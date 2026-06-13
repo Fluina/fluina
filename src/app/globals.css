@@ -1,0 +1,294 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+@theme inline {
+  --color-back-0: var(--back-0);
+  --color-back-1: var(--back-1);
+  --color-back-2: var(--back-2);
+  --color-back-3: var(--back-3);
+  --color-back-4: var(--back-4);
+  --color-back-5: var(--back-5);
+  --color-back-6: var(--back-6);
+  --color-back-7: var(--back-7);
+  --color-back-8: var(--back-8);
+  --color-back-9: var(--back-9);
+
+  --color-fore-0: var(--fore-0);
+  --color-fore-1: var(--fore-1);
+  --color-fore-2: var(--fore-2);
+  --color-fore-3: var(--fore-3);
+  --color-fore-4: var(--fore-4);
+  --color-fore-5: var(--fore-5);
+  --color-fore-6: var(--fore-6);
+  --color-fore-7: var(--fore-7);
+  --color-fore-8: var(--fore-8);
+  --color-fore-9: var(--fore-9);
+
+  --color-fixed-back-0: hsl(0, 0%, 100%);
+  --color-fixed-back-1: hsl(0, 0%, 95%);
+  --color-fixed-back-2: hsl(0, 0%, 90%);
+  --color-fixed-back-3: hsl(0, 0%, 85%);
+  --color-fixed-back-4: hsl(0, 0%, 80%);
+  --color-fixed-back-5: hsl(0, 0%, 75%);
+  --color-fixed-back-6: hsl(0, 0%, 70%);
+  --color-fixed-back-7: hsl(0, 0%, 65%);
+  --color-fixed-back-8: hsl(0, 0%, 60%);
+  --color-fixed-back-9: hsl(0, 0%, 55%);
+
+  --color-fixed-fore-0: hsl(0, 0%, 0%);
+  --color-fixed-fore-1: hsl(0, 0%, 5%);
+  --color-fixed-fore-2: hsl(0, 0%, 10%);
+  --color-fixed-fore-3: hsl(0, 0%, 15%);
+  --color-fixed-fore-4: hsl(0, 0%, 20%);
+  --color-fixed-fore-5: hsl(0, 0%, 25%);
+  --color-fixed-fore-6: hsl(0, 0%, 30%);
+  --color-fixed-fore-7: hsl(0, 0%, 35%);
+  --color-fixed-fore-8: hsl(0, 0%, 40%);
+  --color-fixed-fore-9: hsl(0, 0%, 45%);
+
+  --color-gray: hsl(0, 0%, 50%);
+  --color-red: hsl(15, 100%, 50%);
+  --color-orange: hsl(30, 100%, 50%);
+  --color-yellow: hsl(45, 100%, 50%);
+  --color-green: hsl(135, 100%, 25%);
+  --color-blue: hsl(195, 100%, 50%);
+  --color-indigo: hsl(255, 100%, 50%);
+  --color-violet: hsl(300, 100%, 50%);
+
+  --font-serif: "Playfair Display", serif;
+  --font-sans-serif: "Overused Grotesk", sans-serif;
+
+  --transition-duration: 500ms;
+  --transition-timing-function: ease-out;
+  --transition-delay: 0ms;
+}
+
+:root {
+  --back-0: hsl(0, 0%, 100%);
+  --back-1: hsl(0, 0%, 95%);
+  --back-2: hsl(0, 0%, 90%);
+  --back-3: hsl(0, 0%, 85%);
+  --back-4: hsl(0, 0%, 80%);
+  --back-5: hsl(0, 0%, 75%);
+  --back-6: hsl(0, 0%, 70%);
+  --back-7: hsl(0, 0%, 65%);
+  --back-8: hsl(0, 0%, 60%);
+  --back-9: hsl(0, 0%, 55%);
+
+  --fore-0: hsl(0, 0%, 0%);
+  --fore-1: hsl(0, 0%, 5%);
+  --fore-2: hsl(0, 0%, 10%);
+  --fore-3: hsl(0, 0%, 15%);
+  --fore-4: hsl(0, 0%, 20%);
+  --fore-5: hsl(0, 0%, 25%);
+  --fore-6: hsl(0, 0%, 30%);
+  --fore-7: hsl(0, 0%, 35%);
+  --fore-8: hsl(0, 0%, 40%);
+  --fore-9: hsl(0, 0%, 45%);
+}
+
+[data-theme="dark"] {
+  --back-0: hsl(0, 0%, 100%);
+  --back-1: hsl(0, 0%, 5%);
+  --back-2: hsl(0, 0%, 10%);
+  --back-3: hsl(0, 0%, 15%);
+  --back-4: hsl(0, 0%, 20%);
+  --back-5: hsl(0, 0%, 25%);
+  --back-6: hsl(0, 0%, 30%);
+  --back-7: hsl(0, 0%, 35%);
+  --back-8: hsl(0, 0%, 40%);
+  --back-9: hsl(0, 0%, 45%);
+
+  --fore-0: hsl(0, 0%, 100%);
+  --fore-1: hsl(0, 0%, 95%);
+  --fore-2: hsl(0, 0%, 90%);
+  --fore-3: hsl(0, 0%, 85%);
+  --fore-4: hsl(0, 0%, 80%);
+  --fore-5: hsl(0, 0%, 75%);
+  --fore-6: hsl(0, 0%, 70%);
+  --fore-7: hsl(0, 0%, 65%);
+  --fore-8: hsl(0, 0%, 60%);
+  --fore-9: hsl(0, 0%, 55%);
+}
+
+@utility all {
+  --tw-ease: var(--ease-out);
+  @apply transition-all duration-(--transition-duration) delay-(--transition-delay);
+}
+
+@utility colors {
+  --tw-ease: var(--ease-out);
+  @apply transition-colors duration-(--transition-duration) delay-(--transition-delay);
+}
+
+@utility opacity {
+  --tw-ease: var(--ease-out);
+  @apply transition-opacity duration-(--transition-duration) delay-(--transition-delay);
+}
+
+@utility shadow {
+  --tw-ease: var(--ease-out);
+  @apply transition-shadow duration-(--transition-duration) delay-(--transition-delay);
+}
+
+@utility transform {
+  --tw-ease: var(--ease-out);
+  @apply transition-transform duration-(--transition-duration) delay-(--transition-delay);
+}
+
+@utility none {
+  @apply transition-none;
+}
+
+@utility animate-caret {
+  animation: caret-fade calc(var(--transition-duration) * 10) infinite linear;
+}
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility no-scrollbar-y {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar:vertical {
+    display: none;
+  }
+}
+
+@utility no-scrollbar-x {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar:horizontal {
+    display: none;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  *,
+  *::before,
+  *::after {
+    @apply antialiased appearance-none scroll-smooth select-none;
+    -webkit-user-drag: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body * {
+    @apply colors;
+  }
+
+  body {
+    @apply w-screen h-screen font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
+  }
+
+  @font-face {
+    font-family: "Overused Grotesk";
+    src: url("https://raw.githubusercontent.com/RandomMaerks/Overused-Grotesk/master/fonts/variable/OverusedGroteskRoman-VF.ttf")
+      format("truetype-variations");
+    font-weight: 300 900;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "Overused Grotesk";
+    src: url("https://raw.githubusercontent.com/RandomMaerks/Overused-Grotesk/master/fonts/variable/OverusedGroteskItalic-VF.ttf")
+      format("truetype-variations");
+    font-weight: 300 900;
+    font-style: italic;
+  }
+
+  @font-face {
+    font-family: "Playfair Display";
+    src: url("https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf")
+      format("truetype-variations");
+    font-weight: 400 900;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "Playfair Display";
+    src: url("https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay-Italic%5Bwght%5D.ttf")
+      format("truetype-variations");
+    font-weight: 400 900;
+    font-style: italic;
+  }
+
+
+  *::selection {
+    color: var(--back);
+    background-color: var(--color-blue);
+  }
+
+  *::-ms-reveal {
+    display: none;
+  }
+
+  @keyframes caret-fade {
+    0%,
+    100% {
+      caret-color: var(--color-red);
+    }
+    14.3% {
+      caret-color: var(--color-orange);
+    }
+    28.6% {
+      caret-color: var(--color-yellow);
+    }
+    42.9% {
+      caret-color: var(--color-green);
+    }
+    57.2% {
+      caret-color: var(--color-blue);
+    }
+    71.5% {
+      caret-color: var(--color-indigo);
+    }
+    85.8% {
+      caret-color: var(--color-violet);
+    }
+  }
+}
+
+[data-overlayscrollbars-viewport] {
+  scroll-behavior: auto;
+}
+
+.os-theme,
+.os-theme-textarea {
+  --os-size: 0.6rem;
+  --os-padding-perpendicular: 0.1rem;
+  --os-padding-axis: 0.5rem;
+  --os-track-bg: transparent;
+  --os-handle-border-radius: 1rem;
+  --os-handle-min-size: 1rem;
+  --os-handle-perpendicular-size: 0.3rem;
+  --os-handle-perpendicular-size-hover: 0.5rem;
+  --os-handle-perpendicular-size-active: 0.4rem;
+}
+
+.os-theme .os-scrollbar-handle,
+.os-theme-textarea .os-scrollbar-handle {
+  transition-property: opacity, background-color, width, height;
+  transition-duration: calc(var(--transition-duration) * .5);
+  transition-timing-function: var(--transition-timing-function);
+}
+
+.os-theme {
+  --os-handle-bg: color-mix(in srgb, var(--color-fore-2) 50%, transparent);
+  --os-handle-bg-hover: color-mix(in srgb, var(--color-fore-4) 50%, transparent);
+  --os-handle-bg-active: color-mix(in srgb, var(--color-fore-3) 50%, transparent);
+}
+
+.os-theme-textarea {
+  --os-handle-bg: color-mix(in srgb, var(--color-fore-3) 50%, transparent);
+  --os-handle-bg-hover: color-mix(in srgb, var(--color-fore-5) 50%, transparent);
+  --os-handle-bg-active: color-mix(in srgb, var(--color-fore-4) 50%, transparent);
+}
