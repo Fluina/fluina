@@ -216,8 +216,7 @@ export default function Ask() {
                         className={`flex justify-start items-start ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
                             } ${!isOsActive ? "overflow-hidden" : ""}`}
                     >
-                        <motion.textarea
-                            layout
+                        <textarea
                             rows={1}
                             spellCheck={false}
                             ref={textareaRef}
