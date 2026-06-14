@@ -195,6 +195,7 @@ export default function Ask() {
                     )}
                     <LayoutGroup id="textarea-isolated-zone">
                         <motion.div
+                            layout="position"
                             ref={hostRef}
                             style={{ height: layout.height }}
                             transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
