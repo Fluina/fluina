@@ -207,11 +207,13 @@ export default function Ask() {
                     )}
 
                     <motion.div
-                        layout="size"
                         ref={hostRef}
+                        animate={{ height }}
                         transition={animateHeight ? TRANSITION : { duration: 0 }}
-                        style={{ height }}
-                        className={`... ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"} ...`}
+                        className={`flex bg-blue justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
+                            } ${
+                            !isOsActive ? "overflow-hidden" : ""
+                            }`}
                     >
                         <textarea
                             rows={1}
