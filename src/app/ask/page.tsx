@@ -20,6 +20,7 @@ export default function Ask() {
     const [isEmpty, setIsEmpty] = useState(true);
 
     const [animateHeight, setAnimateHeight] = useState(true);
+    // OverlayScrollbarsが実際に有効化されているかを管理するステート
     const [isOsActive, setIsOsActive] = useState(false);
 
     const resize = useCallback(() => {
@@ -101,10 +102,24 @@ export default function Ask() {
             }
 
             if (e.isComposing) return;
+
             if (document.activeElement === el) return;
-            if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
+
+            if (
+                document.activeElement?.tagName === "INPUT" ||
+                document.activeElement?.tagName === "TEXTAREA"
+            ) {
+                return;
+            }
+
             if (e.ctrlKey || e.metaKey || e.altKey) return;
-            if (document.activeElement?.tagName === "BUTTON" && (e.key === "Enter" || e.key === " ")) return;
+
+            if (
+                document.activeElement?.tagName === "BUTTON" &&
+                (e.key === "Enter" || e.key === " ")
+            ) {
+                return;
+            }
 
             const isPrintable = e.key.length === 1 || e.key === "Process";
             if (isPrintable) {
@@ -191,27 +206,24 @@ export default function Ask() {
                         </p>
                     )}
 
-                    {/* 【変更点】
-                      1. `layout="position"` でグリッド切り替え時の横幅・位置の移動のみをFramer Motionに任せる。
-                      2. `style={{ height }}` で物理的な高さを流し込む。
-                      3. `animateHeight` が true の時だけ Tailwind の `transition-[height]` と `duration-300`（または任意の速度）を効かせる。
-                    */}
                     <motion.div
-                        layout="position"
+                        layout
                         ref={hostRef}
                         style={{ height }}
+                        transition={animateHeight ? TRANSITION : { duration: 0 }}
                         className={`flex justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                            } ${!isOsActive ? "overflow-hidden" : ""} ${animateHeight ? "transition-[height] duration-200 ease-out" : ""
+                            } ${!isOsActive ? "overflow-hidden" : ""
                             }`}
                     >
-                        <textarea
+                        <motion.textarea
+                            layout
                             rows={1}
                             spellCheck={false}
                             ref={ref}
                             onChange={resize}
                             name="prompt"
                             style={{
-                                height: isOsActive && scrollable && taHeight !== undefined ? taHeight : "100%",
+                                height: isOsActive && scrollable && taHeight !== undefined ? taHeight : "100%"
                             }}
                             className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && scrollable ? "overflow-y-auto" : "overflow-y-hidden"
                                 }`}
@@ -230,5 +242,5 @@ export default function Ask() {
                 </motion.div>
             </LayoutGroup>
         </div>
-    );
+    )
 }
