@@ -184,7 +184,7 @@ export default function Ask() {
                     layout
                     ref={gridRef}
                     transition={TRANSITION}
-                    className="max-md:mt-auto bg-yellow grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 shadow-lg"
+                    className="max-md:mt-auto grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 shadow-lg"
                 >
                     <motion.button
                         layout
@@ -211,7 +211,7 @@ export default function Ask() {
                         ref={hostRef}
                         style={{ height }}
                         transition={animateHeight ? TRANSITION : { duration: 0 }}
-                        className={`flex bg-blue justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
+                        className={`flex justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
                             } ${!isOsActive ? "overflow-hidden" : ""
                             }`}
                     >
@@ -224,7 +224,7 @@ export default function Ask() {
                             style={{
                                 height: isOsActive && scrollable && taHeight !== undefined ? taHeight : "100%"
                             }}
-                            className={`block bg-red w-full p-2 outline-none resize-none animate-caret ${!isOsActive && scrollable ? "overflow-y-auto" : "overflow-y-hidden"
+                            className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && scrollable ? "overflow-y-auto" : "overflow-y-hidden"
                                 }`}
                         />
                     </motion.div>
