@@ -39,58 +39,40 @@ export default function Ask() {
         const grid = gridRef.current;
         if (!el || !grid) return;
 
+        // 1. 一度 auto にして正確な scrollHeight を取得（これは既存通り）
+        el.style.height = "auto";
+        const currentScrollHeight = el.scrollHeight;
+
         const style = getComputedStyle(el);
-        const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
+        const lineHeight = parseFloat(style.lineHeight);
         const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-        const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+        const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
 
+        // 最大高さ（例: 5行分）の計算
+        const maxHeight = lineHeight * 5 + padding + border;
+        const overLimit = currentScrollHeight > maxHeight;
+        const finalTaHeight = overLimit ? maxHeight : currentScrollHeight;
+
+        // 🔥 【超重要】Reactのステート更新を待たずに、DOMのスタイルを今すぐ直接書き換える！
+        // これによりブラウザの描画前に高さが確定するため、スマホのカーソルが絶対に置いていかれません。
+        el.style.height = `${finalTaHeight}px`;
+
+        // もし外側のラッパー（hostRef）の高さも連動させているなら、それも直接一瞬で書き換える
+        if (hostRef.current) {
+            hostRef.current.style.height = `${finalTaHeight}px`;
+        }
+
+        // 2. その後、ボタンの配置換え（expanded）などの状態管理のためにステートを更新する
         setLayout((prev) => {
-            const currentWidth = el.getBoundingClientRect().width;
-            if (prev.expanded) {
-                fullWidthRef.current = currentWidth;
-            } else {
-                narrowWidthRef.current = currentWidth;
-            }
-
-            const calculateLinesAtWidth = (targetWidth: number) => {
-                const originalWidth = el.style.width;
-                const originalHeight = el.style.height;
-                const originalOverflow = el.style.overflowY;
-
-                el.rows = 1;
-                el.style.overflowY = "hidden";
-                el.style.height = "auto";
-                el.style.width = `${targetWidth}px`;
-
-                const lines = Math.round((el.scrollHeight - padding) / lineHeight);
-
-                el.style.width = originalWidth;
-                el.style.height = originalHeight;
-                el.style.overflowY = originalOverflow;
-                return lines;
-            };
-
-            const textLength = el.value.length;
-            const isEmptyText = textLength === 0;
-
-            const narrowWidth = narrowWidthRef.current ?? currentWidth;
-            const willExpand = !isEmptyText && calculateLinesAtWidth(narrowWidth) >= 2;
-
-            const gridStyle = getComputedStyle(grid);
-            const gridPadding = parseFloat(gridStyle.paddingLeft) + parseFloat(gridStyle.paddingRight);
-            const fullWidth = fullWidthRef.current ?? (grid.clientWidth - gridPadding);
-
-            const rawLines = willExpand ? calculateLinesAtWidth(fullWidth) : 1;
-            const contentLines = Math.max(rawLines, 1);
-            const visibleLines = Math.min(contentLines, 5);
-
+            const willExpand = currentScrollHeight > lineHeight + padding + border + 10;
             return {
-                height: visibleLines * lineHeight + padding + borderY,
-                taHeight: contentLines * lineHeight + padding + borderY,
+                ...prev,
+                height: finalTaHeight,
+                taHeight: finalTaHeight,
                 expanded: willExpand,
-                scrollable: contentLines > 5,
-                isEmpty: isEmptyText,
-                shouldAnimate: willExpand !== prev.expanded,
+                scrollable: overLimit,
+                isEmpty: el.value === "",
+                shouldAnimate: false, // 💡 改行時のじわじわアニメーションは完全にオフにする
             };
         });
     }, []);
@@ -194,23 +176,26 @@ export default function Ask() {
                         </p>
                     )}
                     <LayoutGroup id="textarea-isolated-zone">
-                        <div
+                        <motion.div
+                            ref={hostRef}
+                            style={{ height: layout.height }}
+                            transition={{ duration: 0 }} // 🔥 アニメーション時間を0にして、一瞬で枠を広げる
                             className={`flex justify-start items-start ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                                }`}
+                                } ${!isOsActive ? "overflow-hidden" : ""}`}
                         >
-                            {/* 2. textarea 自体を <motion.textarea> に変更し、高さを直接制御する */}
-                            <motion.textarea
+                            <textarea
                                 rows={1}
                                 spellCheck={false}
                                 ref={textareaRef}
                                 onChange={resize}
                                 name="prompt"
-                                style={{ height: layout.height }}
-                                transition={{ duration: 0.5, ease: "backOut" }}
-
-                                className={`block w-full p-2 outline-none resize-none animate-caret overflow-y-hidden`}
+                                style={{
+                                    height: "100%" // ラッパーの高さ（一瞬で変わる）に100%同期させる
+                                }}
+                                className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
+                                    }`}
                             />
-                        </div>
+                        </motion.div>
                     </LayoutGroup>
 
                     <motion.button
