@@ -127,26 +127,26 @@ export default function Ask() {
         return () => window.removeEventListener("keydown", handleGlobalKeyDown);
     }, [resize]);
 
-    // useEffect(() => {
-    //     const host = hostRef.current;
-    //     if (!host) return;
-    // 
-    //     const osInstance = OverlayScrollbars(host, {
-    //         scrollbars: { theme: OS_THEME_TEXTAREA, autoHide: "never" },
-    //         overflow: { x: "hidden", y: "hidden" }
-    //     });
-    // 
-    //     if (OverlayScrollbars.valid(osInstance)) {
-    //         osInstanceRef.current = osInstance;
-    //         setIsOsActive(true);
-    //     }
-    // 
-    //     return () => {
-    //         if (OverlayScrollbars.valid(osInstance)) {
-    //             osInstance.destroy();
-    //         }
-    //     };
-    // }, []);
+    useEffect(() => {
+        const host = hostRef.current;
+        if (!host) return;
+
+        const osInstance = OverlayScrollbars(host, {
+            scrollbars: { theme: OS_THEME_TEXTAREA, autoHide: "never" },
+            overflow: { x: "hidden", y: "hidden" }
+        });
+
+        if (OverlayScrollbars.valid(osInstance)) {
+            osInstanceRef.current = osInstance;
+            setIsOsActive(true);
+        }
+
+        return () => {
+            if (OverlayScrollbars.valid(osInstance)) {
+                osInstance.destroy();
+            }
+        };
+    }, []);
 
     useEffect(() => {
         const osInstance = osInstanceRef.current;
@@ -194,27 +194,23 @@ export default function Ask() {
                         </p>
                     )}
                     <LayoutGroup id="textarea-isolated-zone">
-                        <motion.div
-                            layout="position"
-                            ref={hostRef}
-                            style={{ height: layout.height }}
-                            transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
+                        <div
                             className={`flex justify-start items-start ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                                } ${!isOsActive ? "overflow-hidden" : ""}`}
+                                }`}
                         >
-                            <textarea
+                            {/* 2. textarea 自体を <motion.textarea> に変更し、高さを直接制御する */}
+                            <motion.textarea
                                 rows={1}
                                 spellCheck={false}
                                 ref={textareaRef}
                                 onChange={resize}
                                 name="prompt"
-                                style={{
-                                    height: isOsActive && layout.scrollable && layout.taHeight !== undefined ? layout.taHeight : "100%"
-                                }}
-                                className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
-                                    }`}
+                                style={{ height: layout.height }}
+                                transition={{ duration: 0.5, ease: "backOut" }}
+
+                                className={`block w-full p-2 outline-none resize-none animate-caret overflow-y-hidden`}
                             />
-                        </motion.div>
+                        </div>
                     </LayoutGroup>
 
                     <motion.button
