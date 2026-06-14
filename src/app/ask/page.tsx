@@ -146,7 +146,6 @@ export default function Ask() {
             }
         });
 
-        // インスタンスが有効（スマホ等でキャンセルされなかった）場合のみアクティブにする
         if (OverlayScrollbars.valid(osInstance)) {
             osInstanceRef.current = osInstance;
             setIsOsActive(true);
@@ -185,7 +184,7 @@ export default function Ask() {
                     layout
                     ref={gridRef}
                     transition={TRANSITION}
-                    className="max-md:mt-auto grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 gap-y-2 shadow-lg"
+                    className="max-md:mt-auto bg-yellow grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 shadow-lg"
                 >
                     <motion.button
                         layout
@@ -212,9 +211,8 @@ export default function Ask() {
                         ref={hostRef}
                         transition={animateHeight ? TRANSITION : { duration: 0 }}
                         style={{ height }}
-                        className={`flex justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
+                        className={`flex bg-blue justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
                             } ${
-                            // スマホ等でOSが無効な時は、このラッパー自体がスクロールしないように隠す
                             !isOsActive ? "overflow-hidden" : ""
                             }`}
                     >
@@ -225,12 +223,9 @@ export default function Ask() {
                             onChange={resize}
                             name="prompt"
                             style={{
-                                // OSが有効なら元通りtaHeight、スマホ等で無効なら常に100%（親のheightに追従）
                                 height: isOsActive && scrollable && taHeight !== undefined ? taHeight : "100%"
                             }}
-                            className={`block w-full p-2 outline-none resize-none animate-caret ${
-                                // スマホ等のネイティブ環境（!isOsActive）かつ、5行を超えた（scrollable）ときだけ、
-                                // textarea自体のスクロールバーを有効化する
+                            className={`block bg-red w-full p-2 outline-none resize-none animate-caret ${
                                 !isOsActive && scrollable ? "overflow-y-auto" : "overflow-y-hidden"
                                 }`}
                         />
