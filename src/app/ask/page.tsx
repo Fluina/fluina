@@ -92,23 +92,40 @@ export default function Ask() {
             const el = ref.current;
             if (!el) return;
 
+            // 【対策1】変換中（IME入力中）は、スマホ・PC問わず一切のグローバル処理をスキップ
+            if (e.isComposing || e.key === "Process") return;
+
+            // 【対策2】テキストエリア入力中の全削除判定
+            if (document.activeElement === el) {
+                // 入力中に Shift + Backspace または Shift + Delete が押された場合
+                if (e.shiftKey && (e.key === "Backspace" || e.key === "Delete")) {
+                    e.preventDefault();
+                    el.value = "";
+                    setIsEmpty(true);
+                    resize();
+                    return; // 処理が終わったらここで終了
+                }
+                // 入力中、それ以外のキーはブラウザの標準挙動に任せる
+                return;
+            }
+
+            // --- これ以降は「テキストエリア外」にフォーカスがある時の挙動 ---
+
+            // 他のインプット要素にフォーカスがある場合は何もしない
+            if (
+                document.activeElement?.tagName === "INPUT" ||
+                document.activeElement?.tagName === "TEXTAREA"
+            ) {
+                return;
+            }
+
+            // テキストエリア外での全削除ショートカット
             if (e.shiftKey && (e.key === "Backspace" || e.key === "Delete")) {
                 e.preventDefault();
                 el.value = "";
                 setIsEmpty(true);
                 resize();
                 el.focus();
-                return;
-            }
-
-            if (e.isComposing) return;
-
-            if (document.activeElement === el) return;
-
-            if (
-                document.activeElement?.tagName === "INPUT" ||
-                document.activeElement?.tagName === "TEXTAREA"
-            ) {
                 return;
             }
 
@@ -121,7 +138,7 @@ export default function Ask() {
                 return;
             }
 
-            const isPrintable = e.key.length === 1 || e.key === "Process";
+            const isPrintable = e.key.length === 1;
             if (isPrintable) {
                 el.focus();
             }
