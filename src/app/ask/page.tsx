@@ -161,7 +161,7 @@ export default function Ask() {
         <div className="size-full flex flex-col justify-center gap-8 p-4 items-center max-w-3xl">
             <LayoutGroup>
                 <motion.h1
-                    layout
+                    layout="position"
                     transition={TRANSITION}
                     className="max-md:mt-auto text-center font-sans-serif text-4xl font-thin text-fore-1"
                 >
@@ -195,7 +195,6 @@ export default function Ask() {
                     )}
 
                     <motion.div
-                        layout="position"
                         ref={hostRef}
                         style={{ height: layout.height }}
                         transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
