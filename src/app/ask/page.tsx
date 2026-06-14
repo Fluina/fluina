@@ -1,4 +1,5 @@
 "use client";
+
 import { motion, LayoutGroup } from "motion/react";
 import { Plus, ArrowUp } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -8,11 +9,14 @@ import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
 
 export default function Ask() {
     const ref = useRef<HTMLTextAreaElement>(null);
+    // 【追加】高さを裏で安全に計測するための隠しテキストエリア用Ref
+    const shadowRef = useRef<HTMLTextAreaElement>(null);
     const hostRef = useRef<HTMLDivElement>(null);
     const gridRef = useRef<HTMLDivElement>(null);
     const osInstanceRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null);
-    const narrowWidthRef = useRef<number | null>(null);
-    const fullWidthRef = useRef<number | null>(null);
+
+    // useCallbackの依存配列から外すために、expandedの状態をRefでも保持する
+    const expandedRef = useRef(false);
 
     const [height, setHeight] = useState<number>();
     const [taHeight, setTaHeight] = useState<number>();
@@ -24,73 +28,59 @@ export default function Ask() {
     // テキストエリアのサイズとレイアウト（1行か複数行か）を計算・更新する関数
     const resize = useCallback(() => {
         const el = ref.current;
-        if (!el) return;
+        const shadow = shadowRef.current;
+        const grid = gridRef.current;
 
-        setIsEmpty(el.value.length === 0);
+        if (!el || !shadow || !grid) return;
+
+        const val = el.value;
+        setIsEmpty(val.length === 0);
+
+        // 計測用の隠しテキストエリアに値を同期（空の場合は1行分の高さを確保するためにスペースをいれる）
+        shadow.value = val || " ";
 
         const style = getComputedStyle(el);
-        const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
-        const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-
-        if (expanded) {
-            fullWidthRef.current = el.getBoundingClientRect().width;
-        } else {
-            narrowWidthRef.current = el.getBoundingClientRect().width;
-        }
-
-        el.rows = 1;
-
-        // 特定の横幅をシミュレートして何行になるかを計算するインナー関数
-        const linesAt = (width: number) => {
-            const prevWidth = el.style.width;
-            const prevHeight = el.style.height;
-            const prevOverflow = el.style.overflowY;
-
-            el.style.overflowY = "hidden";
-            el.style.height = "auto";
-            el.style.width = `${width}px`;
-
-            const lines = Math.round((el.scrollHeight - padding) / lineHeight);
-
-            el.style.width = prevWidth;
-            el.style.height = prevHeight;
-            el.style.overflowY = prevOverflow;
-
-            return lines;
-        };
-
-        const narrowWidth = narrowWidthRef.current ?? el.getBoundingClientRect().width;
-        const willExpand = linesAt(narrowWidth) >= 2;
-
-        const grid = gridRef.current;
-        if (!grid) return;
+        const fontSize = parseFloat(style.fontSize) || 16;
+        const lineHeight = parseFloat(style.lineHeight) || (fontSize * 1.5);
+        const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+        const borderY = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
 
         const gridStyle = getComputedStyle(grid);
-        const fullWidth =
-            fullWidthRef.current ?? (
-                grid.clientWidth
-                - parseFloat(gridStyle.paddingLeft)
-                - parseFloat(gridStyle.paddingRight)
-            );
+        const gridPadX = (parseFloat(gridStyle.paddingLeft) || 0) + (parseFloat(gridStyle.paddingRight) || 0);
+
+        // アニメーション中の誤計測を防ぐため、実際のコンテナ幅から計算で割り出す
+        const gridWidth = grid.clientWidth > 0 ? grid.clientWidth : Math.min(window.innerWidth - 32, 768);
+        const fullWidth = gridWidth - gridPadX;
+        // 左右のボタン(40px * 2 = 80px) を引いたサイズがNarrow幅
+        const narrowWidth = Math.max(fullWidth - 80, 50);
+
+        // 隠しテキストエリアを使って安全に何行になるかを計算するインナー関数
+        const linesAt = (width: number) => {
+            shadow.style.width = `${width}px`;
+            shadow.style.height = "0px"; // scrollHeightを正確に取得するために一旦0にする
+            const scrollHeight = shadow.scrollHeight;
+            const lines = Math.round((scrollHeight - padding) / lineHeight);
+            return Math.max(lines, 1);
+        };
+
+        const narrowLines = linesAt(narrowWidth);
+        const willExpand = narrowLines >= 2;
 
         const rawLines = willExpand ? linesAt(fullWidth) : 1;
-        const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
         const contentLines = Math.max(rawLines, 1);
         const visibleLines = Math.min(contentLines, 5); // 最大5行まで表示
 
         const nextHeight = visibleLines * lineHeight + padding + borderY;
+        const newTaHeight = contentLines * lineHeight + padding + borderY;
 
-        if (willExpand !== expanded) {
-            setAnimateHeight(true);
-        } else {
-            setAnimateHeight(false);
-        }
+        setAnimateHeight(willExpand !== expandedRef.current);
+        expandedRef.current = willExpand;
 
-        setTaHeight(contentLines * lineHeight + padding + borderY);
+        setTaHeight(newTaHeight);
         setHeight(nextHeight);
         setExpanded(willExpand);
         setScrollable(contentLines > 5);
-    }, [expanded]);
+    }, []);
 
     // 初回レンダリング時にサイズを初期化
     useEffect(() => {
@@ -102,13 +92,12 @@ export default function Ask() {
         ref.current?.focus();
     }, []);
 
-    // グローバルなキーボードイベントの監視（ショートカットや文字入力でフォーカスを当てる処理）
+    // グローバルなキーボードイベントの監視
     useEffect(() => {
         const handleGlobalKeyDown = (e: KeyboardEvent) => {
             const el = ref.current;
             if (!el) return;
 
-            // Shift + Backspace または Shift + Delete でクリア
             if (e.shiftKey && (e.key === "Backspace" || e.key === "Delete")) {
                 e.preventDefault();
                 el.value = "";
@@ -121,7 +110,6 @@ export default function Ask() {
             if (e.isComposing) return;
             if (document.activeElement === el) return;
 
-            // 既に他の入力要素がアクティブな場合は何もしない
             if (
                 document.activeElement?.tagName === "INPUT" ||
                 document.activeElement?.tagName === "TEXTAREA"
@@ -131,7 +119,6 @@ export default function Ask() {
 
             if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-            // ボタン要素でEnterやSpaceを押した場合はボタンの動作を優先
             if (
                 document.activeElement?.tagName === "BUTTON" &&
                 (e.key === "Enter" || e.key === " ")
@@ -139,7 +126,6 @@ export default function Ask() {
                 return;
             }
 
-            // 印刷可能文字キーが押されたらテキストエリアにフォーカス
             const isPrintable = e.key.length === 1 || e.key === "Process";
             if (isPrintable) {
                 el.focus();
@@ -188,7 +174,17 @@ export default function Ask() {
     }, [scrollable]);
 
     return (
-        <div className="size-full flex flex-col justify-center gap-8 p-4 items-center max-w-3xl">
+        <div className="size-full flex flex-col justify-center gap-8 p-4 items-center max-w-3xl relative">
+
+            {/* 【追加】高さ計算用の隠しテキストエリア（レイアウトやIMEのバグを防ぐ） */}
+            <textarea
+                ref={shadowRef}
+                readOnly
+                tabIndex={-1}
+                aria-hidden="true"
+                className="block p-2 outline-none resize-none overflow-hidden absolute top-0 left-0 -z-10 opacity-0 pointer-events-none"
+            />
+
             <LayoutGroup>
                 {/* ページタイトル */}
                 <motion.h1
