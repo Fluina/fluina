@@ -176,10 +176,9 @@ export default function Ask() {
                         </p>
                     )}
                     <LayoutGroup id="textarea-isolated-zone">
-                        <motion.div
+                        <div
                             ref={hostRef}
                             style={{ height: layout.height }}
-                            transition={{ duration: 0 }} // 🔥 アニメーション時間を0にして、一瞬で枠を広げる
                             className={`flex justify-start items-start ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
                                 } ${!isOsActive ? "overflow-hidden" : ""}`}
                         >
@@ -190,12 +189,12 @@ export default function Ask() {
                                 onChange={resize}
                                 name="prompt"
                                 style={{
-                                    height: "100%" // ラッパーの高さ（一瞬で変わる）に100%同期させる
+                                    height: isOsActive && layout.scrollable && layout.taHeight !== undefined ? layout.taHeight : "100%"
                                 }}
                                 className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
                                     }`}
                             />
-                        </motion.div>
+                        </div>
                     </LayoutGroup>
 
                     <motion.button
