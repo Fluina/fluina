@@ -169,7 +169,7 @@ export default function Ask() {
                 </motion.h1>
 
                 <motion.div
-                    layout
+                    layout="size"
                     ref={gridRef}
                     transition={TRANSITION}
                     className="max-md:mt-auto grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 shadow-lg"
@@ -195,7 +195,6 @@ export default function Ask() {
                     )}
                     <LayoutGroup id="textarea-isolated-zone">
                         <motion.div
-                            layout="position"
                             ref={hostRef}
                             style={{ height: layout.height }}
                             transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
