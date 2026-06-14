@@ -1,8 +1,8 @@
 "use client";
-import { motion, LayoutGroup } from "motion/react";
+import { motion, LayoutGroup, AnimatePresence } from "motion/react";
 import { Plus, ArrowUp } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { TRANSITION } from "@/lib/motion";
+import { TRANSITION, THEME } from "@/lib/motion";
 import { OverlayScrollbars } from "overlayscrollbars";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
 
@@ -14,6 +14,12 @@ type LayoutState = {
     isEmpty: boolean;
     shouldAnimate: boolean;
 };
+
+const PLACEHOLDERS = [
+    "Fluinaに訊いてみて！",
+    '"/"を入力してコマンドを発動！',
+    "ドラッグアンドドロップでファイルを追加！"
+];
 
 export default function Ask() {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -33,6 +39,8 @@ export default function Ask() {
         shouldAnimate: false,
     });
     const [isOsActive, setIsOsActive] = useState(false);
+
+    const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
     const resize = useCallback(() => {
         const el = textareaRef.current;
@@ -99,6 +107,16 @@ export default function Ask() {
         resize();
         textareaRef.current?.focus();
     }, [resize]);
+
+    useEffect(() => {
+        if (!layout.isEmpty) return;
+
+        const interval = setInterval(() => {
+            setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDERS.length);
+        }, 5000);
+
+        return () => clearInterval(interval);
+    }, [layout.isEmpty]);
 
     useEffect(() => {
         const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -184,37 +202,58 @@ export default function Ask() {
                         <Plus className="text-fore-2" />
                     </motion.button>
 
-                    {layout.isEmpty && (
-                        <p
-                            aria-hidden
-                            className={`pointer-events-none self-start p-2 text-fore-9 text-left font-sans-serif font-medium truncate ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                                }`}
-                        >
-                            Fluinaに訊いてみて！
-                        </p>
-                    )}
+                    <div className={`relative flex justify-start items-start ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
+                        }`}>
+                        <div className="absolute inset-0 pointer-events-none">
+                            {!layout.isEmpty ? null : (
+                                <AnimatePresence mode="wait">
+                                    <motion.p
+                                        key={placeholderIndex}
+                                        layout={false}
+                                        initial={{ "--mask-x": "100%" } as import("motion/react").TargetAndTransition}
+                                        animate={{ "--mask-x": "50%" } as import("motion/react").TargetAndTransition}
+                                        exit={{ "--mask-x": "0%" } as import("motion/react").TargetAndTransition}
+                                        transition={THEME}
+                                        style={{
+                                            maskImage: "linear-gradient(to right, transparent 0%, transparent 15%, black 30%, black 70%, transparent 85%, transparent 100%)",
+                                            WebkitMaskImage: "linear-gradient(to right, transparent 0%, transparent 15%, black 30%, black 70%, transparent 85%, transparent 100%)",
+                                            maskSize: "500% 100%",
+                                            WebkitMaskSize: "500% 100%",
+                                            maskRepeat: "no-repeat",
+                                            WebkitMaskRepeat: "no-repeat",
+                                            maskPosition: "var(--mask-x) 0%",
+                                            WebkitMaskPosition: "var(--mask-x) 0%",
+                                        }}
+                                        aria-hidden
+                                        className="p-2 text-fore-9 text-left font-sans-serif font-medium truncate w-full"
+                                    >
+                                        {PLACEHOLDERS[placeholderIndex]}
+                                    </motion.p>
+                                </AnimatePresence>
+                            )}
+                        </div>
 
-                    <motion.div
-                        layout="position"
-                        ref={hostRef}
-                        style={{ height: layout.height }}
-                        transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
-                        className={`flex justify-start items-start ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                            } ${!isOsActive ? "overflow-hidden" : ""}`}
-                    >
-                        <textarea
-                            rows={1}
-                            spellCheck={false}
-                            ref={textareaRef}
-                            onChange={resize}
-                            name="prompt"
-                            style={{
-                                height: isOsActive && layout.scrollable && layout.taHeight !== undefined ? layout.taHeight : "100%"
-                            }}
-                            className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
-                                }`}
-                        />
-                    </motion.div>
+                        <motion.div
+                            layout="position"
+                            ref={hostRef}
+                            style={{ height: layout.height }}
+                            transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
+                            className={`w-full ${!isOsActive ? "overflow-hidden" : ""}`}
+                        >
+                            <textarea
+                                rows={1}
+                                spellCheck={false}
+                                ref={textareaRef}
+                                onChange={resize}
+                                name="prompt"
+                                style={{
+                                    height: isOsActive && layout.scrollable && layout.taHeight !== undefined ? layout.taHeight : "100%"
+                                }}
+                                className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
+                                    }`}
+                            />
+                        </motion.div>
+                    </div>
 
                     <motion.button
                         layout
