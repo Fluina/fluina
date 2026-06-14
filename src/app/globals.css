@@ -25,27 +25,27 @@
   --color-fore-8: var(--fore-8);
   --color-fore-9: var(--fore-9);
 
-  --color-fixed-back-0: hsl(0, 0%, 100%);
-  --color-fixed-back-1: hsl(0, 0%, 95%);
-  --color-fixed-back-2: hsl(0, 0%, 90%);
-  --color-fixed-back-3: hsl(0, 0%, 85%);
-  --color-fixed-back-4: hsl(0, 0%, 80%);
-  --color-fixed-back-5: hsl(0, 0%, 75%);
-  --color-fixed-back-6: hsl(0, 0%, 70%);
-  --color-fixed-back-7: hsl(0, 0%, 65%);
-  --color-fixed-back-8: hsl(0, 0%, 60%);
-  --color-fixed-back-9: hsl(0, 0%, 55%);
+  --color-back-0_: hsl(0, 0%, 100%);
+  --color-back-1_: hsl(0, 0%, 95%);
+  --color-back-2_: hsl(0, 0%, 90%);
+  --color-back-3_: hsl(0, 0%, 85%);
+  --color-back-4_: hsl(0, 0%, 80%);
+  --color-back-5_: hsl(0, 0%, 75%);
+  --color-back-6_: hsl(0, 0%, 70%);
+  --color-back-7_: hsl(0, 0%, 65%);
+  --color-back-8_: hsl(0, 0%, 60%);
+  --color-back-9_: hsl(0, 0%, 55%);
 
-  --color-fixed-fore-0: hsl(0, 0%, 0%);
-  --color-fixed-fore-1: hsl(0, 0%, 5%);
-  --color-fixed-fore-2: hsl(0, 0%, 10%);
-  --color-fixed-fore-3: hsl(0, 0%, 15%);
-  --color-fixed-fore-4: hsl(0, 0%, 20%);
-  --color-fixed-fore-5: hsl(0, 0%, 25%);
-  --color-fixed-fore-6: hsl(0, 0%, 30%);
-  --color-fixed-fore-7: hsl(0, 0%, 35%);
-  --color-fixed-fore-8: hsl(0, 0%, 40%);
-  --color-fixed-fore-9: hsl(0, 0%, 45%);
+  --color-fore-0_: hsl(0, 0%, 0%);
+  --color-fore-1_: hsl(0, 0%, 5%);
+  --color-fore-2_: hsl(0, 0%, 10%);
+  --color-fore-3_: hsl(0, 0%, 15%);
+  --color-fore-4_: hsl(0, 0%, 20%);
+  --color-fore-5_: hsl(0, 0%, 25%);
+  --color-fore-6_: hsl(0, 0%, 30%);
+  --color-fore-7_: hsl(0, 0%, 35%);
+  --color-fore-8_: hsl(0, 0%, 40%);
+  --color-fore-9_: hsl(0, 0%, 45%);
 
   --color-gray: hsl(0, 0%, 50%);
   --color-red: hsl(15, 100%, 50%);
@@ -223,8 +223,8 @@
 
 
   *::selection {
-    color: var(--back);
-    background-color: var(--color-blue);
+    color: var(--back-1);
+    background-color: var(--fore-1);
   }
 
   *::-ms-reveal {

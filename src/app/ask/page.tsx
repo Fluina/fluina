@@ -19,6 +19,8 @@ export default function Ask() {
     const [scrollable, setScrollable] = useState(false);
     const [isEmpty, setIsEmpty] = useState(true);
 
+    const [animateHeight, setAnimateHeight] = useState(true);
+
     const resize = useCallback(() => {
         const el = ref.current;
         if (!el) return;
@@ -63,8 +65,16 @@ export default function Ask() {
         const contentLines = Math.max(rawLines, 1);
         const visibleLines = Math.min(contentLines, 5);
 
+        const nextHeight = visibleLines * lineHeight + padding + borderY;
+
+        if (willExpand !== expanded) {
+            setAnimateHeight(true);
+        } else {
+            setAnimateHeight(false);
+        }
+
         setTaHeight(contentLines * lineHeight + padding + borderY);
-        setHeight(visibleLines * lineHeight + padding + borderY);
+        setHeight(nextHeight);
         setExpanded(willExpand);
         setScrollable(contentLines > 5);
     }, [expanded]);
@@ -160,42 +170,42 @@ export default function Ask() {
                 <motion.h1
                     layout
                     transition={TRANSITION}
-                    className="max-md:mt-auto text-center font-sans-serif text-4xl font-thin"
+                    className="max-md:mt-auto text-center font-sans-serif text-4xl font-thin text-fore-1"
                 >
-                    質問
+                    何か手伝えることはあるかな？
                 </motion.h1>
 
                 <motion.div
                     layout
                     ref={gridRef}
                     transition={TRANSITION}
-                    className="max-md:mt-auto grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-2 rounded-4xl p-2 border border-back-3 gap-y-2 shadow-lg"
+                    className="max-md:mt-auto grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 gap-y-2 shadow-lg"
                 >
                     <motion.button
                         layout
                         type="button"
                         transition={TRANSITION}
-                        className={`size-10 rounded-full bg-back-3 flex justify-center items-center ${expanded ? "row-start-2 col-start-1" : "row-start-1 col-start-1"
+                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-1" : "row-start-1 col-start-1"
                             }`}
                     >
                         <Plus className="text-fore-2" />
                     </motion.button>
 
                     {isEmpty && (
-                        <div
+                        <p
                             aria-hidden
-                            className={`pointer-events-none self-start p-2 text-fore-9 truncate ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
+                            className={`pointer-events-none self-start p-2 text-fore-9 text-left font-sans-serif font-medium truncate ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
                                 }`}
                         >
-                            訊きたい質問を入力
-                        </div>
+                            Fluinaに訊いてみてね！
+                        </p>
                     )}
 
                     <motion.div
                         layout
                         ref={hostRef}
-                        transition={TRANSITION}
-                        animate={height !== undefined ? { height } : undefined}
+                        transition={animateHeight ? TRANSITION : { duration: 0 }}
+                        style={{ height }}
                         className={`flex justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
                             }`}
                     >
@@ -205,7 +215,9 @@ export default function Ask() {
                             ref={ref}
                             onChange={resize}
                             name="prompt"
-                            style={taHeight !== undefined ? { height: taHeight } : undefined}
+                            style={{
+                                height: scrollable && taHeight !== undefined ? taHeight : "100%"
+                            }}
                             className="block w-full p-2 outline-none resize-none overflow-y-hidden animate-caret"
                         />
                     </motion.div>
@@ -214,7 +226,7 @@ export default function Ask() {
                         layout
                         type="button"
                         transition={TRANSITION}
-                        className={`size-10 rounded-full bg-back-3 flex justify-center items-center ${expanded ? "row-start-2 col-start-3" : "row-start-1 col-start-3"
+                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-3" : "row-start-1 col-start-3"
                             }`}
                     >
                         <ArrowUp className="text-fore-2" />
