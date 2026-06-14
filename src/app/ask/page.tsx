@@ -6,123 +6,131 @@ import { TRANSITION } from "@/lib/motion";
 import { OverlayScrollbars } from "overlayscrollbars";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
 
+// レイアウトに関するステートの型定義
+type LayoutState = {
+    height: number | undefined;
+    taHeight: number | undefined;
+    expanded: boolean;
+    scrollable: boolean;
+    isEmpty: boolean;
+    shouldAnimate: boolean;
+};
+
 export default function Ask() {
-    const ref = useRef<HTMLTextAreaElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const hostRef = useRef<HTMLDivElement>(null);
     const gridRef = useRef<HTMLDivElement>(null);
     const osInstanceRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null);
+
+    // 計算用の幅を記憶するRef（不要な再レンダリングを防止）
     const narrowWidthRef = useRef<number | null>(null);
     const fullWidthRef = useRef<number | null>(null);
-    const [height, setHeight] = useState<number>();
-    const [taHeight, setTaHeight] = useState<number>();
-    const [expanded, setExpanded] = useState(false);
-    const [scrollable, setScrollable] = useState(false);
-    const [isEmpty, setIsEmpty] = useState(true);
 
-    const [animateHeight, setAnimateHeight] = useState(true);
-    // OverlayScrollbarsが実際に有効化されているかを管理するステート
+    // 1. 【最強の最適化】バラバラだったステートを1つに統合
+    const [layout, setLayout] = useState<LayoutState>({
+        height: undefined,
+        taHeight: undefined,
+        expanded: false,
+        scrollable: false,
+        isEmpty: true,
+        shouldAnimate: false,
+    });
     const [isOsActive, setIsOsActive] = useState(false);
 
+    // 2. レイアウトの計測とステート更新を一括で行う純粋関数
     const resize = useCallback(() => {
-        const el = ref.current;
-        if (!el) return;
-        setIsEmpty(el.value.length === 0);
+        const el = textareaRef.current;
+        const grid = gridRef.current;
+        if (!el || !grid) return;
+
         const style = getComputedStyle(el);
         const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
         const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-
-        if (expanded) fullWidthRef.current = el.getBoundingClientRect().width;
-        else narrowWidthRef.current = el.getBoundingClientRect().width;
-
-        el.rows = 1;
-
-        const linesAt = (width: number) => {
-            const prevWidth = el.style.width;
-            const prevHeight = el.style.height;
-            const prevOverflow = el.style.overflowY;
-            el.style.overflowY = "hidden";
-            el.style.height = "auto";
-            el.style.width = `${width}px`;
-            const lines = Math.round((el.scrollHeight - padding) / lineHeight);
-            el.style.width = prevWidth;
-            el.style.height = prevHeight;
-            el.style.overflowY = prevOverflow;
-            return lines;
-        };
-
-        const narrowWidth = narrowWidthRef.current ?? el.getBoundingClientRect().width;
-        const willExpand = linesAt(narrowWidth) >= 2;
-
-        const grid = gridRef.current;
-        if (!grid) return;
-        const gridStyle = getComputedStyle(grid);
-        const fullWidth =
-            fullWidthRef.current ?? (
-                grid.clientWidth
-                - parseFloat(gridStyle.paddingLeft) - parseFloat(gridStyle.paddingRight)
-            );
-        const rawLines = willExpand ? linesAt(fullWidth) : 1;
-
         const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
-        const contentLines = Math.max(rawLines, 1);
-        const visibleLines = Math.min(contentLines, 5);
 
-        const nextHeight = visibleLines * lineHeight + padding + borderY;
+        // セーフティ：ステート更新関数（純粋関数）の中で一気に次状態を計算
+        setLayout((prev) => {
+            const currentWidth = el.getBoundingClientRect().width;
+            if (prev.expanded) {
+                fullWidthRef.current = currentWidth;
+            } else {
+                narrowWidthRef.current = currentWidth;
+            }
 
-        if (willExpand !== expanded) {
-            setAnimateHeight(true);
-        } else {
-            setAnimateHeight(false);
-        }
+            // 指定された幅での行数をシミュレートするヘルパー
+            const calculateLinesAtWidth = (targetWidth: number) => {
+                const originalWidth = el.style.width;
+                const originalHeight = el.style.height;
+                const originalOverflow = el.style.overflowY;
 
-        setTaHeight(contentLines * lineHeight + padding + borderY);
-        setHeight(nextHeight);
-        setExpanded(willExpand);
-        setScrollable(contentLines > 5);
-    }, [expanded]);
+                el.rows = 1;
+                el.style.overflowY = "hidden";
+                el.style.height = "auto";
+                el.style.width = `${targetWidth}px`;
 
-    useEffect(resize, []);
+                const lines = Math.round((el.scrollHeight - padding) / lineHeight);
 
+                el.style.width = originalWidth;
+                el.style.height = originalHeight;
+                el.style.overflowY = originalOverflow;
+                return lines;
+            };
+
+            const textLength = el.value.length;
+            const isEmptyText = textLength === 0;
+
+            // 展開判定（テキストがあり、かつ狭い幅で2行以上になるか）
+            const narrowWidth = narrowWidthRef.current ?? currentWidth;
+            const willExpand = !isEmptyText && calculateLinesAtWidth(narrowWidth) >= 2;
+
+            // フル幅の取得
+            const gridStyle = getComputedStyle(grid);
+            const gridPadding = parseFloat(gridStyle.paddingLeft) + parseFloat(gridStyle.paddingRight);
+            const fullWidth = fullWidthRef.current ?? (grid.clientWidth - gridPadding);
+
+            const rawLines = willExpand ? calculateLinesAtWidth(fullWidth) : 1;
+            const contentLines = Math.max(rawLines, 1);
+            const visibleLines = Math.min(contentLines, 5);
+
+            return {
+                height: visibleLines * lineHeight + padding + borderY,
+                taHeight: contentLines * lineHeight + padding + borderY,
+                expanded: willExpand,
+                scrollable: contentLines > 5,
+                isEmpty: isEmptyText,
+                shouldAnimate: willExpand !== prev.expanded, // 状態が変化する時だけアニメーション
+            };
+        });
+    }, []); // 完全に不変な関数に
+
+    // 初回マウント時のリサイズとフォーカス
     useEffect(() => {
-        ref.current?.focus();
-    }, []);
+        resize();
+        textareaRef.current?.focus();
+    }, [resize]);
 
+    // グローバルキーボードショートカットの管理
     useEffect(() => {
         const handleGlobalKeyDown = (e: KeyboardEvent) => {
-            const el = ref.current;
+            const el = textareaRef.current;
             if (!el) return;
 
+            // Ctrl + Backspace / Delete で全消去
             if (e.ctrlKey && (e.key === "Backspace" || e.key === "Delete")) {
                 e.preventDefault();
                 el.value = "";
-                setIsEmpty(true);
                 resize();
                 el.focus();
                 return;
             }
 
-            if (e.isComposing) return;
-
-            if (document.activeElement === el) return;
-
-            if (
-                document.activeElement?.tagName === "INPUT" ||
-                document.activeElement?.tagName === "TEXTAREA"
-            ) {
-                return;
-            }
-
+            if (e.isComposing || document.activeElement === el) return;
+            if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "")) return;
             if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (document.activeElement?.tagName === "BUTTON" && /^(Enter| )$/.test(e.key)) return;
 
-            if (
-                document.activeElement?.tagName === "BUTTON" &&
-                (e.key === "Enter" || e.key === " ")
-            ) {
-                return;
-            }
-
-            const isPrintable = e.key.length === 1 || e.key === "Process";
-            if (isPrintable) {
+            // 文字入力で自動フォーカス
+            if (e.key.length === 1 || e.key === "Process") {
                 el.focus();
             }
         };
@@ -131,19 +139,14 @@ export default function Ask() {
         return () => window.removeEventListener("keydown", handleGlobalKeyDown);
     }, [resize]);
 
+    // OverlayScrollbars の初期化とクリーンアップ
     useEffect(() => {
         const host = hostRef.current;
         if (!host) return;
 
         const osInstance = OverlayScrollbars(host, {
-            scrollbars: {
-                theme: OS_THEME_TEXTAREA,
-                autoHide: "never",
-            },
-            overflow: {
-                x: "hidden",
-                y: "hidden",
-            }
+            scrollbars: { theme: OS_THEME_TEXTAREA, autoHide: "never" },
+            overflow: { x: "hidden", y: "hidden" }
         });
 
         if (OverlayScrollbars.valid(osInstance)) {
@@ -158,16 +161,15 @@ export default function Ask() {
         };
     }, []);
 
+    // スクロール可否の同期
     useEffect(() => {
         const osInstance = osInstanceRef.current;
         if (osInstance && OverlayScrollbars.valid(osInstance)) {
             osInstance.options({
-                overflow: {
-                    y: scrollable ? "scroll" : "hidden",
-                },
+                overflow: { y: layout.scrollable ? "scroll" : "hidden" },
             });
         }
-    }, [scrollable]);
+    }, [layout.scrollable]);
 
     return (
         <div className="size-full flex flex-col justify-center gap-8 p-4 items-center max-w-3xl">
@@ -190,16 +192,16 @@ export default function Ask() {
                         layout
                         type="button"
                         transition={TRANSITION}
-                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-1" : "row-start-1 col-start-1"
+                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${layout.expanded ? "row-start-2 col-start-1" : "row-start-1 col-start-1"
                             }`}
                     >
                         <Plus className="text-fore-2" />
                     </motion.button>
 
-                    {isEmpty && (
+                    {layout.isEmpty && (
                         <p
                             aria-hidden
-                            className={`pointer-events-none self-start p-2 text-fore-9 text-left font-sans-serif font-medium truncate ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
+                            className={`pointer-events-none self-start p-2 text-fore-9 text-left font-sans-serif font-medium truncate ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
                                 }`}
                         >
                             Fluinaに訊いてみてね！
@@ -209,23 +211,22 @@ export default function Ask() {
                     <motion.div
                         layout
                         ref={hostRef}
-                        style={{ height }}
-                        transition={animateHeight ? TRANSITION : { duration: 0 }}
-                        className={`flex justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                            } ${!isOsActive ? "overflow-hidden" : ""
-                            }`}
+                        style={{ height: layout.height }}
+                        transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
+                        className={`flex justify-start items-start ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
+                            } ${!isOsActive ? "overflow-hidden" : ""}`}
                     >
                         <motion.textarea
-                            layout
+                            layout="position"
                             rows={1}
                             spellCheck={false}
-                            ref={ref}
+                            ref={textareaRef}
                             onChange={resize}
                             name="prompt"
                             style={{
-                                height: isOsActive && scrollable && taHeight !== undefined ? taHeight : "100%"
+                                height: isOsActive && layout.scrollable && layout.taHeight !== undefined ? layout.taHeight : "100%"
                             }}
-                            className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && scrollable ? "overflow-y-auto" : "overflow-y-hidden"
+                            className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
                                 }`}
                         />
                     </motion.div>
@@ -234,7 +235,7 @@ export default function Ask() {
                         layout
                         type="button"
                         transition={TRANSITION}
-                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-3" : "row-start-1 col-start-3"
+                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${layout.expanded ? "row-start-2 col-start-3" : "row-start-1 col-start-3"
                             }`}
                     >
                         <ArrowUp className="text-fore-2" />
@@ -242,5 +243,5 @@ export default function Ask() {
                 </motion.div>
             </LayoutGroup>
         </div>
-    )
+    );
 }
