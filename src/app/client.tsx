@@ -21,9 +21,6 @@ function ThemeFaviconSync() {
   return null;
 }
 
-// Hand the document's own scrolling to OverlayScrollbars so the whole app shares the same
-// custom scrollbar. On overlay-scrollbar platforms the global `cancel` default kicks in and
-// this is a no-op, leaving the native page scroll alone.
 function BodyOverlayScrollbars() {
   const [initBodyOverlayScrollbars] = useOverlayScrollbars({ defer: true });
 

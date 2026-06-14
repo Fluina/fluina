@@ -186,7 +186,7 @@
   }
 
   body {
-    @apply w-screen h-screen font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
+    @apply w-dvw h-dvh font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
   }
 
   @font-face {
