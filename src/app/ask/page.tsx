@@ -20,6 +20,17 @@ export default function Ask() {
     const [isEmpty, setIsEmpty] = useState(true);
 
     const [animateHeight, setAnimateHeight] = useState(true);
+    const [isMobile, setIsMobile] = useState(false);
+
+    // 画面幅からモバイル（スマホ）環境かどうかを判定
+    useEffect(() => {
+        const checkMobile = () => {
+            setIsMobile(window.innerWidth < 768);
+        };
+        checkMobile();
+        window.addEventListener("resize", checkMobile);
+        return () => window.removeEventListener("resize", checkMobile);
+    }, []);
 
     const resize = useCallback(() => {
         const el = ref.current;
@@ -28,7 +39,28 @@ export default function Ask() {
         const style = getComputedStyle(el);
         const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
         const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+        const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
 
+        // 【対策1】スマホ環境では、IMEバグを防ぐため一時的な幅の書き換え（シミュレーション）をスキップ
+        if (window.innerWidth < 768) {
+            const prevHeight = el.style.height;
+            el.style.height = "0px"; // 正確な scrollHeight を取得するための定石
+            const scrollHeight = el.scrollHeight;
+            el.style.height = prevHeight;
+
+            const contentLines = Math.round((scrollHeight - padding) / lineHeight);
+            const visibleLines = Math.min(Math.max(contentLines, 1), 5);
+            const nextHeight = visibleLines * lineHeight + padding + borderY;
+
+            setAnimateHeight(false); // スマホでの入力中のガタつき防止のためアニメーションをオフに
+            setTaHeight(contentLines * lineHeight + padding + borderY);
+            setHeight(nextHeight);
+            setExpanded(contentLines >= 2);
+            setScrollable(contentLines > 5);
+            return;
+        }
+
+        // --- ここから下はPC向けの既存ロジック ---
         if (expanded) fullWidthRef.current = el.getBoundingClientRect().width;
         else narrowWidthRef.current = el.getBoundingClientRect().width;
 
@@ -39,7 +71,7 @@ export default function Ask() {
             const prevHeight = el.style.height;
             const prevOverflow = el.style.overflowY;
             el.style.overflowY = "hidden";
-            el.style.height = "auto";
+            el.style.height = "0px"; // 正確な計測のために 0px に変更
             el.style.width = `${width}px`;
             const lines = Math.round((el.scrollHeight - padding) / lineHeight);
             el.style.width = prevWidth;
@@ -61,7 +93,6 @@ export default function Ask() {
             );
         const rawLines = willExpand ? linesAt(fullWidth) : 1;
 
-        const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
         const contentLines = Math.max(rawLines, 1);
         const visibleLines = Math.min(contentLines, 5);
 
@@ -79,7 +110,10 @@ export default function Ask() {
         setScrollable(contentLines > 5);
     }, [expanded]);
 
-    useEffect(resize, []);
+    // 依存配列に resize を指定
+    useEffect(() => {
+        resize();
+    }, [resize]);
 
     useEffect(() => {
         ref.current?.focus();
@@ -100,9 +134,7 @@ export default function Ask() {
             }
 
             if (e.isComposing) return;
-
             if (document.activeElement === el) return;
-
             if (
                 document.activeElement?.tagName === "INPUT" ||
                 document.activeElement?.tagName === "TEXTAREA"
@@ -111,7 +143,6 @@ export default function Ask() {
             }
 
             if (e.ctrlKey || e.metaKey || e.altKey) return;
-
             if (
                 document.activeElement?.tagName === "BUTTON" &&
                 (e.key === "Enter" || e.key === " ")
@@ -166,9 +197,10 @@ export default function Ask() {
 
     return (
         <div className="size-full flex flex-col justify-center gap-8 p-4 items-center max-w-3xl">
-            <LayoutGroup>
+            <LayoutGroup id="ask-input-group">
+                {/* 【対策2】スマホ時は layout アニメーションによる位置ズレを防ぐため動的に無効化 */}
                 <motion.h1
-                    layout
+                    layout={!isMobile}
                     transition={TRANSITION}
                     className="max-md:mt-auto text-center font-sans-serif text-4xl font-thin text-fore-1"
                 >
@@ -176,13 +208,13 @@ export default function Ask() {
                 </motion.h1>
 
                 <motion.div
-                    layout
+                    layout={!isMobile}
                     ref={gridRef}
                     transition={TRANSITION}
                     className="max-md:mt-auto grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 gap-y-2 shadow-lg"
                 >
                     <motion.button
-                        layout
+                        layout={!isMobile}
                         type="button"
                         transition={TRANSITION}
                         className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-1" : "row-start-1 col-start-1"
@@ -201,10 +233,12 @@ export default function Ask() {
                         </p>
                     )}
 
+                    {/* 【対策3】入力中のIME崩壊を防ぐため、スマホ環境では layout アニメーションを無効化 */}
                     <motion.div
-                        layout
+                        layout={!isMobile}
                         ref={hostRef}
-                        transition={animateHeight ? TRANSITION : { duration: 0 }}
+                        animate={{ height }}
+                        transition={animateHeight && !isMobile ? TRANSITION : { duration: 0 }}
                         style={{ height }}
                         className={`flex justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
                             }`}
@@ -223,7 +257,7 @@ export default function Ask() {
                     </motion.div>
 
                     <motion.button
-                        layout
+                        layout={!isMobile}
                         type="button"
                         transition={TRANSITION}
                         className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-3" : "row-start-1 col-start-3"
@@ -234,5 +268,5 @@ export default function Ask() {
                 </motion.div>
             </LayoutGroup>
         </div>
-    )
+    );
 }
