@@ -193,27 +193,28 @@ export default function Ask() {
                             Fluinaに訊いてみてね！
                         </p>
                     )}
-
-                    <motion.div
-                        ref={hostRef}
-                        style={{ height: layout.height }}
-                        transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
-                        className={`flex justify-start items-start ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                            } ${!isOsActive ? "overflow-hidden" : ""}`}
-                    >
-                        <textarea
-                            rows={1}
-                            spellCheck={false}
-                            ref={textareaRef}
-                            onChange={resize}
-                            name="prompt"
-                            style={{
-                                height: isOsActive && layout.scrollable && layout.taHeight !== undefined ? layout.taHeight : "100%"
-                            }}
-                            className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
-                                }`}
-                        />
-                    </motion.div>
+                    <LayoutGroup id="textarea-isolated-zone">
+                        <motion.div
+                            ref={hostRef}
+                            style={{ height: layout.height }}
+                            transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
+                            className={`flex justify-start items-start ${layout.expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
+                                } ${!isOsActive ? "overflow-hidden" : ""}`}
+                        >
+                            <textarea
+                                rows={1}
+                                spellCheck={false}
+                                ref={textareaRef}
+                                onChange={resize}
+                                name="prompt"
+                                style={{
+                                    height: isOsActive && layout.scrollable && layout.taHeight !== undefined ? layout.taHeight : "100%"
+                                }}
+                                className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
+                                    }`}
+                            />
+                        </motion.div>
+                    </LayoutGroup>
 
                     <motion.button
                         layout
