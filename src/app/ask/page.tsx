@@ -20,8 +20,10 @@ export default function Ask() {
     const [isEmpty, setIsEmpty] = useState(true);
 
     const [animateHeight, setAnimateHeight] = useState(true);
-    // OverlayScrollbarsが実際に有効化されているかを管理するステート
     const [isOsActive, setIsOsActive] = useState(false);
+
+    // アニメーション中かどうかを追跡するフラグ
+    const isAnimatingRef = useRef(false);
 
     const resize = useCallback(() => {
         const el = ref.current;
@@ -69,11 +71,11 @@ export default function Ask() {
 
         const nextHeight = visibleLines * lineHeight + padding + borderY;
 
-        // レイアウトの状態が変わるかどうかのフラグ
         const isLayoutChanging = willExpand !== expanded;
 
         if (isLayoutChanging) {
             setAnimateHeight(true);
+            isAnimatingRef.current = true; // アニメーション開始フラグ
         } else {
             setAnimateHeight(false);
         }
@@ -83,25 +85,42 @@ export default function Ask() {
         setExpanded(willExpand);
         setScrollable(contentLines > 5);
 
-        // --- 解決策1: スマホ用カーソル位置同期ハック ---
+        // --- 穴を突くハック: アニメーション中、毎フレームカーソル位置を上書き強制同期 ---
         if (isLayoutChanging) {
-            // アニメーションが始まる前の現在のカーソル（選択範囲）位置を保存
             const selectionStart = el.selectionStart;
             const selectionEnd = el.selectionEnd;
 
-            // 次の描画フレーム（アニメーション開始時）にカーソル位置を再適用してブラウザの描画バグを防ぐ
-            requestAnimationFrame(() => {
+            const keepSyncing = () => {
+                if (!isAnimatingRef.current) return; // アニメーションが終わったらループを抜ける
+
+                // スマホブラウザに「今カーソルはここだよ！」と毎フレーム教え込む
                 el.setSelectionRange(selectionStart, selectionEnd);
 
-                // もしこれでもiOSでズレる場合は、一度フォーカスを外して戻す以下の処理に切り替えてみてください
-                // el.blur();
-                // el.focus();
-                // el.setSelectionRange(selectionStart, selectionEnd);
-            });
+                requestAnimationFrame(keepSyncing);
+            };
+
+            // ループ開始
+            requestAnimationFrame(keepSyncing);
         }
-        // ---------------------------------------------
+        // ------------------------------------------------------------------
 
     }, [expanded]);
+
+    // アニメーションが完全に終了したときに呼ばれるイベントハンドラ
+    const handleAnimationComplete = () => {
+        isAnimatingRef.current = false;
+
+        // 念のため、アニメーション完了の最終確定フレームでもう一度同期
+        const el = ref.current;
+        if (el) {
+            const start = el.selectionStart;
+            const end = el.selectionEnd;
+            el.setSelectionRange(start, end);
+
+            // これでもダメなら、完了瞬間に一瞬フォーカスを奪い直す（最終兵器）
+            // el.blur(); el.focus(); el.setSelectionRange(start, end);
+        }
+    };
 
     useEffect(resize, []);
 
@@ -124,24 +143,10 @@ export default function Ask() {
             }
 
             if (e.isComposing) return;
-
             if (document.activeElement === el) return;
-
-            if (
-                document.activeElement?.tagName === "INPUT" ||
-                document.activeElement?.tagName === "TEXTAREA"
-            ) {
-                return;
-            }
-
+            if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
             if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-            if (
-                document.activeElement?.tagName === "BUTTON" &&
-                (e.key === "Enter" || e.key === " ")
-            ) {
-                return;
-            }
+            if (document.activeElement?.tagName === "BUTTON" && (e.key === "Enter" || e.key === " ")) return;
 
             const isPrintable = e.key.length === 1 || e.key === "Process";
             if (isPrintable) {
@@ -212,8 +217,7 @@ export default function Ask() {
                         layout
                         type="button"
                         transition={TRANSITION}
-                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-1" : "row-start-1 col-start-1"
-                            }`}
+                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-1" : "row-start-1 col-start-1"}`}
                     >
                         <Plus className="text-fore-2" />
                     </motion.button>
@@ -221,8 +225,7 @@ export default function Ask() {
                     {isEmpty && (
                         <p
                             aria-hidden
-                            className={`pointer-events-none self-start p-2 text-fore-9 text-left font-sans-serif font-medium truncate ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                                }`}
+                            className={`pointer-events-none self-start p-2 text-fore-9 text-left font-sans-serif font-medium truncate ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"}`}
                         >
                             Fluinaに訊いてみてね！
                         </p>
@@ -233,9 +236,9 @@ export default function Ask() {
                         ref={hostRef}
                         style={{ height }}
                         transition={animateHeight ? TRANSITION : { duration: 0 }}
-                        className={`flex bg-blue justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                            } ${!isOsActive ? "overflow-hidden" : ""
-                            }`}
+                        // アニメーション終了を検知してループを止める
+                        onLayoutAnimationComplete={handleAnimationComplete}
+                        className={`flex bg-blue justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"} ${!isOsActive ? "overflow-hidden" : ""}`}
                     >
                         <textarea
                             rows={1}
@@ -246,8 +249,7 @@ export default function Ask() {
                             style={{
                                 height: isOsActive && scrollable && taHeight !== undefined ? taHeight : "100%"
                             }}
-                            className={`block bg-red w-full p-2 outline-none resize-none animate-caret ${!isOsActive && scrollable ? "overflow-y-auto" : "overflow-y-hidden"
-                                }`}
+                            className={`block bg-red w-full p-2 outline-none resize-none animate-caret ${!isOsActive && scrollable ? "overflow-y-auto" : "overflow-y-hidden"}`}
                         />
                     </motion.div>
 
@@ -255,13 +257,12 @@ export default function Ask() {
                         layout
                         type="button"
                         transition={TRANSITION}
-                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-3" : "row-start-1 col-start-3"
-                            }`}
+                        className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-3" : "row-start-1 col-start-3"}`}
                     >
                         <ArrowUp className="text-fore-2" />
                     </motion.button>
                 </motion.div>
             </LayoutGroup>
         </div>
-    )
+    );
 }
