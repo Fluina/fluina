@@ -141,10 +141,6 @@
   @apply transition-none;
 }
 
-@utility animate-caret {
-  animation: caret-fade calc(var(--transition-duration) * 10) infinite linear;
-}
-
 @utility no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
