@@ -6,7 +6,6 @@ import { TRANSITION } from "@/lib/motion";
 import { OverlayScrollbars } from "overlayscrollbars";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
 
-// レイアウトに関するステートの型定義
 type LayoutState = {
     height: number | undefined;
     taHeight: number | undefined;
@@ -22,11 +21,9 @@ export default function Ask() {
     const gridRef = useRef<HTMLDivElement>(null);
     const osInstanceRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null);
 
-    // 計算用の幅を記憶するRef（不要な再レンダリングを防止）
     const narrowWidthRef = useRef<number | null>(null);
     const fullWidthRef = useRef<number | null>(null);
 
-    // 1. 【最強の最適化】バラバラだったステートを1つに統合
     const [layout, setLayout] = useState<LayoutState>({
         height: undefined,
         taHeight: undefined,
@@ -37,7 +34,6 @@ export default function Ask() {
     });
     const [isOsActive, setIsOsActive] = useState(false);
 
-    // 2. レイアウトの計測とステート更新を一括で行う純粋関数
     const resize = useCallback(() => {
         const el = textareaRef.current;
         const grid = gridRef.current;
@@ -48,7 +44,6 @@ export default function Ask() {
         const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
         const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
 
-        // セーフティ：ステート更新関数（純粋関数）の中で一気に次状態を計算
         setLayout((prev) => {
             const currentWidth = el.getBoundingClientRect().width;
             if (prev.expanded) {
@@ -57,7 +52,6 @@ export default function Ask() {
                 narrowWidthRef.current = currentWidth;
             }
 
-            // 指定された幅での行数をシミュレートするヘルパー
             const calculateLinesAtWidth = (targetWidth: number) => {
                 const originalWidth = el.style.width;
                 const originalHeight = el.style.height;
@@ -79,11 +73,9 @@ export default function Ask() {
             const textLength = el.value.length;
             const isEmptyText = textLength === 0;
 
-            // 展開判定（テキストがあり、かつ狭い幅で2行以上になるか）
             const narrowWidth = narrowWidthRef.current ?? currentWidth;
             const willExpand = !isEmptyText && calculateLinesAtWidth(narrowWidth) >= 2;
 
-            // フル幅の取得
             const gridStyle = getComputedStyle(grid);
             const gridPadding = parseFloat(gridStyle.paddingLeft) + parseFloat(gridStyle.paddingRight);
             const fullWidth = fullWidthRef.current ?? (grid.clientWidth - gridPadding);
@@ -98,24 +90,21 @@ export default function Ask() {
                 expanded: willExpand,
                 scrollable: contentLines > 5,
                 isEmpty: isEmptyText,
-                shouldAnimate: willExpand !== prev.expanded, // 状態が変化する時だけアニメーション
+                shouldAnimate: willExpand !== prev.expanded,
             };
         });
-    }, []); // 完全に不変な関数に
+    }, []);
 
-    // 初回マウント時のリサイズとフォーカス
     useEffect(() => {
         resize();
         textareaRef.current?.focus();
     }, [resize]);
 
-    // グローバルキーボードショートカットの管理
     useEffect(() => {
         const handleGlobalKeyDown = (e: KeyboardEvent) => {
             const el = textareaRef.current;
             if (!el) return;
 
-            // Ctrl + Backspace / Delete で全消去
             if (e.ctrlKey && (e.key === "Backspace" || e.key === "Delete")) {
                 e.preventDefault();
                 el.value = "";
@@ -129,7 +118,6 @@ export default function Ask() {
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             if (document.activeElement?.tagName === "BUTTON" && /^(Enter| )$/.test(e.key)) return;
 
-            // 文字入力で自動フォーカス
             if (e.key.length === 1 || e.key === "Process") {
                 el.focus();
             }
@@ -139,7 +127,6 @@ export default function Ask() {
         return () => window.removeEventListener("keydown", handleGlobalKeyDown);
     }, [resize]);
 
-    // OverlayScrollbars の初期化とクリーンアップ
     useEffect(() => {
         const host = hostRef.current;
         if (!host) return;
@@ -161,7 +148,6 @@ export default function Ask() {
         };
     }, []);
 
-    // スクロール可否の同期
     useEffect(() => {
         const osInstance = osInstanceRef.current;
         if (osInstance && OverlayScrollbars.valid(osInstance)) {
@@ -209,7 +195,7 @@ export default function Ask() {
                     )}
 
                     <motion.div
-                        layout
+                        layout="position"
                         ref={hostRef}
                         style={{ height: layout.height }}
                         transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}

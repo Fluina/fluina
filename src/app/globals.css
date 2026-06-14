@@ -89,7 +89,7 @@
 }
 
 [data-theme="dark"] {
-  --back-0: hsl(0, 0%, 100%);
+  --back-0: hsl(0, 0%, 0%);
   --back-1: hsl(0, 0%, 5%);
   --back-2: hsl(0, 0%, 10%);
   --back-3: hsl(0, 0%, 15%);
@@ -175,10 +175,15 @@
   *,
   *::before,
   *::after {
-    @apply antialiased appearance-none scroll-smooth select-none;
+    @apply appearance-none select-none;
     -webkit-user-drag: none;
     -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body {
+    @apply antialiased scroll-smooth
   }
 
   body * {
