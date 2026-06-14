@@ -207,12 +207,12 @@ export default function Ask() {
                     )}
 
                     <motion.div
+                        layout
                         ref={hostRef}
-                        animate={{ height }}
+                        style={{ height }}
                         transition={animateHeight ? TRANSITION : { duration: 0 }}
                         className={`flex bg-blue justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
-                            } ${
-                            !isOsActive ? "overflow-hidden" : ""
+                            } ${!isOsActive ? "overflow-hidden" : ""
                             }`}
                     >
                         <textarea
@@ -224,8 +224,7 @@ export default function Ask() {
                             style={{
                                 height: isOsActive && scrollable && taHeight !== undefined ? taHeight : "100%"
                             }}
-                            className={`block bg-red w-full p-2 outline-none resize-none animate-caret ${
-                                !isOsActive && scrollable ? "overflow-y-auto" : "overflow-y-hidden"
+                            className={`block bg-red w-full p-2 outline-none resize-none animate-caret ${!isOsActive && scrollable ? "overflow-y-auto" : "overflow-y-hidden"
                                 }`}
                         />
                     </motion.div>
