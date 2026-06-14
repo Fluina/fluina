@@ -217,7 +217,7 @@ export default function Ask() {
                             } ${!isOsActive ? "overflow-hidden" : ""}`}
                     >
                         <motion.textarea
-                            layout="position"
+                            layout
                             rows={1}
                             spellCheck={false}
                             ref={textareaRef}
