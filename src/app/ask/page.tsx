@@ -13,70 +13,49 @@ export default function Ask() {
     const osInstanceRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null);
     const narrowWidthRef = useRef<number | null>(null);
     const fullWidthRef = useRef<number | null>(null);
+
     const [height, setHeight] = useState<number>();
     const [taHeight, setTaHeight] = useState<number>();
     const [expanded, setExpanded] = useState(false);
     const [scrollable, setScrollable] = useState(false);
     const [isEmpty, setIsEmpty] = useState(true);
-
     const [animateHeight, setAnimateHeight] = useState(true);
-    const [isMobile, setIsMobile] = useState(false);
 
-    // 画面幅からモバイル（スマホ）環境かどうかを判定
-    useEffect(() => {
-        const checkMobile = () => {
-            setIsMobile(window.innerWidth < 768);
-        };
-        checkMobile();
-        window.addEventListener("resize", checkMobile);
-        return () => window.removeEventListener("resize", checkMobile);
-    }, []);
-
+    // テキストエリアのサイズとレイアウト（1行か複数行か）を計算・更新する関数
     const resize = useCallback(() => {
         const el = ref.current;
         if (!el) return;
+
         setIsEmpty(el.value.length === 0);
+
         const style = getComputedStyle(el);
         const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
         const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-        const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
 
-        // 【対策1】スマホ環境では、IMEバグを防ぐため一時的な幅の書き換え（シミュレーション）をスキップ
-        if (window.innerWidth < 768) {
-            const prevHeight = el.style.height;
-            el.style.height = "0px"; // 正確な scrollHeight を取得するための定石
-            const scrollHeight = el.scrollHeight;
-            el.style.height = prevHeight;
-
-            const contentLines = Math.round((scrollHeight - padding) / lineHeight);
-            const visibleLines = Math.min(Math.max(contentLines, 1), 5);
-            const nextHeight = visibleLines * lineHeight + padding + borderY;
-
-            setAnimateHeight(false); // スマホでの入力中のガタつき防止のためアニメーションをオフに
-            setTaHeight(contentLines * lineHeight + padding + borderY);
-            setHeight(nextHeight);
-            setExpanded(contentLines >= 2);
-            setScrollable(contentLines > 5);
-            return;
+        if (expanded) {
+            fullWidthRef.current = el.getBoundingClientRect().width;
+        } else {
+            narrowWidthRef.current = el.getBoundingClientRect().width;
         }
-
-        // --- ここから下はPC向けの既存ロジック ---
-        if (expanded) fullWidthRef.current = el.getBoundingClientRect().width;
-        else narrowWidthRef.current = el.getBoundingClientRect().width;
 
         el.rows = 1;
 
+        // 特定の横幅をシミュレートして何行になるかを計算するインナー関数
         const linesAt = (width: number) => {
             const prevWidth = el.style.width;
             const prevHeight = el.style.height;
             const prevOverflow = el.style.overflowY;
+
             el.style.overflowY = "hidden";
-            el.style.height = "0px"; // 正確な計測のために 0px に変更
+            el.style.height = "auto";
             el.style.width = `${width}px`;
+
             const lines = Math.round((el.scrollHeight - padding) / lineHeight);
+
             el.style.width = prevWidth;
             el.style.height = prevHeight;
             el.style.overflowY = prevOverflow;
+
             return lines;
         };
 
@@ -85,16 +64,19 @@ export default function Ask() {
 
         const grid = gridRef.current;
         if (!grid) return;
+
         const gridStyle = getComputedStyle(grid);
         const fullWidth =
             fullWidthRef.current ?? (
                 grid.clientWidth
-                - parseFloat(gridStyle.paddingLeft) - parseFloat(gridStyle.paddingRight)
+                - parseFloat(gridStyle.paddingLeft)
+                - parseFloat(gridStyle.paddingRight)
             );
-        const rawLines = willExpand ? linesAt(fullWidth) : 1;
 
+        const rawLines = willExpand ? linesAt(fullWidth) : 1;
+        const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
         const contentLines = Math.max(rawLines, 1);
-        const visibleLines = Math.min(contentLines, 5);
+        const visibleLines = Math.min(contentLines, 5); // 最大5行まで表示
 
         const nextHeight = visibleLines * lineHeight + padding + borderY;
 
@@ -110,20 +92,23 @@ export default function Ask() {
         setScrollable(contentLines > 5);
     }, [expanded]);
 
-    // 依存配列に resize を指定
+    // 初回レンダリング時にサイズを初期化
     useEffect(() => {
         resize();
     }, [resize]);
 
+    // マウント時にテキストエリアにフォーカスを当てる
     useEffect(() => {
         ref.current?.focus();
     }, []);
 
+    // グローバルなキーボードイベントの監視（ショートカットや文字入力でフォーカスを当てる処理）
     useEffect(() => {
         const handleGlobalKeyDown = (e: KeyboardEvent) => {
             const el = ref.current;
             if (!el) return;
 
+            // Shift + Backspace または Shift + Delete でクリア
             if (e.shiftKey && (e.key === "Backspace" || e.key === "Delete")) {
                 e.preventDefault();
                 el.value = "";
@@ -135,6 +120,8 @@ export default function Ask() {
 
             if (e.isComposing) return;
             if (document.activeElement === el) return;
+
+            // 既に他の入力要素がアクティブな場合は何もしない
             if (
                 document.activeElement?.tagName === "INPUT" ||
                 document.activeElement?.tagName === "TEXTAREA"
@@ -143,6 +130,8 @@ export default function Ask() {
             }
 
             if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+            // ボタン要素でEnterやSpaceを押した場合はボタンの動作を優先
             if (
                 document.activeElement?.tagName === "BUTTON" &&
                 (e.key === "Enter" || e.key === " ")
@@ -150,6 +139,7 @@ export default function Ask() {
                 return;
             }
 
+            // 印刷可能文字キーが押されたらテキストエリアにフォーカス
             const isPrintable = e.key.length === 1 || e.key === "Process";
             if (isPrintable) {
                 el.focus();
@@ -160,6 +150,7 @@ export default function Ask() {
         return () => window.removeEventListener("keydown", handleGlobalKeyDown);
     }, [resize]);
 
+    // カスタムスクロールバー (OverlayScrollbars) の初期化
     useEffect(() => {
         const host = hostRef.current;
         if (!host) return;
@@ -184,6 +175,7 @@ export default function Ask() {
         };
     }, []);
 
+    // 5行を超えてスクロールが必要になったタイミングでスクロールを有効化
     useEffect(() => {
         const osInstance = osInstanceRef.current;
         if (osInstance && OverlayScrollbars.valid(osInstance)) {
@@ -197,24 +189,26 @@ export default function Ask() {
 
     return (
         <div className="size-full flex flex-col justify-center gap-8 p-4 items-center max-w-3xl">
-            <LayoutGroup id="ask-input-group">
-                {/* 【対策2】スマホ時は layout アニメーションによる位置ズレを防ぐため動的に無効化 */}
+            <LayoutGroup>
+                {/* ページタイトル */}
                 <motion.h1
-                    layout={!isMobile}
+                    layout
                     transition={TRANSITION}
                     className="max-md:mt-auto text-center font-sans-serif text-4xl font-thin text-fore-1"
                 >
                     何か手伝えることはあるかな？
                 </motion.h1>
 
+                {/* 入力欄を内包するコンテナグリッド */}
                 <motion.div
-                    layout={!isMobile}
+                    layout
                     ref={gridRef}
                     transition={TRANSITION}
                     className="max-md:mt-auto grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 gap-y-2 shadow-lg"
                 >
+                    {/* プラスボタン */}
                     <motion.button
-                        layout={!isMobile}
+                        layout
                         type="button"
                         transition={TRANSITION}
                         className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-1" : "row-start-1 col-start-1"
@@ -223,6 +217,7 @@ export default function Ask() {
                         <Plus className="text-fore-2" />
                     </motion.button>
 
+                    {/* プレースホルダー文字列 */}
                     {isEmpty && (
                         <p
                             aria-hidden
@@ -233,12 +228,11 @@ export default function Ask() {
                         </p>
                     )}
 
-                    {/* 【対策3】入力中のIME崩壊を防ぐため、スマホ環境では layout アニメーションを無効化 */}
+                    {/* テキストエリアをラップするスクロールホスト */}
                     <motion.div
-                        layout={!isMobile}
+                        layout
                         ref={hostRef}
-                        animate={{ height }}
-                        transition={animateHeight && !isMobile ? TRANSITION : { duration: 0 }}
+                        transition={animateHeight ? TRANSITION : { duration: 0 }}
                         style={{ height }}
                         className={`flex justify-start items-start ${expanded ? "row-start-1 col-span-3" : "row-start-1 col-start-2"
                             }`}
@@ -256,8 +250,9 @@ export default function Ask() {
                         />
                     </motion.div>
 
+                    {/* 送信ボタン（上矢印） */}
                     <motion.button
-                        layout={!isMobile}
+                        layout
                         type="button"
                         transition={TRANSITION}
                         className={`size-10 rounded-full bg-back-2 flex justify-center items-center ${expanded ? "row-start-2 col-start-3" : "row-start-1 col-start-3"
