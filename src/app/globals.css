@@ -191,7 +191,7 @@
   }
 
   body {
-    @apply w-dvw h-dvh overflow-hidden font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
+    @apply w-dvw h-dvh overflow-hidden overscroll-none font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
   }
 
   @font-face {
