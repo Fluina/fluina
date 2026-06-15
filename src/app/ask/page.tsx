@@ -222,7 +222,7 @@ export default function Ask() {
                 </div>
 
                 <motion.div
-                    layout
+                    layout={isMobile ? false : "position"}
                     ref={gridRef}
                     transition={TRANSITION}
                     className="max-md:mt-auto grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 shadow-lg"
