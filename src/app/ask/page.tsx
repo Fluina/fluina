@@ -222,7 +222,7 @@ export default function Ask() {
                 </div>
 
                 <motion.div
-                    layout={isMobile ? false : "position"}
+                    layout={!isMobile}
                     ref={gridRef}
                     transition={TRANSITION}
                     className="max-md:mt-auto grid grid-cols-[auto_1fr_auto] justify-center items-start w-full bg-back-1 rounded-4xl p-2 border border-back-5 shadow-lg"
@@ -260,7 +260,7 @@ export default function Ask() {
                                             WebkitMaskPosition: "var(--mask-x) 0%",
                                         }}
                                         aria-hidden
-                                        className="p-2 text-fore-9 text-left font-sans-serif font-medium truncate w-full"
+                                        className="p-2 text-base text-fore-9 text-left font-sans-serif font-medium truncate w-full"
                                     >
                                         {PLACEHOLDERS[placeholderIndex]}
                                     </motion.p>
@@ -269,7 +269,7 @@ export default function Ask() {
                         </div>
 
                         <motion.div
-                            layout={isMobile ? false : "position"}
+                            layout="position"
                             ref={hostRef}
                             style={{ height: layout.height }}
                             transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
@@ -284,7 +284,7 @@ export default function Ask() {
                                 style={{
                                     height: isOsActive && layout.scrollable && layout.taHeight !== undefined ? layout.taHeight : "100%"
                                 }}
-                                className={`block w-full p-2 outline-none resize-none animate-caret ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
+                                className={`block w-full p-2 outline-none resize-none animate-caret text-base text-fore-1 text-left font-sans-serif font-medium ${!isOsActive && layout.scrollable ? "overflow-y-auto" : "overflow-y-hidden"
                                     }`}
                             />
                         </motion.div>
