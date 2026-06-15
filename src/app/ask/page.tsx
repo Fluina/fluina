@@ -42,8 +42,16 @@ export default function Ask() {
         shouldAnimate: false,
     });
     const [isOsActive, setIsOsActive] = useState(false);
+    const [isMobile, setIsMobile] = useState(false);
 
     const [placeholderIndex, setPlaceholderIndex] = useState(0);
+
+    useEffect(() => {
+        if (typeof window !== "undefined") {
+            const ua = navigator.userAgent;
+            setIsMobile(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua));
+        }
+    }, []);
 
     const resize = useCallback(() => {
         const el = textareaRef.current;
@@ -261,7 +269,7 @@ export default function Ask() {
                         </div>
 
                         <motion.div
-                            layout="position"
+                            layout={isMobile ? false : "position"}
                             ref={hostRef}
                             style={{ height: layout.height }}
                             transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
