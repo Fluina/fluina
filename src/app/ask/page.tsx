@@ -269,7 +269,7 @@ export default function Ask() {
                         </div>
 
                         <motion.div
-                            layout="position"
+                            layout={isMobile ? false : "position"}
                             ref={hostRef}
                             style={{ height: layout.height }}
                             transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}

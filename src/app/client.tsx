@@ -36,7 +36,7 @@ export default function Client({ children }: { children: React.ReactNode }) {
     <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
       <ThemeFaviconSync />
       <BodyOverlayScrollbars />
-      <main className="size-full flex justify-center items-center">{children}</main>
+      <main className="size-full flex justify-center items-center pb-safe">{children}</main>
     </ThemeProvider>
   );
 }
