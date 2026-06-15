@@ -5,6 +5,9 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { TRANSITION, THEME } from "@/lib/motion";
 import { OverlayScrollbars } from "overlayscrollbars";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
+import Image from "next/image";
+import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
+import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
 
 type LayoutState = {
     height: number | undefined;
@@ -178,13 +181,37 @@ export default function Ask() {
     return (
         <div className="size-full flex flex-col justify-center gap-8 p-4 items-center max-w-3xl">
             <LayoutGroup>
-                <motion.h1
-                    layout="position"
-                    transition={TRANSITION}
-                    className="max-md:mt-auto text-center font-sans-serif text-4xl font-thin text-fore-1"
-                >
-                    何か手伝えることはある？
-                </motion.h1>
+                <div className="max-md:mt-auto flex flex-col justify-center items-center gap-4">
+                    <motion.div
+                        layout="position"
+                        transition={TRANSITION}
+                        className="relative size-15"
+                    >
+                        <Image
+                            src={Frame_Fluina_small_dark}
+                            alt="Frame Fluina small dark"
+                            width={60}
+                            height={60}
+                            className="absolute inset-0 dark:opacity-0 opacity-100 opacity"
+                        />
+
+                        <Image
+                            src={Frame_Fluina_small_light}
+                            alt="Frame Fluina small light"
+                            width={60}
+                            height={60}
+                            className="absolute inset-0 dark:opacity-100 opacity-0 opacity"
+                        />
+                    </motion.div>
+
+                    <motion.h1
+                        layout="position"
+                        transition={TRANSITION}
+                        className="text-center font-sans-serif text-3xl font-thin text-fore-1"
+                    >
+                        何か手伝えることはある？
+                    </motion.h1>
+                </div>
 
                 <motion.div
                     layout
