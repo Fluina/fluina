@@ -272,7 +272,7 @@ export default function Ask() {
                             layout={isMobile ? false : "position"}
                             ref={hostRef}
                             style={{ height: layout.height }}
-                            transition={layout.shouldAnimate ? TRANSITION : { duration: 0 }}
+                            transition={layout.shouldAnimate ? TRANSITION : TRANSITION}
                             className={`w-full ${!isOsActive ? "overflow-hidden" : ""}`}
                         >
                             <textarea
