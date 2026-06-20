@@ -24,7 +24,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 		};
 
 		const buttonClass = cn(
-			"overflow-hidden relative outline-none cursor-pointer all",
+			"overflow-clip relative outline-none cursor-pointer all",
 			"focus-visible:scale-110 focus-visible:ring-2 focus-visible:ring-fore-1",
 			"hover:scale-110",
 			"active:scale-90 active:[&>*:not(:first-child)]:scale-75",
