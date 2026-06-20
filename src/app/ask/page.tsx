@@ -152,7 +152,7 @@ export default function Ask() {
     };
 
     return (
-        <div className="size-full flex flex-col justify-center p-4 items-center max-w-3xl">
+        <div className="size-full flex flex-col p-4 items-center max-w-3xl max-md:justify-end md:justify-center">
             <LayoutGroup>
                 <motion.form
                     layout
