@@ -87,9 +87,6 @@ export default function Ask() {
             >
                 <motion.div
                     layout="position"
-                    initial={{ opacity: 0, scale: 0.5 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.5 }}
                     transition={TRANSITION}
                     className={`${isAdjusted ? "col-start-1 row-start-2" : ""}`}
                 >
@@ -110,12 +107,10 @@ export default function Ask() {
 
                     <motion.div
                         layout="position"
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.5 }}
                         transition={TRANSITION}
+                        className="flex justify-center items-center w-full bg-blue"
                     >
-                        <motion.textarea
+                        <textarea
                             autoFocus
                             rows={1}
                             spellCheck={false}
@@ -128,7 +123,7 @@ export default function Ask() {
                             id="prompt"
                             name="prompt"
                             placeholder=""
-                            className="outline-none resize-none m-2 w-full animate-caret text-base text-fore-1 text-left font-sans-serif font-medium"
+                            className="outline-none bg-red resize-none m-2 w-full animate-caret text-base text-fore-1 text-left font-sans-serif font-medium"
                         />
                     </motion.div>
                 </label>
@@ -156,9 +151,6 @@ export default function Ask() {
 
                 <motion.div
                     layout="position"
-                    initial={{ opacity: 0, scale: 0.5 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.5 }}
                     transition={TRANSITION}
                     className={`${isAdjusted ? "col-start-2 row-start-2" : ""}`}
                 >
@@ -172,9 +164,6 @@ export default function Ask() {
 
                 <motion.div
                     layout="position"
-                    initial={{ opacity: 0, scale: 0.5 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.5 }}
                     transition={TRANSITION}
                     className={`${isAdjusted ? "col-start-3 row-start-2" : ""}`}
                 >
