@@ -208,7 +208,7 @@ export default function Ask() {
                         </motion.div>
                     </label>
 
-                    <AnimatePresence mode="popLayout" initial={false}>
+                    <AnimatePresence mode="popLayout" initial={false} presenceAffectsLayout={false}>
                         {hasInput && (
                             <motion.div
                                 layout="position"
@@ -252,7 +252,7 @@ export default function Ask() {
                             aria-label={hasInput ? "Send" : "Converse"}
                             className="size-10 rounded-full bg-blue flex justify-center items-center"
                         >
-                            <AnimatePresence mode="popLayout" initial={false}>
+                            <AnimatePresence mode="popLayout" initial={false} presenceAffectsLayout={false}>
                                 {hasInput ? (
                                     <motion.div
                                         key="send"
