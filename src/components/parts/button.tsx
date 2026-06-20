@@ -1,0 +1,49 @@
+import type React from "react";
+import { forwardRef } from "react";
+import { Ripple, useRipple } from "@/components/effects/ripple";
+import { cn } from "@/lib/cn";
+
+export interface ButtonProps
+	extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+	ripple?: boolean;
+}
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+	(
+		{ type = "button", ripple = true, onClick, className, children, ...props },
+		ref,
+	) => {
+		const { ripples, triggerRipple } = useRipple();
+
+		const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+			if (ripple) {
+				triggerRipple(e);
+			}
+
+			onClick?.(e);
+		};
+
+		const buttonClass = cn(
+			"overflow-hidden relative outline-none cursor-pointer all",
+			"focus-visible:scale-110 focus-visible:ring-2 focus-visible:ring-fore-1",
+			"hover:scale-110",
+			"active:scale-90 active:[&>*:not(:first-child)]:scale-75",
+			className,
+		);
+
+		return (
+			<button
+				{...props}
+				ref={ref}
+				type={type}
+				onClick={handleClick}
+				className={buttonClass}
+			>
+				{ripple && <Ripple ripples={ripples} />}
+				{children}
+			</button>
+		);
+	},
+);
+
+Button.displayName = "Button";
