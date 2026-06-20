@@ -16,10 +16,30 @@ export default function Ask() {
 
     const formRef = useRef<HTMLFormElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
 
     const hasInput = value.length > 0;
     const singleLineRef = useRef<number>(0);
     const singleLineWidthRef = useRef<number>(0);
+
+    useEffect(() => {
+        if (!scrollRef.current) return;
+
+        const osInstance = OverlayScrollbars(scrollRef.current, {
+            scrollbars: {
+                theme: OS_THEME_TEXTAREA,
+                autoHide: "leave",
+            },
+            overflow: {
+                x: "hidden",
+                y: "scroll",
+            }
+        });
+
+        return () => {
+            osInstance.destroy();
+        };
+    }, []);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -74,7 +94,6 @@ export default function Ask() {
         if (nextIsAdjusted !== isAdjusted) {
             setIsAdjusted(nextIsAdjusted);
         } else {
-            textarea.style.height = "auto";
             textarea.style.height = `${textarea.scrollHeight}px`;
         }
     }, [value, isAdjusted]);
@@ -85,7 +104,7 @@ export default function Ask() {
         if ((e.ctrlKey || e.metaKey) && e.key === "Backspace") {
             e.preventDefault();
             setValue("");
-            
+
             return;
         }
 
@@ -168,7 +187,8 @@ export default function Ask() {
                         <motion.div
                             layout="position"
                             transition={TRANSITION}
-                            className="flex justify-center relative items-center w-full"
+                            ref={scrollRef}
+                            className="overflow-clip max-h-34 p-2 flex justify-center relative items-center w-full"
                         >
                             <motion.textarea
                                 autoFocus
@@ -183,7 +203,7 @@ export default function Ask() {
                                 id="prompt"
                                 name="prompt"
                                 placeholder=""
-                                className="outline-none resize-none m-2 w-full animate-caret text-base text-fore-1 text-left font-sans-serif font-medium"
+                                className="overflow-clip block outline-none resize-none w-full animate-caret text-base text-fore-1 text-left font-sans-serif font-medium"
                             />
                         </motion.div>
                     </label>
@@ -192,9 +212,9 @@ export default function Ask() {
                         {hasInput && (
                             <motion.div
                                 layout="position"
-                                initial={{ opacity: 0, scale: 0.5 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.5 }}
+                                initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                                animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                                exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                                 transition={TRANSITION}
                                 className={`${isAdjusted ? "col-start-3 row-start-1 self-start" : ""}`}
                             >
@@ -230,13 +250,33 @@ export default function Ask() {
                         <Button
                             type="submit"
                             aria-label={hasInput ? "Send" : "Converse"}
-                            className="size-10 rounded-full bg-back-2 flex justify-center items-center"
+                            className="size-10 rounded-full bg-blue flex justify-center items-center"
                         >
-                            {hasInput ? (
-                                <ArrowUp className="text-fore-2 all" />
-                            ) : (
-                                <AudioLines className="text-fore-2 all" />
-                            )}
+                            <AnimatePresence mode="popLayout" initial={false}>
+                                {hasInput ? (
+                                    <motion.div
+                                        key="send"
+                                        initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                                        animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                                        exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                                        transition={TRANSITION}
+                                        className="all"
+                                    >
+                                        <ArrowUp className="text-fore-2" />
+                                    </motion.div>
+                                ) : (
+                                    <motion.div
+                                        key="converse"
+                                        initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                                        animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                                        exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                                        transition={TRANSITION}
+                                        className="all"
+                                    >
+                                        <AudioLines className="text-fore-2" />
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                         </Button>
                     </motion.div>
                 </motion.form>

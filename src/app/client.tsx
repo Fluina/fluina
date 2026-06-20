@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { ThemeProvider, useTheme } from "next-themes";
 import { useOverlayScrollbars } from "overlayscrollbars-react";
 import "@/lib/overlayscrollbars";
+import { MotionConfig, useReducedMotion } from "motion/react";
 
 function ThemeFaviconSync() {
   const { theme, resolvedTheme } = useTheme();
@@ -32,11 +33,18 @@ function BodyOverlayScrollbars() {
 }
 
 export default function Client({ children }: { children: React.ReactNode }) {
+  const shouldReduceMotion = useReducedMotion();
+
   return (
     <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
-      <ThemeFaviconSync />
-      <BodyOverlayScrollbars />
-      <main className="size-full flex justify-center items-center pt-[env(safe-area-inset-top,1rem)] pb-[env(safe-area-inset-bottom,1rem)] pl-[env(safe-area-inset-left,1rem)] pr-[env(safe-area-inset-right,1rem)]">{children}</main>
+      <MotionConfig
+        reducedMotion="user"
+        transition={shouldReduceMotion ? { duration: 0 } : undefined}
+      >
+        <ThemeFaviconSync />
+        <BodyOverlayScrollbars />
+        <main className="size-full flex justify-center items-center pt-[env(safe-area-inset-top,1rem)] pb-[env(safe-area-inset-bottom,1rem)] pl-[env(safe-area-inset-left,1rem)] pr-[env(safe-area-inset-right,1rem)]">{children}</main>
+      </MotionConfig>
     </ThemeProvider>
   );
 }
