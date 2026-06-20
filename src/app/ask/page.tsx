@@ -188,7 +188,7 @@ export default function Ask() {
                             layout="position"
                             transition={TRANSITION}
                             ref={scrollRef}
-                            className="overflow-clip max-h-34 p-2 flex justify-center relative items-center w-full"
+                            className="overflow-y-auto max-h-34 p-2 flex justify-center relative items-center w-full"
                         >
                             <motion.textarea
                                 autoFocus
@@ -203,7 +203,7 @@ export default function Ask() {
                                 id="prompt"
                                 name="prompt"
                                 placeholder=""
-                                className="overflow-clip block outline-none resize-none w-full animate-caret text-base text-fore-1 text-left font-sans-serif font-medium"
+                                className="overflow-y-auto block outline-none resize-none w-full animate-caret text-base text-fore-1 text-left font-sans-serif font-medium"
                             />
                         </motion.div>
                     </label>
