@@ -11,7 +11,7 @@ export function configureOverlayScrollbars(): void {
   configured = true;
 
   const env = OverlayScrollbars.env();
-  
+
   env.setDefaultInitialization({ cancel: { nativeScrollbarsOverlaid: true } });
   env.setDefaultOptions({ scrollbars: { theme: OS_THEME, autoHide: "never" } });
 }

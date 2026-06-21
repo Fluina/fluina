@@ -1,7 +1,7 @@
 "use client";
-import { useEffect } from "react";
 import { ThemeProvider, useTheme } from "next-themes";
 import { useOverlayScrollbars } from "overlayscrollbars-react";
+import { useEffect } from "react";
 import "@/lib/overlayscrollbars";
 import { MotionConfig, useReducedMotion } from "motion/react";
 
@@ -43,7 +43,9 @@ export default function Client({ children }: { children: React.ReactNode }) {
       >
         <ThemeFaviconSync />
         <BodyOverlayScrollbars />
-        <main className="size-full flex justify-center items-center pt-[env(safe-area-inset-top,1rem)] pb-[env(safe-area-inset-bottom,1rem)] pl-[env(safe-area-inset-left,1rem)] pr-[env(safe-area-inset-right,1rem)]">{children}</main>
+        <main className="size-full flex justify-center items-center pt-[env(safe-area-inset-top,1rem)] pb-[env(safe-area-inset-bottom,1rem)] pl-[env(safe-area-inset-left,1rem)] pr-[env(safe-area-inset-right,1rem)]">
+          {children}
+        </main>
       </MotionConfig>
     </ThemeProvider>
   );

@@ -1,9 +1,9 @@
 export const TRANSITION = {
-    duration: 0.5,
-    ease: "backOut",
+  duration: 0.5,
+  ease: "backOut",
 } as const;
 
 export const THEME = {
-    duration: 0.5,
-    ease: "easeOut",
+  duration: 0.5,
+  ease: "easeOut",
 } as const;
