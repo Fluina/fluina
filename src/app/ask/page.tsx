@@ -17,7 +17,7 @@ const PLACEHOLDERS = [
     "# を入力してタグを追記！",
     "リンクを挿入！",
     "ファイルとテキストを連関！",
-    "今日もおつかれ様！！！"
+    "今日も、おつかれ様。"
 ];
 
 export default function Ask() {
@@ -188,14 +188,57 @@ export default function Ask() {
     };
 
     return (
-        <div className="size-full flex flex-col p-4 items-center max-w-3xl max-md:justify-end md:justify-center">
+        <div className="size-full flex flex-col p-4 gap-8 items-center max-w-3xl justify-center">
             <LayoutGroup>
+                <AnimatePresence mode="popLayout" initial={false} presenceAffectsLayout={false}>
+                    {!isExpanded && (
+                        <motion.div
+                            layout="position"
+                            initial={{ opacity: 0, y: -50 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -50 }}
+                            transition={TRANSITION}
+                            className="max-md:mt-auto flex flex-col justify-center items-center gap-4 z-10"
+                        >
+                            <motion.div
+                                layout="position"
+                                transition={THEME}
+                                className="relative size-15"
+                            >
+                                <Image
+                                    src={Frame_Fluina_small_dark}
+                                    alt="Frame Fluina small dark"
+                                    width={60}
+                                    height={60}
+                                    className="absolute inset-0 dark:opacity-0 opacity-100 opacity"
+                                />
+
+                                <Image
+                                    src={Frame_Fluina_small_light}
+                                    alt="Frame Fluina small light"
+                                    width={60}
+                                    height={60}
+                                    className="absolute inset-0 dark:opacity-100 opacity-0 opacity"
+                                />
+                            </motion.div>
+
+                            <motion.h1
+                                layout="position"
+                                transition={TRANSITION}
+                                className="text-center font-sans-serif text-3xl font-thin text-fore-1"
+                            >
+                                何か手伝えることはある？
+                            </motion.h1>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
                 <motion.form
                     layout
                     transition={TRANSITION}
                     ref={formRef}
                     onSubmit={handleSubmit}
-                    className={`grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
+                    className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
                         ${isExpanded ? "h-full" : "max-h-full"}
                         ${isAdjusted || isExpanded ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]" :
                             hasInput ? "grid-cols-[auto_1fr_auto_auto_auto]" : "grid-cols-[auto_1fr_auto_auto]"
