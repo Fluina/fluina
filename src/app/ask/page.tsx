@@ -10,9 +10,22 @@ import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_sma
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
 import { Button } from "@/components/parts/button"
 
+const PLACEHOLDERS = [
+    "Fluinaに訊いてみて！",
+    "/ を入力してコマンドを発動！",
+    "ドラッグ＆ドロップでファイルを添付！",
+    "# を入力してタグを追記！",
+    "リンクを挿入！",
+    "ファイルとテキストを連関！",
+    "今日もおつかれ様！！！"
+];
+
 export default function Ask() {
     const [value, setValue] = useState("");
     const [isAdjusted, setIsAdjusted] = useState(false);
+    const [isScrollable, setIsScrollable] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
     const formRef = useRef<HTMLFormElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -49,6 +62,7 @@ export default function Ask() {
         console.log("Submitted:", value);
 
         setValue("");
+        setIsExpanded(false);
     };
 
     useLayoutEffect(() => {
@@ -96,7 +110,17 @@ export default function Ask() {
         } else {
             textarea.style.height = `${textarea.scrollHeight}px`;
         }
-    }, [value, isAdjusted]);
+
+        const nextIsScrollable = textarea.scrollHeight >= 136;
+
+        if (nextIsScrollable !== isScrollable) {
+            setIsScrollable(nextIsScrollable);
+        }
+
+        if (!nextIsScrollable && isExpanded) {
+            setIsExpanded(false);
+        }
+    }, [value, isAdjusted, isScrollable, isExpanded]);
 
     const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.nativeEvent.isComposing) return;
@@ -104,6 +128,7 @@ export default function Ask() {
         if ((e.ctrlKey || e.metaKey) && e.key === "Backspace") {
             e.preventDefault();
             setValue("");
+            setIsExpanded(false);
 
             return;
         }
@@ -145,8 +170,19 @@ export default function Ask() {
         };
     }, []);
 
+    useEffect(() => {
+        if (hasInput) return;
+
+        const interval = setInterval(() => {
+            setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDERS.length);
+        }, 5000);
+
+        return () => clearInterval(interval);
+    }, [hasInput]);
+
     const handleClear = () => {
         setValue("");
+        setIsExpanded(false);
 
         textareaRef.current?.focus();
     };
@@ -159,15 +195,16 @@ export default function Ask() {
                     transition={TRANSITION}
                     ref={formRef}
                     onSubmit={handleSubmit}
-                    className={`grid gap-1 max-h-full min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
-                        ${isAdjusted ? "grid-cols-[1fr_auto_auto] grid-rows-[1fr_auto]" :
+                    className={`grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
+                        ${isExpanded ? "h-full" : "max-h-full"}
+                        ${isAdjusted || isExpanded ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]" :
                             hasInput ? "grid-cols-[auto_1fr_auto_auto_auto]" : "grid-cols-[auto_1fr_auto_auto]"
                         }`}
                 >
                     <motion.div
                         layout="position"
                         transition={TRANSITION}
-                        className={`${isAdjusted ? "col-start-1 row-start-2" : ""}`}
+                        className={`${isAdjusted ? "col-start-1 row-start-3" : ""}`}
                     >
                         <Button
                             aria-label="Attatch"
@@ -177,18 +214,39 @@ export default function Ask() {
                         </Button>
                     </motion.div>
 
-                    <label className={`relative w-full flex justify-start items-center  ${isAdjusted ? "col-span-2" : "col-span-1"}`}>
+                    <label className={`relative w-full flex justify-start items-center ${isExpanded ? "h-full items-start" : "items-center"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}>
                         {!hasInput && (
-                            <span className="absolute inset-0 m-2 w-full pointer-events-none text-base text-fore-9 text-left font-sans-serif font-medium truncate">
-                                Fluinaに訊いてみて！
-                            </span>
+                            <AnimatePresence mode="wait" initial={false} presenceAffectsLayout={false}>
+                                <motion.span
+                                    key={placeholderIndex}
+                                    layout={false}
+                                    initial={{ "--mask-x": "100%" } as import("motion/react").TargetAndTransition}
+                                    animate={{ "--mask-x": "50%" } as import("motion/react").TargetAndTransition}
+                                    exit={{ "--mask-x": "0%" } as import("motion/react").TargetAndTransition}
+                                    transition={THEME}
+                                    aria-hidden
+                                    style={{
+                                        maskImage: "linear-gradient(to right, transparent 0%, transparent 15%, black 30%, black 70%, transparent 85%, transparent 100%)",
+                                        WebkitMaskImage: "linear-gradient(to right, transparent 0%, transparent 15%, black 30%, black 70%, transparent 85%, transparent 100%)",
+                                        maskSize: "500% 100%",
+                                        WebkitMaskSize: "500% 100%",
+                                        maskRepeat: "no-repeat",
+                                        WebkitMaskRepeat: "no-repeat",
+                                        maskPosition: "var(--mask-x) 0%",
+                                        WebkitMaskPosition: "var(--mask-x) 0%",
+                                    }}
+                                    className="absolute inset-0 m-2 w-full pointer-events-none text-base text-fore-9 text-left font-sans-serif font-medium truncate block"
+                                >
+                                    {PLACEHOLDERS[placeholderIndex]}
+                                </motion.span>
+                            </AnimatePresence>
                         )}
 
                         <motion.div
                             layout="position"
                             transition={TRANSITION}
                             ref={scrollRef}
-                            className="overflow-y-auto max-h-34 p-2 flex justify-center relative items-center w-full"
+                            className={`overflow-y-auto p-2 flex justify-center relative items-center w-full ${isExpanded ? " h-full max-h-full" : "max-h-34"}`}
                         >
                             <motion.textarea
                                 autoFocus
@@ -226,13 +284,59 @@ export default function Ask() {
                                     <Trash2 className="text-red all" />
                                 </Button>
                             </motion.div>
+
+                        )}
+                    </AnimatePresence>
+
+                    <AnimatePresence mode="popLayout" initial={false} presenceAffectsLayout={false}>
+                        {(isScrollable || isExpanded) && (
+                            <motion.div
+                                layout="position"
+                                initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                                animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                                exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                                transition={TRANSITION}
+                                className={`${isAdjusted ? "col-start-3 row-start-2 self-start" : ""}`}
+                            >
+                                <Button
+                                    aria-label="Maximize"
+                                    onClick={() => setIsExpanded(!isExpanded)}
+                                    className="size-10 rounded-full bg-back-2 flex justify-center items-center"
+                                >
+                                    <AnimatePresence mode="popLayout" initial={false} presenceAffectsLayout={false}>
+                                        {isExpanded ? (
+                                            <motion.div
+                                                key="maximize"
+                                                initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                                                animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                                                exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                                                transition={TRANSITION}
+                                                className="all"
+                                            >
+                                                <Minimize2 className="text-yellow" />
+                                            </motion.div>
+                                        ) : (
+                                            <motion.div
+                                                key="minimize"
+                                                initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                                                animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                                                exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                                                transition={TRANSITION}
+                                                className="all"
+                                            >
+                                                <Maximize2 className="text-yellow" />
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </Button>
+                            </motion.div>
                         )}
                     </AnimatePresence>
 
                     <motion.div
                         layout="position"
                         transition={TRANSITION}
-                        className={`${isAdjusted ? "col-start-2 row-start-2" : ""}`}
+                        className={`${isAdjusted ? "col-start-2 row-start-3" : ""}`}
                     >
                         <Button
                             aria-label="Mic"
@@ -245,7 +349,7 @@ export default function Ask() {
                     <motion.div
                         layout="position"
                         transition={TRANSITION}
-                        className={`${isAdjusted ? "col-start-3 row-start-2" : ""}`}
+                        className={`${isAdjusted ? "col-start-3 row-start-3" : ""}`}
                     >
                         <Button
                             type="submit"
