@@ -226,7 +226,6 @@
     font-style: italic;
   }
 
-
   *::selection {
     color: var(--back-1);
     background-color: var(--fore-1);

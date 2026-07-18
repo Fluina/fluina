@@ -10,7 +10,6 @@ if (!validTypes.includes(versionType)) {
 
 try {
     console.log("🎨 1. Biomeでコードを整形・チェックしています...");
-    // 💡 エラーがあっても整形を強制し、エラー落ちを防ぐオプションを追加
     await $`bunx @biomejs/biome check --write --unsafe --formatter-format-with-errors=true .`.nothrow();
 
     console.log("📦 2. 変更をGitにステージングしています...");
@@ -25,7 +24,6 @@ try {
     }
 
     console.log(`🚀 4. バージョンを更新し、タグを作成しています (${versionType})...`);
-    // 💡 --no-git-tag-version を使う選択肢もありますが、npm versionに全て任せるのが一番楽です
     await $`npm version ${versionType}`;
 
     console.log("☁️ 5. リモートリポジトリにプッシュしています...");

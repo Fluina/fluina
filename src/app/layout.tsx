@@ -1,3 +1,4 @@
+import { GoogleAnalytics } from "@next/third-parties/google";
 import type { Metadata, Viewport } from "next";
 import "overlayscrollbars/overlayscrollbars.css";
 import "./globals.css";
@@ -50,6 +51,7 @@ export default function RootLayout({
       </head>
       <body>
         <Client>{children}</Client>
+        <GoogleAnalytics gaId="G-BCZSM2BCKX" />
       </body>
     </html>
   );

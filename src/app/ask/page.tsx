@@ -216,7 +216,7 @@ export default function Ask() {
             >
               <motion.div
                 layout="position"
-                transition={THEME}
+                transition={TRANSITION}
                 className="relative size-15"
               >
                 <Image
