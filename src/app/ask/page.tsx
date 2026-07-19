@@ -36,6 +36,10 @@ export default function Ask() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
+  // 💡 追加：AIの回答とローディング（考え中）の状態を管理
+  const [aiReply, setAiReply] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+
   const formRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -63,15 +67,46 @@ export default function Ask() {
     };
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // 💡 修正：送信ボタンが押されたとき（またはEnterが押されたとき）の処理
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!hasInput) return;
+    if (!hasInput || isLoading) return;
 
-    console.log("Submitted:", value);
-
+    // 現在の入力を保存してフォームをリセット
+    const userPrompt = value;
     setValue("");
     setIsExpanded(false);
+
+    // 通信開始
+    setIsLoading(true);
+    setAiReply("Fluinaが考え中..."); // 考え中の仮表示
+
+    try {
+      // 🦊 Elysiaサーバー（3001番ポート）の /api/ask/ に質問を送る
+      const response = await fetch("http://localhost:3001/api/ask/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt: userPrompt }), // schemaで定めた「prompt」のキーで送る
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch response from Elysia server");
+      }
+
+      const data = await response.json();
+
+      // AIの返答（reply）を画面の状態にセット
+      setAiReply(data.reply);
+    } catch (error) {
+      console.error("Connection Error:", error);
+      setAiReply("エラーが発生しました。バックエンドサーバーが起動しているか確認してください。");
+    } finally {
+      // 通信終了
+      setIsLoading(false);
+    }
   };
 
   useLayoutEffect(() => {
@@ -247,6 +282,17 @@ export default function Ask() {
           )}
         </AnimatePresence>
 
+        {/* 💡 追加：AIからの返答を表示するエリア */}
+        {aiReply && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`w-full p-4 rounded-2xl bg-back-2 border border-back-5 text-fore-1 font-sans-serif text-left ${isLoading ? "animate-pulse opacity-70" : ""}`}
+          >
+            <p className="whitespace-pre-wrap">{aiReply}</p>
+          </motion.div>
+        )}
+
         <motion.form
           layout
           transition={TRANSITION}
@@ -254,13 +300,12 @@ export default function Ask() {
           onSubmit={handleSubmit}
           className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
                         ${isExpanded ? "h-full" : "max-h-full"}
-                        ${
-                          isAdjusted || isExpanded
-                            ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
-                            : hasInput
-                              ? "grid-cols-[auto_1fr_auto_auto_auto]"
-                              : "grid-cols-[auto_1fr_auto_auto]"
-                        }`}
+                        ${isAdjusted || isExpanded
+              ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
+              : hasInput
+                ? "grid-cols-[auto_1fr_auto_auto_auto]"
+                : "grid-cols-[auto_1fr_auto_auto]"
+            }`}
         >
           <motion.div
             layout="position"
@@ -335,6 +380,7 @@ export default function Ask() {
                 onChange={(e) => {
                   setValue(e.target.value);
                 }}
+                disabled={isLoading} // 💡 通信中は入力をロック
                 onKeyDown={handleTextareaKeyDown}
                 id="prompt"
                 name="prompt"
@@ -441,6 +487,7 @@ export default function Ask() {
           >
             <Button
               type="submit"
+              disabled={isLoading} // 💡 通信中はボタンを無効化
               aria-label={hasInput ? "Send" : "Converse"}
               shape="circle"
               color="primary"
