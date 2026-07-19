@@ -1,12 +1,7 @@
 import { cors } from "@elysia/cors";
 
 export const corsPlugin = cors({
-    origin: [
-        "https://fluina.focalrina.com",
-        "http://localhost:3000",
-        "http://localhost:3001"
-    ],
-
+    origin: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     credentials: true,
 });
