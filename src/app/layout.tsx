@@ -1,4 +1,5 @@
 import { GoogleAnalytics } from "@next/third-parties/google";
+import { Analytics } from "@vercel/analytics/next"
 import type { Metadata, Viewport } from "next";
 import "overlayscrollbars/overlayscrollbars.css";
 import "./globals.css";
@@ -51,6 +52,7 @@ export default function RootLayout({
       </head>
       <body>
         <Client>{children}</Client>
+        <Analytics />
         <GoogleAnalytics gaId="G-BCZSM2BCKX" />
       </body>
     </html>
