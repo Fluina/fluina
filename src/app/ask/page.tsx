@@ -36,7 +36,6 @@ export default function Ask() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
-  // 💡 追加：AIの回答とローディング（考え中）の状態を管理
   const [aiReply, setAiReply] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -67,29 +66,29 @@ export default function Ask() {
     };
   }, []);
 
-  // 💡 修正：送信ボタンが押されたとき（またはEnterが押されたとき）の処理
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!hasInput || isLoading) return;
 
-    // 現在の入力を保存してフォームをリセット
     const userPrompt = value;
     setValue("");
     setIsExpanded(false);
 
-    // 通信開始
     setIsLoading(true);
-    setAiReply("Fluinaが考え中..."); // 考え中の仮表示
+    setAiReply("Fluinaが考え中...");
 
     try {
-      // 🦊 Elysiaサーバー（3001番ポート）の /api/ask/ に質問を送る
-      const response = await fetch("http://localhost:3001/api/ask/", {
+      // 💡 修正：環境変数からAPIの基本URLを取得し、無ければローカルにフォールバック 
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
+      // 💡 修正：取得した環境変数のURLをベースにリクエストを送信 
+      const response = await fetch(`${apiUrl}/api/ask/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt: userPrompt }), // schemaで定めた「prompt」のキーで送る
+        body: JSON.stringify({ prompt: userPrompt }),
       });
 
       if (!response.ok) {
@@ -97,14 +96,11 @@ export default function Ask() {
       }
 
       const data = await response.json();
-
-      // AIの返答（reply）を画面の状態にセット
       setAiReply(data.reply);
     } catch (error) {
       console.error("Connection Error:", error);
       setAiReply("エラーが発生しました。バックエンドサーバーが起動しているか確認してください。");
     } finally {
-      // 通信終了
       setIsLoading(false);
     }
   };
@@ -259,7 +255,7 @@ export default function Ask() {
                   alt="Frame Fluina small dark"
                   width={60}
                   height={60}
-                  className="absolute inset-0 dark:opacity-0 opacity-100 opacity"
+                  className="absolute inset-0 dark:opacity-0 opacity-100"
                 />
 
                 <Image
@@ -267,7 +263,7 @@ export default function Ask() {
                   alt="Frame Fluina small light"
                   width={60}
                   height={60}
-                  className="absolute inset-0 dark:opacity-100 opacity-0 opacity"
+                  className="absolute inset-0 dark:opacity-100 opacity-0"
                 />
               </motion.div>
 
@@ -282,7 +278,6 @@ export default function Ask() {
           )}
         </AnimatePresence>
 
-        {/* 💡 追加：AIからの返答を表示するエリア */}
         {aiReply && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -380,7 +375,7 @@ export default function Ask() {
                 onChange={(e) => {
                   setValue(e.target.value);
                 }}
-                disabled={isLoading} // 💡 通信中は入力をロック
+                disabled={isLoading}
                 onKeyDown={handleTextareaKeyDown}
                 id="prompt"
                 name="prompt"
@@ -487,7 +482,7 @@ export default function Ask() {
           >
             <Button
               type="submit"
-              disabled={isLoading} // 💡 通信中はボタンを無効化
+              disabled={isLoading}
               aria-label={hasInput ? "Send" : "Converse"}
               shape="circle"
               color="primary"
