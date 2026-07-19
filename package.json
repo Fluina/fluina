@@ -1,6 +1,6 @@
 {
   "name": "fluina",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "private": true,
   "scripts": {
     "dev": "concurrently \"next dev\" \"bun --watch src/index.ts\"",
