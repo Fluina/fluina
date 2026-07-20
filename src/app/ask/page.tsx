@@ -6,7 +6,7 @@ import {
   Mic,
   Minimize2,
   Plus,
-  Trash2,
+  X,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
@@ -167,14 +167,6 @@ export default function Ask() {
   ) => {
     if (e.nativeEvent.isComposing) return;
 
-    if ((e.ctrlKey || e.metaKey) && e.key === "Backspace") {
-      e.preventDefault();
-      setValue("");
-      setIsExpanded(false);
-
-      return;
-    }
-
     const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
 
     if (isTouchDevice) return;
@@ -184,8 +176,10 @@ export default function Ask() {
         return;
       } else {
         e.preventDefault();
+
         if (hasInput) {
           formRef.current?.requestSubmit();
+          textareaRef.current?.focus();
         }
       }
     }
@@ -193,11 +187,31 @@ export default function Ask() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Backspace") {
+        e.preventDefault();
+        setValue("");
+        setIsExpanded(false);
+
+        textareaRef.current?.focus();
+
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.code === "Space") {
+        e.preventDefault();
+
+        if (isScrollable || isExpanded) {
+          setIsExpanded((prev) => !prev);
+        }
+
+        return;
+      }
+
       if (document.activeElement === textareaRef.current) return;
 
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
 
-      const isInputKey = e.key.length === 1 && e.key !== " ";
+      const isInputKey = e.key.length === 1 || e.key === "Backspace";
 
       if (isInputKey) {
         textareaRef.current?.focus();
@@ -209,7 +223,7 @@ export default function Ask() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, []);
+  }, [isScrollable, isExpanded]);
 
   useEffect(() => {
     if (hasInput) return;
@@ -308,7 +322,7 @@ export default function Ask() {
             className={`${isAdjusted ? "col-start-1 row-start-3" : ""}`}
           >
             <Button aria-label="Attatch" shape="circle" className="bg-back-2">
-              <Plus className="text-fore-2 all" />
+              <Plus className="text-fore-1 all" />
             </Button>
           </motion.div>
 
@@ -403,9 +417,8 @@ export default function Ask() {
                   aria-label="Clear"
                   onClick={handleClear}
                   shape="circle"
-                  className="bg-back-2"
                 >
-                  <Trash2 className="text-red all" />
+                  <X className="text-fore-1 all" />
                 </Button>
               </motion.div>
             )}
@@ -429,7 +442,6 @@ export default function Ask() {
                   aria-label="Maximize"
                   onClick={() => setIsExpanded(!isExpanded)}
                   shape="circle"
-                  className="bg-back-2"
                 >
                   <AnimatePresence
                     mode="popLayout"
@@ -445,7 +457,7 @@ export default function Ask() {
                         transition={TRANSITION}
                         className="all"
                       >
-                        <Minimize2 className="text-yellow" />
+                        <Minimize2 className="text-fore-1" />
                       </motion.div>
                     ) : (
                       <motion.div
@@ -456,7 +468,7 @@ export default function Ask() {
                         transition={TRANSITION}
                         className="all"
                       >
-                        <Maximize2 className="text-yellow" />
+                        <Maximize2 className="text-fore-1" />
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -471,7 +483,7 @@ export default function Ask() {
             className={`${isAdjusted ? "col-start-2 row-start-3" : ""}`}
           >
             <Button aria-label="Mic" shape="circle" className="bg-back-2">
-              <Mic className="text-fore-2 all" />
+              <Mic className="text-fore-1 all" />
             </Button>
           </motion.div>
 
@@ -501,7 +513,7 @@ export default function Ask() {
                     transition={TRANSITION}
                     className="all"
                   >
-                    <ArrowUp className="text-fore-2" />
+                    <ArrowUp className="text-back-1_" />
                   </motion.div>
                 ) : (
                   <motion.div
@@ -512,7 +524,7 @@ export default function Ask() {
                     transition={TRANSITION}
                     className="all"
                   >
-                    <AudioLines className="text-fore-2" />
+                    <AudioLines className="text-back-1_" />
                   </motion.div>
                 )}
               </AnimatePresence>
