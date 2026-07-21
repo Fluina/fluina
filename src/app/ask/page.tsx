@@ -83,7 +83,7 @@ export default function Ask() {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
       // 💡 修正：取得した環境変数のURLをベースにリクエストを送信 
-      const response = await fetch(`${apiUrl}/api/ask/`, {
+      const response = await fetch(`${apiUrl}/api/ask`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

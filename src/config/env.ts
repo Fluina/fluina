@@ -1,5 +1,5 @@
-import { t } from "elysia";
 import { Value } from "@sinclair/typebox/value";
+import { t } from "elysia";
 
 const envSchema = t.Object({
     NODE_ENV: t.Optional(t.Union([t.Literal("development"), t.Literal("production")], { default: "development" })),
