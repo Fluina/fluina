@@ -14,7 +14,7 @@ import { OverlayScrollbars } from "overlayscrollbars";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
-import { Button } from "@/components/parts/button";
+import { Button, Tooltip } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
 
@@ -321,9 +321,11 @@ export default function Ask() {
             transition={TRANSITION}
             className={`${isAdjusted ? "col-start-1 row-start-3" : ""}`}
           >
-            <Button aria-label="Attatch" shape="circle" className="bg-back-2">
-              <Plus className="text-fore-1 all" />
-            </Button>
+            <Tooltip content="添付">
+              <Button aria-label="Attatch" shape="circle" className="bg-back-2">
+                <Plus className="text-fore-1 all" />
+              </Button>
+            </Tooltip>
           </motion.div>
 
           <label
@@ -413,13 +415,15 @@ export default function Ask() {
                 transition={TRANSITION}
                 className={`${isAdjusted ? "col-start-3 row-start-1 self-start" : ""}`}
               >
-                <Button
-                  aria-label="Clear"
-                  onClick={handleClear}
-                  shape="circle"
-                >
-                  <X className="text-fore-1 all" />
-                </Button>
+                <Tooltip content="削除" placement={isAdjusted ? "top" : "bottom"}>
+                  <Button
+                    aria-label="Clear"
+                    onPress={handleClear}
+                    shape="circle"
+                  >
+                    <X className="text-fore-1 all" />
+                  </Button>
+                </Tooltip>
               </motion.div>
             )}
           </AnimatePresence>
@@ -438,41 +442,43 @@ export default function Ask() {
                 transition={TRANSITION}
                 className={`${isAdjusted ? "col-start-3 row-start-2 self-start" : ""}`}
               >
-                <Button
-                  aria-label="Maximize"
-                  onClick={() => setIsExpanded(!isExpanded)}
-                  shape="circle"
-                >
-                  <AnimatePresence
-                    mode="popLayout"
-                    initial={false}
-                    presenceAffectsLayout={false}
+                <Tooltip content={isExpanded ? "縮小" : "拡大"}>
+                  <Button
+                    aria-label={isExpanded ? "Minimize" : "Maximize"}
+                    onPress={() => setIsExpanded(!isExpanded)}
+                    shape="circle"
                   >
-                    {isExpanded ? (
-                      <motion.div
-                        key="maximize"
-                        initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                        animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                        exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                        transition={TRANSITION}
-                        className="all"
-                      >
-                        <Minimize2 className="text-fore-1" />
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="minimize"
-                        initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                        animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                        exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                        transition={TRANSITION}
-                        className="all"
-                      >
-                        <Maximize2 className="text-fore-1" />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </Button>
+                    <AnimatePresence
+                      mode="popLayout"
+                      initial={false}
+                      presenceAffectsLayout={false}
+                    >
+                      {isExpanded ? (
+                        <motion.div
+                          key="maximize"
+                          initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                          animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                          exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                          transition={TRANSITION}
+                          className="all"
+                        >
+                          <Minimize2 className="text-fore-1" />
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key="minimize"
+                          initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                          animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                          exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                          transition={TRANSITION}
+                          className="all"
+                        >
+                          <Maximize2 className="text-fore-1" />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </Button>
+                </Tooltip>
               </motion.div>
             )}
           </AnimatePresence>
@@ -482,9 +488,11 @@ export default function Ask() {
             transition={TRANSITION}
             className={`${isAdjusted ? "col-start-2 row-start-3" : ""}`}
           >
-            <Button aria-label="Mic" shape="circle" className="bg-back-2">
-              <Mic className="text-fore-1 all" />
-            </Button>
+            <Tooltip content="マイク">
+              <Button aria-label="Mic" shape="circle" className="bg-back-2">
+                <Mic className="text-fore-1 all" />
+              </Button>
+            </Tooltip>
           </motion.div>
 
           <motion.div
@@ -492,43 +500,45 @@ export default function Ask() {
             transition={TRANSITION}
             className={`${isAdjusted ? "col-start-3 row-start-3" : ""}`}
           >
-            <Button
-              type="submit"
-              disabled={isLoading}
-              aria-label={hasInput ? "Send" : "Converse"}
-              shape="circle"
-              color="primary"
-            >
-              <AnimatePresence
-                mode="popLayout"
-                initial={false}
-                presenceAffectsLayout={false}
+            <Tooltip content={hasInput ? "送信" : "会話"}>
+              <Button
+                type="submit"
+                isDisabled={isLoading}
+                aria-label={hasInput ? "Send" : "Converse"}
+                shape="circle"
+                color="primary"
               >
-                {hasInput ? (
-                  <motion.div
-                    key="send"
-                    initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                    exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                    transition={TRANSITION}
-                    className="all"
-                  >
-                    <ArrowUp className="text-back-1_" />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="converse"
-                    initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                    exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                    transition={TRANSITION}
-                    className="all"
-                  >
-                    <AudioLines className="text-back-1_" />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </Button>
+                <AnimatePresence
+                  mode="popLayout"
+                  initial={false}
+                  presenceAffectsLayout={false}
+                >
+                  {hasInput ? (
+                    <motion.div
+                      key="send"
+                      initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                      exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                      transition={TRANSITION}
+                      className="all"
+                    >
+                      <ArrowUp className="text-back-1_" />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="converse"
+                      initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                      exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                      transition={TRANSITION}
+                      className="all"
+                    >
+                      <AudioLines className="text-back-1_" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </Button>
+            </Tooltip>
           </motion.div>
         </motion.form>
       </LayoutGroup>

@@ -1,14 +1,18 @@
-import type React from "react";
-import { forwardRef } from "react";
+import { forwardRef, useRef } from "react";
+import {
+  Button as RACButton,
+  type ButtonProps as RACButtonProps,
+  type PressEvent,
+} from "react-aria-components";
 import { tv, type VariantProps } from "tailwind-variants";
 import { Ripple, useRipple } from "@/components/effects/ripple";
 
 const buttonVariants = tv({
   base: [
     "overflow-clip relative outline-none cursor-pointer all",
-    "focus-visible:scale-110 focus-visible:ring-2 focus-visible:ring-fore-1",
-    "hover:scale-110",
-    "active:scale-90 active:[&>*:not(:first-child)]:scale-75",
+    "data-hovered:scale-110",
+    "data-pressed:scale-90 data-pressed:[&>*:not(:first-child)]:scale-75",
+    "data-focus-visible:scale-110 data-focus-visible:ring-2 data-focus-visible:ring-fore-1",
   ],
   variants: {
     shape: {
@@ -27,8 +31,8 @@ const buttonVariants = tv({
 });
 
 export interface ButtonProps
-  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "color">,
-    VariantProps<typeof buttonVariants> {
+  extends Omit<RACButtonProps, "color">,
+  VariantProps<typeof buttonVariants> {
   ripple?: boolean;
 }
 
@@ -39,7 +43,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       ripple = true,
       shape,
       color,
-      onClick,
+      onPress,
       className,
       children,
       ...props
@@ -48,24 +52,61 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ) => {
     const { ripples, triggerRipple } = useRipple();
 
-    const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const pointerCoordsRef = useRef<{ clientX: number; clientY: number } | null>(null);
+
+    const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
       if (ripple) {
-        triggerRipple(e);
+        pointerCoordsRef.current = {
+          clientX: e.clientX,
+          clientY: e.clientY,
+        };
       }
-      onClick?.(e);
+    };
+
+    const handlePress = (e: PressEvent) => {
+      if (ripple) {
+        const buttonEl =
+          (e.target as HTMLElement)?.closest?.("button") ||
+          (e.target as Element);
+
+        if (buttonEl) {
+          const coords = pointerCoordsRef.current;
+          const isKeyboard = e.pointerType === "keyboard" || e.pointerType === "virtual" || !coords;
+
+          triggerRipple({
+            currentTarget: buttonEl,
+            clientX: isKeyboard ? undefined : coords.clientX,
+            clientY: isKeyboard ? undefined : coords.clientY,
+          });
+        }
+      }
+
+      onPress?.(e);
+
+      pointerCoordsRef.current = null;
     };
 
     return (
-      <button
+      <RACButton
         {...props}
         ref={ref}
         type={type}
-        onClick={handleClick}
-        className={buttonVariants({ shape, color, className })}
+        onPress={handlePress}
+        onPointerDown={handlePointerDown}
+        className={(renderProps) => {
+          const resolvedClassName =
+            typeof className === "function" ? className(renderProps) : className;
+
+          return buttonVariants({ shape, color, className: resolvedClassName });
+        }}
       >
-        {ripple && <Ripple ripples={ripples} />}
-        {children}
-      </button>
+        {(renderProps) => (
+          <>
+            {ripple && <Ripple ripples={ripples} />}
+            {typeof children === "function" ? children(renderProps) : children}
+          </>
+        )}
+      </RACButton>
     );
   },
 );

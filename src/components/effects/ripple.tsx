@@ -1,4 +1,3 @@
-import type React from "react";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 
@@ -9,26 +8,39 @@ type RippleType = {
   size: number;
 };
 
+interface RippleTriggerEvent {
+  currentTarget: Element;
+  clientX?: number;
+  clientY?: number;
+  detail?: number;
+}
+
 export const useRipple = () => {
   const [ripples, setRipples] = useState<RippleType[]>([]);
 
-  const triggerRipple = useCallback((e: React.MouseEvent<HTMLElement>) => {
+  const triggerRipple = useCallback((e: RippleTriggerEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const w = rect.width;
     const h = rect.height;
 
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+
     const isKeyboardClick =
-      e.detail === 0 || (e.clientX === 0 && e.clientY === 0);
+      e.detail === 0 ||
+      clientX === undefined ||
+      clientY === undefined ||
+      (clientX === 0 && clientY === 0);
 
     let x: number;
     let y: number;
 
-    if (isKeyboardClick) {
+    if (isKeyboardClick || clientX === undefined || clientY === undefined) {
       x = w / 2;
       y = h / 2;
     } else {
-      x = e.clientX - rect.left;
-      y = e.clientY - rect.top;
+      x = clientX - rect.left;
+      y = clientY - rect.top;
     }
 
     const distTopLeft = Math.hypot(x, y);
