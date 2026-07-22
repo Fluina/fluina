@@ -6,7 +6,7 @@ import {
   Mic,
   Minimize2,
   Plus,
-  X,
+  Delete,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
@@ -16,6 +16,7 @@ import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_sma
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
 import { Button, Tooltip } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
+import { useOS } from "@/lib/os";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
 
 const PLACEHOLDERS = [
@@ -30,6 +31,8 @@ const PLACEHOLDERS = [
 ];
 
 export default function Ask() {
+  const os = useOS();
+
   const [value, setValue] = useState("");
   const [isAdjusted, setIsAdjusted] = useState(false);
   const [isScrollable, setIsScrollable] = useState(false);
@@ -187,7 +190,9 @@ export default function Ask() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Backspace") {
+      const modifierPressed = os === "mac" ? e.metaKey : e.ctrlKey;
+
+      if (modifierPressed && e.key === "Backspace") {
         e.preventDefault();
         setValue("");
         setIsExpanded(false);
@@ -197,7 +202,7 @@ export default function Ask() {
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.code === "Space") {
+      if (modifierPressed && e.code === "Space") {
         e.preventDefault();
 
         if (isScrollable || isExpanded) {
@@ -223,7 +228,7 @@ export default function Ask() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isScrollable, isExpanded]);
+  }, [os, isScrollable, isExpanded]);
 
   useEffect(() => {
     if (hasInput) return;
@@ -415,13 +420,17 @@ export default function Ask() {
                 transition={TRANSITION}
                 className={`${isAdjusted ? "col-start-3 row-start-1 self-start" : ""}`}
               >
-                <Tooltip content="削除" placement={isAdjusted ? "top" : "bottom"}>
+                <Tooltip
+                  content="削除"
+                  placement={isAdjusted ? "left" : "bottom"}
+                  shortcut={{ mac: ["⌘", "Backspace"], windows: ["Ctrl", "Backspace"] }}
+                >
                   <Button
                     aria-label="Clear"
                     onPress={handleClear}
                     shape="circle"
                   >
-                    <X className="text-fore-1 all" />
+                    <Delete className="text-fore-1 all" />
                   </Button>
                 </Tooltip>
               </motion.div>
@@ -442,7 +451,11 @@ export default function Ask() {
                 transition={TRANSITION}
                 className={`${isAdjusted ? "col-start-3 row-start-2 self-start" : ""}`}
               >
-                <Tooltip content={isExpanded ? "縮小" : "拡大"}>
+                <Tooltip
+                  content={isExpanded ? "縮小" : "拡大"}
+                  placement={isAdjusted ? "left" : "bottom"}
+                  shortcut={{ mac: ["⌘", "Space"], windows: ["Ctrl", "Space"] }}
+                >
                   <Button
                     aria-label={isExpanded ? "Minimize" : "Maximize"}
                     onPress={() => setIsExpanded(!isExpanded)}
