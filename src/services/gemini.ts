@@ -9,7 +9,7 @@ export const ai = new GoogleGenAI({
 
 export const generateAskResponse = async (message: string) => {
     const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.6-flash",
         contents: message,
     });
 

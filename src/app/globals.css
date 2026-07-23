@@ -56,8 +56,8 @@
   --color-indigo: hsl(255, 100%, 50%);
   --color-violet: hsl(300, 100%, 50%);
 
-  --font-serif: "Playfair Display", serif;
   --font-sans-serif: "Overused Grotesk", sans-serif;
+  --font-serif: "Playfair Display", serif;
 
   --transition-duration: 500ms;
   --transition-timing-function: ease-out;
@@ -196,32 +196,29 @@
 
   @font-face {
     font-family: "Overused Grotesk";
-    src: url("https://raw.githubusercontent.com/RandomMaerks/Overused-Grotesk/master/fonts/variable/OverusedGroteskRoman-VF.ttf")
-      format("truetype-variations");
+    src: url("/fonts/sans-serif/OverusedGrotesk-VF.woff2") format("woff2");
     font-weight: 300 900;
     font-style: normal;
   }
-
+  
   @font-face {
     font-family: "Overused Grotesk";
-    src: url("https://raw.githubusercontent.com/RandomMaerks/Overused-Grotesk/master/fonts/variable/OverusedGroteskItalic-VF.ttf")
-      format("truetype-variations");
+    src: url("/fonts/sans-serif/OverusedGrotesk-VF.woff2") format("woff2");
     font-weight: 300 900;
     font-style: italic;
+    font-variation-settings: "slnt" -10;
   }
 
   @font-face {
     font-family: "Playfair Display";
-    src: url("https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf")
-      format("truetype-variations");
+    src: url("/fonts/serif/PlayfairDisplay-VariableFont_wght.woff2") format("woff2");
     font-weight: 400 900;
     font-style: normal;
   }
 
   @font-face {
     font-family: "Playfair Display";
-    src: url("https://raw.githubusercontent.com/google/fonts/main/ofl/playfairdisplay/PlayfairDisplay-Italic%5Bwght%5D.ttf")
-      format("truetype-variations");
+    src: url("/fonts/serif/PlayfairDisplay-Italic-VariableFont_wght.woff2") format("woff2");
     font-weight: 400 900;
     font-style: italic;
   }

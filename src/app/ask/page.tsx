@@ -7,6 +7,13 @@ import {
   Minimize2,
   Plus,
   Delete,
+  Paperclip,
+  Camera,
+  Folder,
+  Puzzle,
+  Plug,
+  Zap,
+  Globe,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
@@ -14,7 +21,7 @@ import { OverlayScrollbars } from "overlayscrollbars";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
-import { Button, Tooltip } from "@/components/parts";
+import { Button, Tooltip, Menu } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useOS } from "@/lib/os";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
@@ -289,7 +296,7 @@ export default function Ask() {
               <motion.h1
                 layout="position"
                 transition={TRANSITION}
-                className="text-center font-sans-serif text-3xl font-thin text-fore-1"
+                className="text-center font-sans-serif text-3xl font-light text-fore-1"
               >
                 何か手伝えることはある？
               </motion.h1>
@@ -321,21 +328,55 @@ export default function Ask() {
                 : "grid-cols-[auto_1fr_auto_auto]"
             }`}
         >
-          <motion.div
-            layout="position"
-            transition={TRANSITION}
-            className={`${isAdjusted ? "col-start-1 row-start-3" : ""}`}
-          >
-            <Tooltip content="添付">
-              <Button aria-label="Attatch" shape="circle" className="bg-back-2">
-                <Plus className="text-fore-1 all" />
-              </Button>
-            </Tooltip>
-          </motion.div>
+          <Menu.Trigger>
+            <motion.div
+              layout="position"
+              transition={TRANSITION}
+              className={`${isAdjusted ? "col-start-1 row-start-3" : ""}`}
+            >
+              <Tooltip content="添付">
+                <Button aria-label="Attatch" shape="circle" className="bg-back-2">
+                  <Plus className="text-fore-1 all" />
+                </Button>
+              </Tooltip>
+            </motion.div>
+
+            <Menu.Content>
+              <Menu.Item icon={<Paperclip />} shortcut="Ctrl+U">
+                ファイルまたは写真を追加
+              </Menu.Item>
+              <Menu.Item icon={<Camera />}>スクリーンショットを撮る</Menu.Item>
+
+              <Menu.Separator />
+
+              <Menu.SubmenuTrigger>
+                <Menu.Item icon={<Folder />}>プロジェクトに追加</Menu.Item>
+                <Menu.Content>
+                  <Menu.Item>プロジェクト A</Menu.Item>
+                  <Menu.Item>プロジェクト B</Menu.Item>
+                </Menu.Content>
+              </Menu.SubmenuTrigger>
+
+              <Menu.Item icon={<Puzzle />}>スキル</Menu.Item>
+              <Menu.Item icon={<Plug />}>コネクタを追加</Menu.Item>
+              <Menu.Item icon={<Zap />}>プラグインを追加...</Menu.Item>
+
+              <Menu.Separator />
+
+              <Menu.Section selectionMode="single" defaultSelectedKeys={["web-search"]}>
+                <Menu.Item id="web-search" icon={<Globe />}>
+                  ウェブ検索
+                </Menu.Item>
+              </Menu.Section>
+            </Menu.Content>
+          </Menu.Trigger>
 
           <label
+            htmlFor="prompt"
             className={`relative w-full flex justify-start items-center ${isExpanded ? "h-full items-start" : "items-center"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}
           >
+            <span className="sr-only">プロンプトを入力</span>
+            
             {!hasInput && (
               <AnimatePresence
                 mode="wait"
@@ -361,7 +402,7 @@ export default function Ask() {
                     } as import("motion/react").TargetAndTransition
                   }
                   transition={THEME}
-                  aria-hidden
+                  aria-hidden="true"
                   style={{
                     maskImage:
                       "linear-gradient(to right, transparent 0%, transparent 15%, black 30%, black 70%, transparent 85%, transparent 100%)",
