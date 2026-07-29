@@ -176,10 +176,6 @@ export default function Ask() {
     recalcTextareaHeight();
   }, [value, recalcTextareaHeight]);
 
-  // モバイルのソフトウェアキーボードが開閉すると visualViewport のサイズが変わる。
-  // それ自体は value/isAdjusted/isScrollable/isExpanded を変えないので、
-  // 上の useLayoutEffect は再実行されない。キーボード開閉時にも直接
-  // recalcTextareaHeight を呼んで高さのズレを解消する。
   useEffect(() => {
     const vv = window.visualViewport;
 
@@ -536,7 +532,6 @@ export default function Ask() {
                           animate={{ opacity: 1, scale: 1, rotate: 0 }}
                           exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                           transition={TRANSITION}
-                          className="all"
                         >
                           <Minimize2 className="text-fore-1" />
                         </motion.div>
@@ -547,7 +542,6 @@ export default function Ask() {
                           animate={{ opacity: 1, scale: 1, rotate: 0 }}
                           exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                           transition={TRANSITION}
-                          className="all"
                         >
                           <Maximize2 className="text-fore-1" />
                         </motion.div>
@@ -596,7 +590,6 @@ export default function Ask() {
                       animate={{ opacity: 1, scale: 1, rotate: 0 }}
                       exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                       transition={TRANSITION}
-                      className="all"
                     >
                       <ArrowUp className="text-back-1_" />
                     </motion.div>
@@ -607,7 +600,6 @@ export default function Ask() {
                       animate={{ opacity: 1, scale: 1, rotate: 0 }}
                       exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                       transition={TRANSITION}
-                      className="all"
                     >
                       <AudioLines className="text-back-1_" />
                     </motion.div>
