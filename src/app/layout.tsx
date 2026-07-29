@@ -1,5 +1,5 @@
 import { GoogleAnalytics } from "@next/third-parties/google";
-import { Analytics } from "@vercel/analytics/next"
+import { Analytics } from "@vercel/analytics/next";
 import type { Metadata, Viewport } from "next";
 import "overlayscrollbars/overlayscrollbars.css";
 import "./globals.css";
@@ -17,6 +17,7 @@ export const viewport: Viewport = {
     { media: "(prefers-color-scheme: dark)", color: "#0d0d0d" },
   ],
   viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

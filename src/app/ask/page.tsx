@@ -2,26 +2,32 @@
 import {
   ArrowUp,
   AudioLines,
+  Camera,
+  Delete,
+  Folder,
+  Globe,
   Maximize2,
   Mic,
   Minimize2,
-  Plus,
-  Delete,
   Paperclip,
-  Camera,
-  Folder,
-  Puzzle,
   Plug,
+  Plus,
+  Puzzle,
   Zap,
-  Globe,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
 import { OverlayScrollbars } from "overlayscrollbars";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
-import { Button, Tooltip, Menu } from "@/components/parts";
+import { Button, Menu, Tooltip } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useOS } from "@/lib/os";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
@@ -89,10 +95,8 @@ export default function Ask() {
     setAiReply("Fluinaが考え中...");
 
     try {
-      // 💡 修正：環境変数からAPIの基本URLを取得し、無ければローカルにフォールバック 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
-      // 💡 修正：取得した環境変数のURLをベースにリクエストを送信 
       const response = await fetch(`${apiUrl}/api/ask`, {
         method: "POST",
         headers: {
@@ -109,15 +113,15 @@ export default function Ask() {
       setAiReply(data.reply);
     } catch (error) {
       console.error("Connection Error:", error);
-      setAiReply("エラーが発生しました。バックエンドサーバーが起動しているか確認してください。");
+      setAiReply(
+        "エラーが発生しました。バックエンドサーバーが起動しているか確認してください。",
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  useLayoutEffect(() => {
-    if (value === undefined) return;
-
+  const recalcTextareaHeight = useCallback(() => {
     const textarea = textareaRef.current;
 
     if (!textarea) return;
@@ -171,6 +175,30 @@ export default function Ask() {
       setIsExpanded(false);
     }
   }, [value, isAdjusted, isScrollable, isExpanded]);
+
+  useLayoutEffect(() => {
+    if (value === undefined) return;
+
+    recalcTextareaHeight();
+  }, [value, recalcTextareaHeight]);
+
+  // モバイルのソフトウェアキーボードが開閉すると visualViewport のサイズが変わる。
+  // それ自体は value/isAdjusted/isScrollable/isExpanded を変えないので、
+  // 上の useLayoutEffect は再実行されない。キーボード開閉時にも直接
+  // recalcTextareaHeight を呼んで高さのズレを解消する。
+  useEffect(() => {
+    const vv = window.visualViewport;
+
+    if (!vv) return;
+
+    vv.addEventListener("resize", recalcTextareaHeight);
+    vv.addEventListener("scroll", recalcTextareaHeight);
+
+    return () => {
+      vv.removeEventListener("resize", recalcTextareaHeight);
+      vv.removeEventListener("scroll", recalcTextareaHeight);
+    };
+  }, [recalcTextareaHeight]);
 
   const handleTextareaKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement>,
@@ -321,12 +349,13 @@ export default function Ask() {
           onSubmit={handleSubmit}
           className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
                         ${isExpanded ? "h-full" : "max-h-full"}
-                        ${isAdjusted || isExpanded
-              ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
-              : hasInput
-                ? "grid-cols-[auto_1fr_auto_auto_auto]"
-                : "grid-cols-[auto_1fr_auto_auto]"
-            }`}
+                        ${
+                          isAdjusted || isExpanded
+                            ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
+                            : hasInput
+                              ? "grid-cols-[auto_1fr_auto_auto_auto]"
+                              : "grid-cols-[auto_1fr_auto_auto]"
+                        }`}
         >
           <Menu.Trigger>
             <motion.div
@@ -335,7 +364,11 @@ export default function Ask() {
               className={`${isAdjusted ? "col-start-1 row-start-3" : ""}`}
             >
               <Tooltip content="添付">
-                <Button aria-label="Attatch" shape="circle" className="bg-back-2">
+                <Button
+                  aria-label="Attatch"
+                  shape="circle"
+                  className="bg-back-2"
+                >
                   <Plus className="text-fore-1 all" />
                 </Button>
               </Tooltip>
@@ -363,7 +396,10 @@ export default function Ask() {
 
               <Menu.Separator />
 
-              <Menu.Section selectionMode="single" defaultSelectedKeys={["web-search"]}>
+              <Menu.Section
+                selectionMode="single"
+                defaultSelectedKeys={["web-search"]}
+              >
                 <Menu.Item id="web-search" icon={<Globe />}>
                   ウェブ検索
                 </Menu.Item>
@@ -376,7 +412,7 @@ export default function Ask() {
             className={`relative w-full flex justify-start items-center ${isExpanded ? "h-full items-start" : "items-center"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}
           >
             <span className="sr-only">プロンプトを入力</span>
-            
+
             {!hasInput && (
               <AnimatePresence
                 mode="wait"
@@ -464,7 +500,10 @@ export default function Ask() {
                 <Tooltip
                   content="削除"
                   placement={isAdjusted ? "left" : "bottom"}
-                  shortcut={{ mac: ["⌘", "Backspace"], windows: ["Ctrl", "Backspace"] }}
+                  shortcut={{
+                    mac: ["⌘", "Backspace"],
+                    windows: ["Ctrl", "Backspace"],
+                  }}
                 >
                   <Button
                     aria-label="Clear"

@@ -1,8 +1,8 @@
 import { forwardRef, useRef } from "react";
 import {
+  type PressEvent,
   Button as RACButton,
   type ButtonProps as RACButtonProps,
-  type PressEvent,
 } from "react-aria-components";
 import { tv, type VariantProps } from "tailwind-variants";
 import { Ripple, useRipple } from "@/components/effects/ripple";
@@ -32,7 +32,7 @@ const buttonVariants = tv({
 
 export interface ButtonProps
   extends Omit<RACButtonProps, "color">,
-  VariantProps<typeof buttonVariants> {
+    VariantProps<typeof buttonVariants> {
   ripple?: boolean;
 }
 
@@ -52,7 +52,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ) => {
     const { ripples, triggerRipple } = useRipple();
 
-    const pointerCoordsRef = useRef<{ clientX: number; clientY: number } | null>(null);
+    const pointerCoordsRef = useRef<{
+      clientX: number;
+      clientY: number;
+    } | null>(null);
 
     const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
       if (ripple) {
@@ -71,7 +74,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 
         if (buttonEl) {
           const coords = pointerCoordsRef.current;
-          const isKeyboard = e.pointerType === "keyboard" || e.pointerType === "virtual" || !coords;
+          const isKeyboard =
+            e.pointerType === "keyboard" ||
+            e.pointerType === "virtual" ||
+            !coords;
 
           triggerRipple({
             currentTarget: buttonEl,
@@ -95,7 +101,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         onPointerDown={handlePointerDown}
         className={(renderProps) => {
           const resolvedClassName =
-            typeof className === "function" ? className(renderProps) : className;
+            typeof className === "function"
+              ? className(renderProps)
+              : className;
 
           return buttonVariants({ shape, color, className: resolvedClassName });
         }}
