@@ -89,10 +89,8 @@ export default function Ask() {
     setAiReply("Fluinaが考え中...");
 
     try {
-      // 💡 修正：環境変数からAPIの基本URLを取得し、無ければローカルにフォールバック 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
-      // 💡 修正：取得した環境変数のURLをベースにリクエストを送信 
       const response = await fetch(`${apiUrl}/api/ask`, {
         method: "POST",
         headers: {
@@ -391,7 +389,7 @@ export default function Ask() {
 
           <label
             htmlFor="prompt"
-            className={`relative w-full flex justify-start items-center ${isExpanded ? "h-full items-start" : "items-center"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}
+            className={`relative w-full flex justify-start items-start ${isExpanded && "h-full"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}
           >
             <span className="sr-only">プロンプトを入力</span>
 
@@ -532,6 +530,7 @@ export default function Ask() {
                           animate={{ opacity: 1, scale: 1, rotate: 0 }}
                           exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                           transition={TRANSITION}
+                          className="all"
                         >
                           <Minimize2 className="text-fore-1" />
                         </motion.div>
@@ -542,6 +541,7 @@ export default function Ask() {
                           animate={{ opacity: 1, scale: 1, rotate: 0 }}
                           exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                           transition={TRANSITION}
+                          className="all"
                         >
                           <Maximize2 className="text-fore-1" />
                         </motion.div>
@@ -590,6 +590,7 @@ export default function Ask() {
                       animate={{ opacity: 1, scale: 1, rotate: 0 }}
                       exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                       transition={TRANSITION}
+                      className="all"
                     >
                       <ArrowUp className="text-back-1_" />
                     </motion.div>
@@ -600,6 +601,7 @@ export default function Ask() {
                       animate={{ opacity: 1, scale: 1, rotate: 0 }}
                       exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                       transition={TRANSITION}
+                      className="all"
                     >
                       <AudioLines className="text-back-1_" />
                     </motion.div>
