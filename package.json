@@ -17,6 +17,7 @@
     "@next/third-parties": "^16.2.12",
     "@tailwindcss/typography": "^0.5.20",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "class-variance-authority": "^0.7.1",
     "elysia": "^1.4.29",
     "lucide-react": "^1.27.0",
