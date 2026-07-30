@@ -2,26 +2,32 @@
 import {
   ArrowUp,
   AudioLines,
+  Camera,
+  Delete,
+  Folder,
+  Globe,
   Maximize2,
   Mic,
   Minimize2,
-  Plus,
-  Delete,
   Paperclip,
-  Camera,
-  Folder,
-  Puzzle,
   Plug,
+  Plus,
+  Puzzle,
   Zap,
-  Globe,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
 import { OverlayScrollbars } from "overlayscrollbars";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
-import { Button, Tooltip, Menu } from "@/components/parts";
+import { Button, Menu, Tooltip } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useOS } from "@/lib/os";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
@@ -46,6 +52,9 @@ export default function Ask() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [dragFileCount, setDragFileCount] = useState(0);
+
   const [aiReply, setAiReply] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -56,6 +65,10 @@ export default function Ask() {
   const hasInput = value.length > 0;
   const singleLineRef = useRef<number>(0);
   const singleLineWidthRef = useRef<number>(0);
+
+  //  ================================================================
+  //    Textarea
+  //  ================================================================
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -107,7 +120,9 @@ export default function Ask() {
       setAiReply(data.reply);
     } catch (error) {
       console.error("Connection Error:", error);
-      setAiReply("エラーが発生しました。バックエンドサーバーが起動しているか確認してください。");
+      setAiReply(
+        "エラーが発生しました。バックエンドサーバーが起動しているか確認してください。",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -270,348 +285,455 @@ export default function Ask() {
     textareaRef.current?.focus();
   };
 
+  //  ================================================================
+  //    Drag and Drop
+  //  ================================================================
+
+  useEffect(() => {
+    const handleWindowDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.dataTransfer?.types.includes("Files")) {
+        const fileCount = e.dataTransfer.items?.length || 0;
+
+        setDragFileCount(fileCount);
+        setIsDragOver(true);
+      }
+    };
+
+    const handleWindowDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.dataTransfer?.types.includes("Files")) {
+        const fileCount = e.dataTransfer.items?.length || 0;
+
+        setDragFileCount(fileCount);
+      }
+    };
+
+    const handleWindowDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.clientX === 0 && e.clientY === 0) {
+        setIsDragOver(false);
+      }
+    };
+
+    const handleWindowDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+
+      const files = e.dataTransfer?.files;
+
+      if (files && files.length > 0) {
+        console.log("Dropped files:", files);
+      }
+    };
+
+    window.addEventListener("dragenter", handleWindowDragEnter);
+    window.addEventListener("dragover", handleWindowDragOver);
+    window.addEventListener("dragleave", handleWindowDragLeave);
+    window.addEventListener("drop", handleWindowDrop);
+
+    return () => {
+      window.removeEventListener("dragenter", handleWindowDragEnter);
+      window.removeEventListener("dragover", handleWindowDragOver);
+      window.removeEventListener("dragleave", handleWindowDragLeave);
+      window.removeEventListener("drop", handleWindowDrop);
+    };
+  }, []);
+
   return (
-    <div className="size-full flex flex-col p-4 gap-8 items-center max-w-3xl justify-center">
-      <LayoutGroup>
-        <AnimatePresence
-          mode="popLayout"
-          initial={false}
-          presenceAffectsLayout={false}
-        >
-          {!isExpanded && (
+    <>
+      <AnimatePresence
+        mode="popLayout"
+        initial={false}
+        presenceAffectsLayout={false}
+      >
+        {isDragOver && (
+          <motion.div
+            initial={{ opacity: 0, backdropFilter: "blur(0)" }}
+            animate={{ opacity: 1, backdropFilter: "blur(1rem)" }}
+            exit={{ opacity: 0, backdropFilter: "blur(0)" }}
+            transition={TRANSITION}
+            className="fixed inset-0 p-2 bg-back-0/50 z-1000 pointer-events-none flex items-center justify-center"
+          >
+            <div className="animate-pulse flex flex-col gap-2 items-center justify-center size-full border-2 border-dashed border-fore-1 rounded-2xl">
+              <Paperclip
+                className="text-fore-1 text-shadow-lg animate-bounce"
+                size={64}
+              />
+
+              <p className="text-center font-sans-serif text-2xl font-medium text-fore-1 text-shadow-lg">
+                {dragFileCount}ファイルをドロップして追加
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="size-full flex flex-col p-4 gap-8 items-center max-w-3xl justify-center">
+        <LayoutGroup>
+          <AnimatePresence
+            mode="popLayout"
+            initial={false}
+            presenceAffectsLayout={false}
+          >
+            {!isExpanded && (
+              <motion.div
+                layout="position"
+                initial={{ opacity: 0, y: -50 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -50 }}
+                transition={TRANSITION}
+                className="max-md:mt-auto flex flex-col justify-center items-center gap-4 z-10"
+              >
+                <motion.div
+                  layout="position"
+                  transition={TRANSITION}
+                  className="relative size-15"
+                >
+                  <Image
+                    src={Frame_Fluina_small_dark}
+                    alt="Frame Fluina small dark"
+                    width={60}
+                    height={60}
+                    className="absolute inset-0 dark:opacity-0 opacity-100 opacity"
+                  />
+
+                  <Image
+                    src={Frame_Fluina_small_light}
+                    alt="Frame Fluina small light"
+                    width={60}
+                    height={60}
+                    className="absolute inset-0 dark:opacity-100 opacity-0 opacity"
+                  />
+                </motion.div>
+
+                <motion.h1
+                  layout="position"
+                  transition={TRANSITION}
+                  className="text-center font-sans-serif text-3xl font-light text-fore-1"
+                >
+                  何でも訊いてみてね！
+                </motion.h1>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {aiReply && (
             <motion.div
-              layout="position"
-              initial={{ opacity: 0, y: -50 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -50 }}
-              transition={TRANSITION}
-              className="max-md:mt-auto flex flex-col justify-center items-center gap-4 z-10"
+              className={`w-full p-4 rounded-2xl bg-back-2 border border-back-5 text-fore-1 font-sans-serif text-left ${isLoading ? "animate-pulse opacity-70" : ""}`}
             >
+              <p className="whitespace-pre-wrap">{aiReply}</p>
+            </motion.div>
+          )}
+
+          <motion.form
+            layout
+            transition={TRANSITION}
+            ref={formRef}
+            onSubmit={handleSubmit}
+            className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
+                        ${isExpanded ? "h-full" : "max-h-full"}
+                        ${
+                          isAdjusted || isExpanded
+                            ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
+                            : hasInput
+                              ? "grid-cols-[auto_1fr_auto_auto_auto]"
+                              : "grid-cols-[auto_1fr_auto_auto]"
+                        }`}
+          >
+            <Menu.Trigger>
               <motion.div
                 layout="position"
                 transition={TRANSITION}
-                className="relative size-15"
+                className={`${isAdjusted && "col-start-1 row-start-3"}`}
               >
-                <Image
-                  src={Frame_Fluina_small_dark}
-                  alt="Frame Fluina small dark"
-                  width={60}
-                  height={60}
-                  className="absolute inset-0 dark:opacity-0 opacity-100"
-                />
-
-                <Image
-                  src={Frame_Fluina_small_light}
-                  alt="Frame Fluina small light"
-                  width={60}
-                  height={60}
-                  className="absolute inset-0 dark:opacity-100 opacity-0"
-                />
+                <Tooltip content="添付">
+                  <Button
+                    aria-label="Attatch"
+                    shape="circle"
+                    className="bg-back-2"
+                  >
+                    <Plus className="text-fore-1 all" />
+                  </Button>
+                </Tooltip>
               </motion.div>
 
-              <motion.h1
+              <Menu.Content>
+                <Menu.Item icon={<Paperclip />} shortcut="Ctrl+U">
+                  ファイルまたは写真を追加
+                </Menu.Item>
+                <Menu.Item icon={<Camera />}>
+                  スクリーンショットを撮る
+                </Menu.Item>
+
+                <Menu.Separator />
+
+                <Menu.SubmenuTrigger>
+                  <Menu.Item icon={<Folder />}>プロジェクトに追加</Menu.Item>
+                  <Menu.Content>
+                    <Menu.Item>プロジェクト A</Menu.Item>
+                    <Menu.Item>プロジェクト B</Menu.Item>
+                  </Menu.Content>
+                </Menu.SubmenuTrigger>
+
+                <Menu.Item icon={<Puzzle />}>スキル</Menu.Item>
+                <Menu.Item icon={<Plug />}>コネクタを追加</Menu.Item>
+                <Menu.Item icon={<Zap />}>プラグインを追加...</Menu.Item>
+
+                <Menu.Separator />
+
+                <Menu.Section
+                  selectionMode="single"
+                  defaultSelectedKeys={["web-search"]}
+                >
+                  <Menu.Item id="web-search" icon={<Globe />}>
+                    ウェブ検索
+                  </Menu.Item>
+                </Menu.Section>
+              </Menu.Content>
+            </Menu.Trigger>
+
+            <label
+              htmlFor="prompt"
+              className={`relative w-full flex justify-start items-start ${isExpanded && "h-full"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}
+            >
+              <span className="sr-only">プロンプトを入力</span>
+
+              {!hasInput && (
+                <AnimatePresence
+                  mode="wait"
+                  initial={false}
+                  presenceAffectsLayout={false}
+                >
+                  <motion.span
+                    key={placeholderIndex}
+                    layout={false}
+                    initial={
+                      {
+                        "--mask-x": "100%",
+                      } as import("motion/react").TargetAndTransition
+                    }
+                    animate={
+                      {
+                        "--mask-x": "50%",
+                      } as import("motion/react").TargetAndTransition
+                    }
+                    exit={
+                      {
+                        "--mask-x": "0%",
+                      } as import("motion/react").TargetAndTransition
+                    }
+                    transition={THEME}
+                    aria-hidden="true"
+                    style={{
+                      maskImage:
+                        "linear-gradient(to right, transparent 0%, transparent 15%, black 30%, black 70%, transparent 85%, transparent 100%)",
+                      WebkitMaskImage:
+                        "linear-gradient(to right, transparent 0%, transparent 15%, black 30%, black 70%, transparent 85%, transparent 100%)",
+                      maskSize: "500% 100%",
+                      WebkitMaskSize: "500% 100%",
+                      maskRepeat: "no-repeat",
+                      WebkitMaskRepeat: "no-repeat",
+                      maskPosition: "var(--mask-x) 0%",
+                      WebkitMaskPosition: "var(--mask-x) 0%",
+                    }}
+                    className="absolute inset-0 p-2 w-full pointer-events-none text-lg text-fore-9 text-left font-sans-serif font-medium truncate block"
+                  >
+                    {PLACEHOLDERS[placeholderIndex]}
+                  </motion.span>
+                </AnimatePresence>
+              )}
+
+              <motion.div
                 layout="position"
                 transition={TRANSITION}
-                className="text-center font-sans-serif text-3xl font-light text-fore-1"
+                ref={scrollRef}
+                className={`overflow-y-auto p-2 flex justify-center relative w-full ${isAdjusted || isScrollable || isExpanded ? "items-start" : "items-center"} ${isExpanded ? " h-full max-h-full" : "max-h-34"}`}
               >
-                何か手伝えることはある？
-              </motion.h1>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                <motion.textarea
+                  autoFocus
+                  rows={1}
+                  spellCheck={false}
+                  ref={textareaRef}
+                  value={value}
+                  onChange={(e) => {
+                    setValue(e.target.value);
+                  }}
+                  disabled={isLoading}
+                  onKeyDown={handleTextareaKeyDown}
+                  id="prompt"
+                  name="prompt"
+                  placeholder=""
+                  className="overflow-y-auto block outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
+                />
+              </motion.div>
+            </label>
 
-        {aiReply && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`w-full p-4 rounded-2xl bg-back-2 border border-back-5 text-fore-1 font-sans-serif text-left ${isLoading ? "animate-pulse opacity-70" : ""}`}
-          >
-            <p className="whitespace-pre-wrap">{aiReply}</p>
-          </motion.div>
-        )}
+            <AnimatePresence
+              mode="popLayout"
+              initial={false}
+              presenceAffectsLayout={false}
+            >
+              {hasInput && (
+                <motion.div
+                  layout="position"
+                  initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                  animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                  exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                  transition={TRANSITION}
+                  className={`${isAdjusted ? "col-start-3 row-start-1 self-start" : ""}`}
+                >
+                  <Tooltip
+                    content="削除"
+                    placement={isAdjusted ? "left" : "bottom"}
+                    shortcut={{
+                      mac: ["⌘", "Backspace"],
+                      windows: ["Ctrl", "Backspace"],
+                    }}
+                  >
+                    <Button
+                      aria-label="Clear"
+                      onPress={handleClear}
+                      shape="circle"
+                    >
+                      <Delete className="text-fore-1 all" />
+                    </Button>
+                  </Tooltip>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-        <motion.form
-          layout
-          transition={TRANSITION}
-          ref={formRef}
-          onSubmit={handleSubmit}
-          className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
-                        ${isExpanded ? "h-full" : "max-h-full"}
-                        ${isAdjusted || isExpanded
-              ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
-              : hasInput
-                ? "grid-cols-[auto_1fr_auto_auto_auto]"
-                : "grid-cols-[auto_1fr_auto_auto]"
-            }`}
-        >
-          <Menu.Trigger>
+            <AnimatePresence
+              mode="popLayout"
+              initial={false}
+              presenceAffectsLayout={false}
+            >
+              {(isScrollable || isExpanded) && (
+                <motion.div
+                  layout="position"
+                  initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                  animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                  exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                  transition={TRANSITION}
+                  className={`${isAdjusted ? "col-start-3 row-start-2 self-start" : ""}`}
+                >
+                  <Tooltip
+                    content={isExpanded ? "縮小" : "拡大"}
+                    placement={isAdjusted ? "left" : "bottom"}
+                    shortcut={{
+                      mac: ["⌘", "Space"],
+                      windows: ["Ctrl", "Space"],
+                    }}
+                  >
+                    <Button
+                      aria-label={isExpanded ? "Minimize" : "Maximize"}
+                      onPress={() => setIsExpanded(!isExpanded)}
+                      shape="circle"
+                    >
+                      <AnimatePresence
+                        mode="popLayout"
+                        initial={false}
+                        presenceAffectsLayout={false}
+                      >
+                        {isExpanded ? (
+                          <motion.div
+                            key="maximize"
+                            initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                            animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                            exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                            transition={TRANSITION}
+                            className="all"
+                          >
+                            <Minimize2 className="text-fore-1" />
+                          </motion.div>
+                        ) : (
+                          <motion.div
+                            key="minimize"
+                            initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                            animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                            exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                            transition={TRANSITION}
+                            className="all"
+                          >
+                            <Maximize2 className="text-fore-1" />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </Button>
+                  </Tooltip>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`${isAdjusted ? "col-start-1 row-start-3" : ""}`}
+              className={`${isAdjusted ? "col-start-2 row-start-3" : ""}`}
             >
-              <Tooltip content="添付">
-                <Button aria-label="Attatch" shape="circle" className="bg-back-2">
-                  <Plus className="text-fore-1 all" />
+              <Tooltip content="マイク">
+                <Button aria-label="Mic" shape="circle" className="bg-back-2">
+                  <Mic className="text-fore-1 all" />
                 </Button>
               </Tooltip>
             </motion.div>
 
-            <Menu.Content>
-              <Menu.Item icon={<Paperclip />} shortcut="Ctrl+U">
-                ファイルまたは写真を追加
-              </Menu.Item>
-              <Menu.Item icon={<Camera />}>スクリーンショットを撮る</Menu.Item>
-
-              <Menu.Separator />
-
-              <Menu.SubmenuTrigger>
-                <Menu.Item icon={<Folder />}>プロジェクトに追加</Menu.Item>
-                <Menu.Content>
-                  <Menu.Item>プロジェクト A</Menu.Item>
-                  <Menu.Item>プロジェクト B</Menu.Item>
-                </Menu.Content>
-              </Menu.SubmenuTrigger>
-
-              <Menu.Item icon={<Puzzle />}>スキル</Menu.Item>
-              <Menu.Item icon={<Plug />}>コネクタを追加</Menu.Item>
-              <Menu.Item icon={<Zap />}>プラグインを追加...</Menu.Item>
-
-              <Menu.Separator />
-
-              <Menu.Section selectionMode="single" defaultSelectedKeys={["web-search"]}>
-                <Menu.Item id="web-search" icon={<Globe />}>
-                  ウェブ検索
-                </Menu.Item>
-              </Menu.Section>
-            </Menu.Content>
-          </Menu.Trigger>
-
-          <label
-            htmlFor="prompt"
-            className={`relative w-full flex justify-start items-start ${isExpanded && "h-full"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}
-          >
-            <span className="sr-only">プロンプトを入力</span>
-
-            {!hasInput && (
-              <AnimatePresence
-                mode="wait"
-                initial={false}
-                presenceAffectsLayout={false}
-              >
-                <motion.span
-                  key={placeholderIndex}
-                  layout={false}
-                  initial={
-                    {
-                      "--mask-x": "100%",
-                    } as import("motion/react").TargetAndTransition
-                  }
-                  animate={
-                    {
-                      "--mask-x": "50%",
-                    } as import("motion/react").TargetAndTransition
-                  }
-                  exit={
-                    {
-                      "--mask-x": "0%",
-                    } as import("motion/react").TargetAndTransition
-                  }
-                  transition={THEME}
-                  aria-hidden="true"
-                  style={{
-                    maskImage:
-                      "linear-gradient(to right, transparent 0%, transparent 15%, black 30%, black 70%, transparent 85%, transparent 100%)",
-                    WebkitMaskImage:
-                      "linear-gradient(to right, transparent 0%, transparent 15%, black 30%, black 70%, transparent 85%, transparent 100%)",
-                    maskSize: "500% 100%",
-                    WebkitMaskSize: "500% 100%",
-                    maskRepeat: "no-repeat",
-                    WebkitMaskRepeat: "no-repeat",
-                    maskPosition: "var(--mask-x) 0%",
-                    WebkitMaskPosition: "var(--mask-x) 0%",
-                  }}
-                  className="absolute inset-0 p-2 w-full pointer-events-none text-base text-fore-9 text-left font-sans-serif font-medium truncate block"
-                >
-                  {PLACEHOLDERS[placeholderIndex]}
-                </motion.span>
-              </AnimatePresence>
-            )}
-
             <motion.div
               layout="position"
               transition={TRANSITION}
-              ref={scrollRef}
-              className={`overflow-y-auto p-2 flex justify-center relative w-full ${isAdjusted || isScrollable || isExpanded ? "items-start" : "items-center"} ${isExpanded ? " h-full max-h-full" : "max-h-34"}`}
+              className={`${isAdjusted ? "col-start-3 row-start-3" : ""}`}
             >
-              <motion.textarea
-                autoFocus
-                rows={1}
-                spellCheck={false}
-                ref={textareaRef}
-                value={value}
-                onChange={(e) => {
-                  setValue(e.target.value);
-                }}
-                disabled={isLoading}
-                onKeyDown={handleTextareaKeyDown}
-                id="prompt"
-                name="prompt"
-                placeholder=""
-                className="overflow-y-auto block outline-none resize-none w-full animate-caret text-base text-fore-1 text-left font-sans-serif font-medium"
-              />
+              <Tooltip content={hasInput ? "送信" : "会話"}>
+                <Button
+                  type="submit"
+                  isDisabled={isLoading}
+                  aria-label={hasInput ? "Send" : "Converse"}
+                  shape="circle"
+                  color="primary"
+                >
+                  <AnimatePresence
+                    mode="popLayout"
+                    initial={false}
+                    presenceAffectsLayout={false}
+                  >
+                    {hasInput ? (
+                      <motion.div
+                        key="send"
+                        initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                        animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                        exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                        transition={TRANSITION}
+                        className="all"
+                      >
+                        <ArrowUp className="text-back-1_" />
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="converse"
+                        initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                        animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                        exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                        transition={TRANSITION}
+                        className="all"
+                      >
+                        <AudioLines className="text-back-1_" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </Button>
+              </Tooltip>
             </motion.div>
-          </label>
-
-          <AnimatePresence
-            mode="popLayout"
-            initial={false}
-            presenceAffectsLayout={false}
-          >
-            {hasInput && (
-              <motion.div
-                layout="position"
-                initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                transition={TRANSITION}
-                className={`${isAdjusted ? "col-start-3 row-start-1 self-start" : ""}`}
-              >
-                <Tooltip
-                  content="削除"
-                  placement={isAdjusted ? "left" : "bottom"}
-                  shortcut={{ mac: ["⌘", "Backspace"], windows: ["Ctrl", "Backspace"] }}
-                >
-                  <Button
-                    aria-label="Clear"
-                    onPress={handleClear}
-                    shape="circle"
-                  >
-                    <Delete className="text-fore-1 all" />
-                  </Button>
-                </Tooltip>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <AnimatePresence
-            mode="popLayout"
-            initial={false}
-            presenceAffectsLayout={false}
-          >
-            {(isScrollable || isExpanded) && (
-              <motion.div
-                layout="position"
-                initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                transition={TRANSITION}
-                className={`${isAdjusted ? "col-start-3 row-start-2 self-start" : ""}`}
-              >
-                <Tooltip
-                  content={isExpanded ? "縮小" : "拡大"}
-                  placement={isAdjusted ? "left" : "bottom"}
-                  shortcut={{ mac: ["⌘", "Space"], windows: ["Ctrl", "Space"] }}
-                >
-                  <Button
-                    aria-label={isExpanded ? "Minimize" : "Maximize"}
-                    onPress={() => setIsExpanded(!isExpanded)}
-                    shape="circle"
-                  >
-                    <AnimatePresence
-                      mode="popLayout"
-                      initial={false}
-                      presenceAffectsLayout={false}
-                    >
-                      {isExpanded ? (
-                        <motion.div
-                          key="maximize"
-                          initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                          animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                          exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                          transition={TRANSITION}
-                          className="all"
-                        >
-                          <Minimize2 className="text-fore-1" />
-                        </motion.div>
-                      ) : (
-                        <motion.div
-                          key="minimize"
-                          initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                          animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                          exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                          transition={TRANSITION}
-                          className="all"
-                        >
-                          <Maximize2 className="text-fore-1" />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </Button>
-                </Tooltip>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <motion.div
-            layout="position"
-            transition={TRANSITION}
-            className={`${isAdjusted ? "col-start-2 row-start-3" : ""}`}
-          >
-            <Tooltip content="マイク">
-              <Button aria-label="Mic" shape="circle" className="bg-back-2">
-                <Mic className="text-fore-1 all" />
-              </Button>
-            </Tooltip>
-          </motion.div>
-
-          <motion.div
-            layout="position"
-            transition={TRANSITION}
-            className={`${isAdjusted ? "col-start-3 row-start-3" : ""}`}
-          >
-            <Tooltip content={hasInput ? "送信" : "会話"}>
-              <Button
-                type="submit"
-                isDisabled={isLoading}
-                aria-label={hasInput ? "Send" : "Converse"}
-                shape="circle"
-                color="primary"
-              >
-                <AnimatePresence
-                  mode="popLayout"
-                  initial={false}
-                  presenceAffectsLayout={false}
-                >
-                  {hasInput ? (
-                    <motion.div
-                      key="send"
-                      initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                      exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                      transition={TRANSITION}
-                      className="all"
-                    >
-                      <ArrowUp className="text-back-1_" />
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="converse"
-                      initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
-                      animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                      exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
-                      transition={TRANSITION}
-                      className="all"
-                    >
-                      <AudioLines className="text-back-1_" />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </Button>
-            </Tooltip>
-          </motion.div>
-        </motion.form>
-      </LayoutGroup>
-    </div>
+          </motion.form>
+        </LayoutGroup>
+      </div>
+    </>
   );
 }

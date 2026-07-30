@@ -64,7 +64,7 @@ export function Tooltip({
                 `}
       >
         <span className="flex justify-center items-center">
-          <span className="whitespace-nowrap text-sm px-1 font-medium text-center font-sans-serif text-back-1">
+          <span className="whitespace-nowrap text-sm px-1 font-light text-center font-sans-serif text-back-1">
             {content}
           </span>
 
@@ -73,7 +73,7 @@ export function Tooltip({
               {resolvedKeys.map((key, index) => (
                 <kbd
                   key={key}
-                  className={`${getKeyRounding(index, resolvedKeys.length)} whitespace-nowrap bg-fore-5/50 px-1 py-0.5 text-xs font-medium text-center font-sans-serif text-back-5`}
+                  className={`${getKeyRounding(index, resolvedKeys.length)} whitespace-nowrap bg-fore-5/50 px-1 py-0.5 text-xs font-light text-center font-sans-serif text-back-5`}
                 >
                   {key}
                 </kbd>
