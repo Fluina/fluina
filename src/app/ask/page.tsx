@@ -2,26 +2,32 @@
 import {
   ArrowUp,
   AudioLines,
+  Camera,
+  Delete,
+  Folder,
+  Globe,
   Maximize2,
   Mic,
   Minimize2,
-  Plus,
-  Delete,
   Paperclip,
-  Camera,
-  Folder,
-  Puzzle,
   Plug,
+  Plus,
+  Puzzle,
   Zap,
-  Globe,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
 import { OverlayScrollbars } from "overlayscrollbars";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
-import { Button, Tooltip, Menu } from "@/components/parts";
+import { Button, Menu, Tooltip } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useOS } from "@/lib/os";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
@@ -59,6 +65,9 @@ export default function Ask() {
   const hasText = value.length > 0;
   const hasInput = value.trim().length > 0;
 
+  const osInstanceRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
+    null,
+  );
   const singleLineRef = useRef<number>(0);
   const singleLineWidthRef = useRef<number>(0);
   const isComposingRef = useRef(false);
@@ -67,10 +76,75 @@ export default function Ask() {
   //    Textarea
   //  ================================================================
 
+  const recalcTextareaHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+
+    if (!textarea) return;
+
+    if (singleLineRef.current === 0) {
+      const originalValue = textarea.value;
+
+      if (originalValue && originalValue !== value) {
+        setValue(originalValue);
+      }
+
+      textarea.value = "";
+      textarea.style.height = "auto";
+      singleLineRef.current = textarea.scrollHeight;
+      textarea.value = originalValue;
+    }
+
+    if (!isAdjusted) {
+      singleLineWidthRef.current = textarea.getBoundingClientRect().width;
+    }
+
+    const originalWidth = textarea.style.width;
+
+    if (isAdjusted && singleLineWidthRef.current > 0) {
+      textarea.style.width = `${singleLineWidthRef.current}px`;
+    }
+
+    textarea.style.height = "auto";
+    const checkHeight = textarea.scrollHeight;
+
+    if (isAdjusted && singleLineWidthRef.current > 0) {
+      textarea.style.width = originalWidth;
+    }
+
+    const nextIsAdjusted = checkHeight > singleLineRef.current;
+
+    if (nextIsAdjusted !== isAdjusted) {
+      setIsAdjusted(nextIsAdjusted);
+    } else {
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    }
+
+    const max5LinesHeight = singleLineRef.current * 5;
+    const nextIsScrollable = checkHeight > max5LinesHeight;
+
+    if (nextIsScrollable !== isScrollable) {
+      setIsScrollable(nextIsScrollable);
+    }
+
+    if (!nextIsScrollable) {
+      setIsExpanded((prev) => (prev ? false : prev));
+    }
+  }, [value, isAdjusted, isScrollable]);
+
+  const handleScrollbarPointerDown = (
+    e: React.PointerEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>
+  ) => {
+    const target = e.target as HTMLElement;
+    if (target.closest(".os-scrollbar")) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
   useEffect(() => {
     if (!scrollRef.current) return;
 
-    const osInstance = OverlayScrollbars(scrollRef.current, {
+    const instance = OverlayScrollbars(scrollRef.current, {
       scrollbars: {
         theme: OS_THEME_TEXTAREA,
         autoHide: "leave",
@@ -81,10 +155,52 @@ export default function Ask() {
       },
     });
 
+    osInstanceRef.current = instance;
+
     return () => {
-      osInstance.destroy();
+      instance.destroy();
+      osInstanceRef.current = null;
     };
   }, []);
+
+  useLayoutEffect(() => {
+    if (value === undefined) return;
+
+    recalcTextareaHeight();
+
+    if (osInstanceRef.current) {
+      const _expanded = isExpanded;
+      requestAnimationFrame(() => {
+        if (_expanded || !_expanded) {
+          osInstanceRef.current?.update(true);
+        }
+      });
+    }
+  }, [value, isExpanded, recalcTextareaHeight]);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const handleResize = () => {
+      singleLineRef.current = 0;
+      recalcTextareaHeight();
+    };
+
+    if (vv) {
+      vv.addEventListener("resize", handleResize);
+      vv.addEventListener("scroll", handleResize);
+    }
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener("resize", handleResize);
+        vv.removeEventListener("scroll", handleResize);
+      }
+
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [recalcTextareaHeight]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -117,101 +233,47 @@ export default function Ask() {
       setAiReply(data.reply);
     } catch (error) {
       console.error("Connection Error:", error);
-      setAiReply("エラーが発生しました。バックエンドサーバーが起動しているか確認してください。");
+      setAiReply(
+        "エラーが発生しました。バックエンドサーバーが起動しているか確認してください。",
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const recalcTextareaHeight = useCallback(() => {
-    const textarea = textareaRef.current;
-
-    if (!textarea) return;
-
-    if (singleLineRef.current === 0) {
-      const originalValue = textarea.value;
-
-      if (originalValue && originalValue !== value) {
-        setValue(originalValue);
-      }
-
-      textarea.value = "";
-      textarea.style.height = "auto";
-      singleLineRef.current = textarea.scrollHeight;
-      textarea.value = originalValue;
-    }
-
-    if (!isAdjusted) {
-      singleLineWidthRef.current = textarea.getBoundingClientRect().width;
-    }
-
-    const originalWidth = textarea.style.width;
-
-    if (isAdjusted && singleLineWidthRef.current > 0) {
-      textarea.style.width = `${singleLineWidthRef.current}px`;
-    }
-
-    textarea.style.height = "auto";
-
-    const checkHeight = textarea.scrollHeight;
-
-    if (isAdjusted && singleLineWidthRef.current > 0) {
-      textarea.style.width = originalWidth;
-    }
-
-    const nextIsAdjusted = checkHeight > singleLineRef.current;
-
-    if (nextIsAdjusted !== isAdjusted) {
-      setIsAdjusted(nextIsAdjusted);
-    } else {
-      textarea.style.height = `${textarea.scrollHeight}px`;
-    }
-
-    const nextIsScrollable = textarea.scrollHeight >= 136;
-
-    if (nextIsScrollable !== isScrollable) {
-      setIsScrollable(nextIsScrollable);
-    }
-
-    if (!nextIsScrollable && isExpanded) {
-      setIsExpanded(false);
-    }
-  }, [value, isAdjusted, isScrollable, isExpanded]);
-
-  useLayoutEffect(() => {
-    if (value === undefined) return;
-
-    recalcTextareaHeight();
-  }, [value, recalcTextareaHeight]);
-
-  useEffect(() => {
-    const vv = window.visualViewport;
-
-    if (!vv) return;
-
-    vv.addEventListener("resize", recalcTextareaHeight);
-    vv.addEventListener("scroll", recalcTextareaHeight);
-
-    return () => {
-      vv.removeEventListener("resize", recalcTextareaHeight);
-      vv.removeEventListener("scroll", recalcTextareaHeight);
-    };
-  }, [recalcTextareaHeight]);
+  const dynamicMaxHeight =
+    singleLineRef.current > 0
+      ? `${singleLineRef.current * 5 + 16}px`
+      : undefined;
 
   const handleTextareaKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement>,
   ) => {
-    if (e.nativeEvent.isComposing || isComposingRef.current) return;
+    if (
+      e.nativeEvent.isComposing ||
+      isComposingRef.current ||
+      e.keyCode === 229
+    ) {
+      return;
+    }
 
     const isMobile =
       /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
         navigator.userAgent,
       ) ||
-      ("maxTouchPoints" in navigator && navigator.maxTouchPoints > 0 && window.innerWidth <= 768);
+      ("maxTouchPoints" in navigator &&
+        navigator.maxTouchPoints > 0 &&
+        window.innerWidth <= 768);
 
     if (isMobile) return;
 
-    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
       if (!hasInput) return;
 
       e.preventDefault();
@@ -223,9 +285,10 @@ export default function Ask() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const modifierPressed = os === "mac"
-        ? (e.metaKey && e.shiftKey && e.altKey)
-        : (e.ctrlKey && e.shiftKey && e.altKey);
+      const modifierPressed =
+        os === "mac"
+          ? e.metaKey && e.shiftKey && e.altKey
+          : e.ctrlKey && e.shiftKey && e.altKey;
 
       if (!modifierPressed) return;
 
@@ -374,7 +437,10 @@ export default function Ask() {
             className="fixed inset-0 p-2 bg-back-0/50 z-1000 pointer-events-none flex items-center justify-center"
           >
             <div className="animate-pulse flex flex-col gap-2 items-center justify-center size-full border-2 border-dashed border-fore-1 rounded-2xl">
-              <Paperclip className="text-fore-1 text-shadow-lg animate-bounce" size={64} />
+              <Paperclip
+                className="text-fore-1 text-shadow-lg animate-bounce"
+                size={64}
+              />
 
               <p className="text-center font-sans-serif text-2xl font-medium text-fore-1 text-shadow-lg">
                 {dragFileCount}ファイルをドロップして追加
@@ -465,9 +531,16 @@ export default function Ask() {
               >
                 <Tooltip
                   content="添付"
-                  shortcut={{ mac: ["⌘", "Shift", "Option", "A"], windows: ["Ctrl", "Shift", "Alt", "A"] }}
+                  shortcut={{
+                    mac: ["⌘", "Shift", "Option", "A"],
+                    windows: ["Ctrl", "Shift", "Alt", "A"],
+                  }}
                 >
-                  <Button aria-label="Attatch" shape="circle" className="bg-back-2">
+                  <Button
+                    aria-label="Attatch"
+                    shape="circle"
+                    className="bg-back-2"
+                  >
                     <Plus className="text-fore-1 all" />
                   </Button>
                 </Tooltip>
@@ -477,7 +550,9 @@ export default function Ask() {
                 <Menu.Item icon={<Paperclip />} shortcut="Ctrl+Shift+Alt+U">
                   ファイルまたは写真を追加
                 </Menu.Item>
-                <Menu.Item icon={<Camera />}>スクリーンショットを撮る</Menu.Item>
+                <Menu.Item icon={<Camera />}>
+                  スクリーンショットを撮る
+                </Menu.Item>
 
                 <Menu.Separator />
 
@@ -495,7 +570,10 @@ export default function Ask() {
 
                 <Menu.Separator />
 
-                <Menu.Section selectionMode="single" defaultSelectedKeys={["web-search"]}>
+                <Menu.Section
+                  selectionMode="single"
+                  defaultSelectedKeys={["web-search"]}
+                >
                   <Menu.Item id="web-search" icon={<Globe />}>
                     ウェブ検索
                   </Menu.Item>
@@ -503,11 +581,10 @@ export default function Ask() {
               </Menu.Content>
             </Menu.Trigger>
 
-            <label
-              htmlFor="prompt"
+            <div
               className={`relative w-full flex justify-start items-start ${isExpanded && "h-full"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}
             >
-              <span className="sr-only">プロンプトを入力</span>
+              <label htmlFor="prompt" className="sr-only">プロンプトを入力</label>
 
               {!hasText && (
                 <AnimatePresence
@@ -547,7 +624,7 @@ export default function Ask() {
                       maskPosition: "var(--mask-x) 0%",
                       WebkitMaskPosition: "var(--mask-x) 0%",
                     }}
-                    className="absolute inset-0 p-2 w-full pointer-events-none text-lg text-fore-9 text-left font-sans-serif font-medium truncate block"
+                    className="absolute inset-0 p-2 w-full pointer-events-none text-lg leading-normal text-fore-9 text-left font-sans-serif font-medium truncate block"
                   >
                     {PLACEHOLDERS[placeholderIndex]}
                   </motion.span>
@@ -558,7 +635,12 @@ export default function Ask() {
                 layout="position"
                 transition={TRANSITION}
                 ref={scrollRef}
-                className={`overflow-y-auto p-2 flex justify-center relative w-full ${isAdjusted || isScrollable || isExpanded ? "items-start" : "items-center"} ${isExpanded ? " h-full max-h-full" : "max-h-34"}`}
+                onPointerDown={handleScrollbarPointerDown}
+                onMouseDown={handleScrollbarPointerDown}
+                style={{
+                  maxHeight: isExpanded ? "100%" : dynamicMaxHeight,
+                }}
+                className={`p-2 flex justify-center relative w-full ${isAdjusted || isScrollable || isExpanded ? "items-start" : "items-center"} ${isExpanded ? "h-full" : ""}`}
               >
                 <motion.textarea
                   autoFocus
@@ -582,10 +664,10 @@ export default function Ask() {
                   id="prompt"
                   name="prompt"
                   placeholder=""
-                  className="overflow-y-auto block outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
+                  className="leading-normal overflow-hidden block outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
                 />
               </motion.div>
-            </label>
+            </div>
 
             <AnimatePresence
               mode="popLayout"
@@ -604,7 +686,10 @@ export default function Ask() {
                   <Tooltip
                     content="削除"
                     placement={isAdjusted ? "left" : "bottom"}
-                    shortcut={{ mac: ["⌘", "Shift", "Option", "Backspace"], windows: ["Ctrl", "Shift", "Alt", "Backspace"] }}
+                    shortcut={{
+                      mac: ["⌘", "Shift", "Option", "Backspace"],
+                      windows: ["Ctrl", "Shift", "Alt", "Backspace"],
+                    }}
                   >
                     <Button
                       aria-label="Clear"
@@ -635,7 +720,10 @@ export default function Ask() {
                   <Tooltip
                     content={isExpanded ? "縮小" : "拡大"}
                     placement={isAdjusted ? "left" : "bottom"}
-                    shortcut={{ mac: ["⌘", "Shift", "Option", "Space"], windows: ["Ctrl", "Shift", "Alt", "Space"] }}
+                    shortcut={{
+                      mac: ["⌘", "Shift", "Option", "Space"],
+                      windows: ["Ctrl", "Shift", "Alt", "Space"],
+                    }}
                   >
                     <Button
                       aria-label={isExpanded ? "Minimize" : "Maximize"}
@@ -684,7 +772,10 @@ export default function Ask() {
             >
               <Tooltip
                 content="マイク"
-                shortcut={{ mac: ["⌘", "Shift", "Option", "M"], windows: ["Ctrl", "Shift", "Alt", "M"] }}
+                shortcut={{
+                  mac: ["⌘", "Shift", "Option", "M"],
+                  windows: ["Ctrl", "Shift", "Alt", "M"],
+                }}
               >
                 <Button aria-label="Mic" shape="circle" className="bg-back-2">
                   <Mic className="text-fore-1 all" />
@@ -699,7 +790,10 @@ export default function Ask() {
             >
               <Tooltip
                 content={hasInput ? "送信" : "会話"}
-                shortcut={{ mac: ["⌘", "Shift", "Option", "S"], windows: ["Ctrl", "Shift", "Alt", "S"] }}
+                shortcut={{
+                  mac: ["⌘", "Shift", "Option", "S"],
+                  windows: ["Ctrl", "Shift", "Alt", "S"],
+                }}
               >
                 <Button
                   type="submit"
