@@ -56,7 +56,9 @@ export default function Ask() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const hasInput = value.length > 0;
+  const hasText = value.length > 0;
+  const hasInput = value.trim().length > 0;
+
   const singleLineRef = useRef<number>(0);
   const singleLineWidthRef = useRef<number>(0);
   const isComposingRef = useRef(false);
@@ -86,10 +88,10 @@ export default function Ask() {
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-
     if (!hasInput || isLoading) return;
 
-    const userPrompt = value;
+    const userPrompt = value.trim();
+
     setValue("");
     setIsExpanded(false);
 
@@ -201,16 +203,24 @@ export default function Ask() {
   ) => {
     if (e.nativeEvent.isComposing || isComposingRef.current) return;
 
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent,
+      ) ||
+      ("maxTouchPoints" in navigator && navigator.maxTouchPoints > 0 && window.innerWidth <= 768);
+
+    if (isMobile) return;
+
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!hasInput) return;
+
       e.preventDefault();
 
-      if (hasInput) {
-        formRef.current?.requestSubmit();
-        textareaRef.current?.focus();
-      }
+      formRef.current?.requestSubmit();
+      textareaRef.current?.focus();
     }
   };
-  
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const modifierPressed = os === "mac"
@@ -270,14 +280,14 @@ export default function Ask() {
   }, [os, isScrollable, isExpanded, hasInput]);
 
   useEffect(() => {
-    if (hasInput) return;
+    if (hasText) return;
 
     const interval = setInterval(() => {
       setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDERS.length);
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [hasInput]);
+  }, [hasText]);
 
   const handleClear = () => {
     setValue("");
@@ -442,7 +452,7 @@ export default function Ask() {
                         ${isExpanded ? "h-full" : "max-h-full"}
                         ${isAdjusted || isExpanded
                 ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
-                : hasInput
+                : hasText
                   ? "grid-cols-[auto_1fr_auto_auto_auto]"
                   : "grid-cols-[auto_1fr_auto_auto]"
               }`}
@@ -499,7 +509,7 @@ export default function Ask() {
             >
               <span className="sr-only">プロンプトを入力</span>
 
-              {!hasInput && (
+              {!hasText && (
                 <AnimatePresence
                   mode="wait"
                   initial={false}
@@ -582,7 +592,7 @@ export default function Ask() {
               initial={false}
               presenceAffectsLayout={false}
             >
-              {hasInput && (
+              {hasText && (
                 <motion.div
                   layout="position"
                   initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
