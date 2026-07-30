@@ -2,32 +2,26 @@
 import {
   ArrowUp,
   AudioLines,
-  Camera,
-  Delete,
-  Folder,
-  Globe,
   Maximize2,
   Mic,
   Minimize2,
-  Paperclip,
-  Plug,
   Plus,
+  Delete,
+  Paperclip,
+  Camera,
+  Folder,
   Puzzle,
+  Plug,
   Zap,
+  Globe,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
 import { OverlayScrollbars } from "overlayscrollbars";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
-import { Button, Menu, Tooltip } from "@/components/parts";
+import { Button, Tooltip, Menu } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useOS } from "@/lib/os";
 import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
@@ -65,6 +59,7 @@ export default function Ask() {
   const hasInput = value.length > 0;
   const singleLineRef = useRef<number>(0);
   const singleLineWidthRef = useRef<number>(0);
+  const isComposingRef = useRef(false);
 
   //  ================================================================
   //    Textarea
@@ -89,8 +84,8 @@ export default function Ask() {
     };
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
 
     if (!hasInput || isLoading) return;
 
@@ -120,9 +115,7 @@ export default function Ask() {
       setAiReply(data.reply);
     } catch (error) {
       console.error("Connection Error:", error);
-      setAiReply(
-        "エラーが発生しました。バックエンドサーバーが起動しているか確認してください。",
-      );
+      setAiReply("エラーが発生しました。バックエンドサーバーが起動しているか確認してください。");
     } finally {
       setIsLoading(false);
     }
@@ -206,31 +199,29 @@ export default function Ask() {
   const handleTextareaKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement>,
   ) => {
-    if (e.nativeEvent.isComposing) return;
+    if (e.nativeEvent.isComposing || isComposingRef.current) return;
 
-    const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
 
-    if (isTouchDevice) return;
-
-    if (e.key === "Enter") {
-      if (e.shiftKey) {
-        return;
-      } else {
-        e.preventDefault();
-
-        if (hasInput) {
-          formRef.current?.requestSubmit();
-          textareaRef.current?.focus();
-        }
+      if (hasInput) {
+        formRef.current?.requestSubmit();
+        textareaRef.current?.focus();
       }
     }
   };
-
+  
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const modifierPressed = os === "mac" ? e.metaKey : e.ctrlKey;
+      const modifierPressed = os === "mac"
+        ? (e.metaKey && e.shiftKey && e.altKey)
+        : (e.ctrlKey && e.shiftKey && e.altKey);
 
-      if (modifierPressed && e.key === "Backspace") {
+      if (!modifierPressed) return;
+
+      const key = e.key.toLowerCase();
+
+      if (e.key === "Backspace") {
         e.preventDefault();
         setValue("");
         setIsExpanded(false);
@@ -240,7 +231,7 @@ export default function Ask() {
         return;
       }
 
-      if (modifierPressed && e.code === "Space") {
+      if (e.code === "Space") {
         e.preventDefault();
 
         if (isScrollable || isExpanded) {
@@ -250,14 +241,24 @@ export default function Ask() {
         return;
       }
 
-      if (document.activeElement === textareaRef.current) return;
+      if (key === "a") {
+        e.preventDefault();
+        return;
+      }
 
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (key === "m") {
+        e.preventDefault();
+        return;
+      }
 
-      const isInputKey = e.key.length === 1 || e.key === "Backspace";
+      if (key === "s") {
+        e.preventDefault();
 
-      if (isInputKey) {
-        textareaRef.current?.focus();
+        if (hasInput) {
+          formRef.current?.requestSubmit();
+        }
+
+        return;
       }
     };
 
@@ -266,7 +267,7 @@ export default function Ask() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [os, isScrollable, isExpanded]);
+  }, [os, isScrollable, isExpanded, hasInput]);
 
   useEffect(() => {
     if (hasInput) return;
@@ -363,10 +364,7 @@ export default function Ask() {
             className="fixed inset-0 p-2 bg-back-0/50 z-1000 pointer-events-none flex items-center justify-center"
           >
             <div className="animate-pulse flex flex-col gap-2 items-center justify-center size-full border-2 border-dashed border-fore-1 rounded-2xl">
-              <Paperclip
-                className="text-fore-1 text-shadow-lg animate-bounce"
-                size={64}
-              />
+              <Paperclip className="text-fore-1 text-shadow-lg animate-bounce" size={64} />
 
               <p className="text-center font-sans-serif text-2xl font-medium text-fore-1 text-shadow-lg">
                 {dragFileCount}ファイルをドロップして追加
@@ -442,13 +440,12 @@ export default function Ask() {
             onSubmit={handleSubmit}
             className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
                         ${isExpanded ? "h-full" : "max-h-full"}
-                        ${
-                          isAdjusted || isExpanded
-                            ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
-                            : hasInput
-                              ? "grid-cols-[auto_1fr_auto_auto_auto]"
-                              : "grid-cols-[auto_1fr_auto_auto]"
-                        }`}
+                        ${isAdjusted || isExpanded
+                ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
+                : hasInput
+                  ? "grid-cols-[auto_1fr_auto_auto_auto]"
+                  : "grid-cols-[auto_1fr_auto_auto]"
+              }`}
           >
             <Menu.Trigger>
               <motion.div
@@ -456,24 +453,21 @@ export default function Ask() {
                 transition={TRANSITION}
                 className={`${isAdjusted && "col-start-1 row-start-3"}`}
               >
-                <Tooltip content="添付">
-                  <Button
-                    aria-label="Attatch"
-                    shape="circle"
-                    className="bg-back-2"
-                  >
+                <Tooltip
+                  content="添付"
+                  shortcut={{ mac: ["⌘", "Shift", "Option", "A"], windows: ["Ctrl", "Shift", "Alt", "A"] }}
+                >
+                  <Button aria-label="Attatch" shape="circle" className="bg-back-2">
                     <Plus className="text-fore-1 all" />
                   </Button>
                 </Tooltip>
               </motion.div>
 
               <Menu.Content>
-                <Menu.Item icon={<Paperclip />} shortcut="Ctrl+U">
+                <Menu.Item icon={<Paperclip />} shortcut="Ctrl+Shift+Alt+U">
                   ファイルまたは写真を追加
                 </Menu.Item>
-                <Menu.Item icon={<Camera />}>
-                  スクリーンショットを撮る
-                </Menu.Item>
+                <Menu.Item icon={<Camera />}>スクリーンショットを撮る</Menu.Item>
 
                 <Menu.Separator />
 
@@ -491,10 +485,7 @@ export default function Ask() {
 
                 <Menu.Separator />
 
-                <Menu.Section
-                  selectionMode="single"
-                  defaultSelectedKeys={["web-search"]}
-                >
+                <Menu.Section selectionMode="single" defaultSelectedKeys={["web-search"]}>
                   <Menu.Item id="web-search" icon={<Globe />}>
                     ウェブ検索
                   </Menu.Item>
@@ -570,6 +561,14 @@ export default function Ask() {
                   }}
                   disabled={isLoading}
                   onKeyDown={handleTextareaKeyDown}
+                  onCompositionStart={() => {
+                    isComposingRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    setTimeout(() => {
+                      isComposingRef.current = false;
+                    }, 0);
+                  }}
                   id="prompt"
                   name="prompt"
                   placeholder=""
@@ -595,10 +594,7 @@ export default function Ask() {
                   <Tooltip
                     content="削除"
                     placement={isAdjusted ? "left" : "bottom"}
-                    shortcut={{
-                      mac: ["⌘", "Backspace"],
-                      windows: ["Ctrl", "Backspace"],
-                    }}
+                    shortcut={{ mac: ["⌘", "Shift", "Option", "Backspace"], windows: ["Ctrl", "Shift", "Alt", "Backspace"] }}
                   >
                     <Button
                       aria-label="Clear"
@@ -629,10 +625,7 @@ export default function Ask() {
                   <Tooltip
                     content={isExpanded ? "縮小" : "拡大"}
                     placement={isAdjusted ? "left" : "bottom"}
-                    shortcut={{
-                      mac: ["⌘", "Space"],
-                      windows: ["Ctrl", "Space"],
-                    }}
+                    shortcut={{ mac: ["⌘", "Shift", "Option", "Space"], windows: ["Ctrl", "Shift", "Alt", "Space"] }}
                   >
                     <Button
                       aria-label={isExpanded ? "Minimize" : "Maximize"}
@@ -679,7 +672,10 @@ export default function Ask() {
               transition={TRANSITION}
               className={`${isAdjusted ? "col-start-2 row-start-3" : ""}`}
             >
-              <Tooltip content="マイク">
+              <Tooltip
+                content="マイク"
+                shortcut={{ mac: ["⌘", "Shift", "Option", "M"], windows: ["Ctrl", "Shift", "Alt", "M"] }}
+              >
                 <Button aria-label="Mic" shape="circle" className="bg-back-2">
                   <Mic className="text-fore-1 all" />
                 </Button>
@@ -691,7 +687,10 @@ export default function Ask() {
               transition={TRANSITION}
               className={`${isAdjusted ? "col-start-3 row-start-3" : ""}`}
             >
-              <Tooltip content={hasInput ? "送信" : "会話"}>
+              <Tooltip
+                content={hasInput ? "送信" : "会話"}
+                shortcut={{ mac: ["⌘", "Shift", "Option", "S"], windows: ["Ctrl", "Shift", "Alt", "S"] }}
+              >
                 <Button
                   type="submit"
                   isDisabled={isLoading}

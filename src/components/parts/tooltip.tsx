@@ -24,7 +24,8 @@ function getKeyRounding(index: number, total: number): string {
   if (total === 1) return "rounded-xl";
   if (index === 0) return "rounded-l-xl rounded-r-sm";
   if (index === total - 1) return "rounded-r-xl rounded-l-sm";
-  return "rounded-xl";
+  
+  return "rounded-sm";
 }
 
 export function Tooltip({
