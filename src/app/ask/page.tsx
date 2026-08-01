@@ -69,6 +69,8 @@ export default function Ask() {
   const singleLineWidthRef = useRef<number>(0);
   const isComposingRef = useRef(false);
 
+  const osInstanceRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null);
+
   //  ================================================================
   //    Textarea
   //  ================================================================
@@ -87,8 +89,11 @@ export default function Ask() {
       },
     });
 
+    osInstanceRef.current = osInstance;
+
     return () => {
       osInstance.destroy();
+      osInstanceRef.current = null;
     };
   }, []);
 
@@ -144,9 +149,9 @@ export default function Ask() {
 
     const isAtBottom = scrollContainer
       ? scrollContainer.scrollHeight -
-          scrollContainer.scrollTop -
-          scrollContainer.clientHeight <
-        15
+      scrollContainer.scrollTop -
+      scrollContainer.clientHeight <
+      15
       : false;
 
     if (singleLineRef.current === 0) {
@@ -231,6 +236,16 @@ export default function Ask() {
       vv.removeEventListener("scroll", recalcTextareaHeight);
     };
   }, [recalcTextareaHeight]);
+
+  useEffect(() => {
+    if (isExpanded !== undefined) {
+      const timer = setTimeout(() => {
+        osInstanceRef.current?.update(true);
+      }, 500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [isExpanded]);
 
   const handleTextareaKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement>,
@@ -499,15 +514,17 @@ export default function Ask() {
             transition={TRANSITION}
             ref={formRef}
             onSubmit={handleSubmit}
+            onLayoutAnimationComplete={() => {
+              osInstanceRef.current?.update(true);
+            }}
             className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
                         ${isExpanded ? "h-full" : "max-h-full"}
-                        ${
-                          isAdjusted || isExpanded
-                            ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
-                            : hasText
-                              ? "grid-cols-[auto_1fr_auto_auto_auto]"
-                              : "grid-cols-[auto_1fr_auto_auto]"
-                        }`}
+                        ${isAdjusted || isExpanded
+                ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
+                : hasText
+                  ? "grid-cols-[auto_1fr_auto_auto_auto]"
+                  : "grid-cols-[auto_1fr_auto_auto]"
+              }`}
           >
             <Menu.Trigger>
               <motion.div
