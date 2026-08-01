@@ -65,9 +65,6 @@ export default function Ask() {
   const hasText = value.length > 0;
   const hasInput = value.trim().length > 0;
 
-  const osInstanceRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(
-    null,
-  );
   const singleLineRef = useRef<number>(0);
   const singleLineWidthRef = useRef<number>(0);
   const isComposingRef = useRef(false);
@@ -76,75 +73,10 @@ export default function Ask() {
   //    Textarea
   //  ================================================================
 
-  const recalcTextareaHeight = useCallback(() => {
-    const textarea = textareaRef.current;
-
-    if (!textarea) return;
-
-    if (singleLineRef.current === 0) {
-      const originalValue = textarea.value;
-
-      if (originalValue && originalValue !== value) {
-        setValue(originalValue);
-      }
-
-      textarea.value = "";
-      textarea.style.height = "auto";
-      singleLineRef.current = textarea.scrollHeight;
-      textarea.value = originalValue;
-    }
-
-    if (!isAdjusted) {
-      singleLineWidthRef.current = textarea.getBoundingClientRect().width;
-    }
-
-    const originalWidth = textarea.style.width;
-
-    if (isAdjusted && singleLineWidthRef.current > 0) {
-      textarea.style.width = `${singleLineWidthRef.current}px`;
-    }
-
-    textarea.style.height = "auto";
-    const checkHeight = textarea.scrollHeight;
-
-    if (isAdjusted && singleLineWidthRef.current > 0) {
-      textarea.style.width = originalWidth;
-    }
-
-    const nextIsAdjusted = checkHeight > singleLineRef.current;
-
-    if (nextIsAdjusted !== isAdjusted) {
-      setIsAdjusted(nextIsAdjusted);
-    } else {
-      textarea.style.height = `${textarea.scrollHeight}px`;
-    }
-
-    const max5LinesHeight = singleLineRef.current * 5;
-    const nextIsScrollable = checkHeight > max5LinesHeight;
-
-    if (nextIsScrollable !== isScrollable) {
-      setIsScrollable(nextIsScrollable);
-    }
-
-    if (!nextIsScrollable) {
-      setIsExpanded((prev) => (prev ? false : prev));
-    }
-  }, [value, isAdjusted, isScrollable]);
-
-  const handleScrollbarPointerDown = (
-    e: React.PointerEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>
-  ) => {
-    const target = e.target as HTMLElement;
-    if (target.closest(".os-scrollbar")) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  };
-
   useEffect(() => {
     if (!scrollRef.current) return;
 
-    const instance = OverlayScrollbars(scrollRef.current, {
+    const osInstance = OverlayScrollbars(scrollRef.current, {
       scrollbars: {
         theme: OS_THEME_TEXTAREA,
         autoHide: "leave",
@@ -155,52 +87,10 @@ export default function Ask() {
       },
     });
 
-    osInstanceRef.current = instance;
-
     return () => {
-      instance.destroy();
-      osInstanceRef.current = null;
+      osInstance.destroy();
     };
   }, []);
-
-  useLayoutEffect(() => {
-    if (value === undefined) return;
-
-    recalcTextareaHeight();
-
-    if (osInstanceRef.current) {
-      const _expanded = isExpanded;
-      requestAnimationFrame(() => {
-        if (_expanded || !_expanded) {
-          osInstanceRef.current?.update(true);
-        }
-      });
-    }
-  }, [value, isExpanded, recalcTextareaHeight]);
-
-  useEffect(() => {
-    const vv = window.visualViewport;
-    const handleResize = () => {
-      singleLineRef.current = 0;
-      recalcTextareaHeight();
-    };
-
-    if (vv) {
-      vv.addEventListener("resize", handleResize);
-      vv.addEventListener("scroll", handleResize);
-    }
-
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      if (vv) {
-        vv.removeEventListener("resize", handleResize);
-        vv.removeEventListener("scroll", handleResize);
-      }
-
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [recalcTextareaHeight]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -241,10 +131,103 @@ export default function Ask() {
     }
   };
 
-  const dynamicMaxHeight =
-    singleLineRef.current > 0
-      ? `${singleLineRef.current * 5 + 16}px`
-      : undefined;
+  const recalcTextareaHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+
+    const scrollContainer =
+      scrollRef.current?.querySelector("[data-overlayscrollbars-viewport]") ||
+      scrollRef.current;
+
+    if (!textarea) return;
+
+    const currentScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+
+    const isAtBottom = scrollContainer
+      ? scrollContainer.scrollHeight -
+          scrollContainer.scrollTop -
+          scrollContainer.clientHeight <
+        15
+      : false;
+
+    if (singleLineRef.current === 0) {
+      const originalValue = textarea.value;
+
+      if (originalValue && originalValue !== value) {
+        setValue(originalValue);
+      }
+
+      textarea.value = "";
+      textarea.style.height = "auto";
+      singleLineRef.current = textarea.scrollHeight;
+      textarea.value = originalValue;
+    }
+
+    if (!isAdjusted) {
+      singleLineWidthRef.current = textarea.getBoundingClientRect().width;
+    }
+
+    const originalWidth = textarea.style.width;
+
+    if (isAdjusted && singleLineWidthRef.current > 0) {
+      textarea.style.width = `${singleLineWidthRef.current}px`;
+    }
+
+    textarea.style.height = "auto";
+
+    const checkHeight = textarea.scrollHeight;
+
+    if (isAdjusted && singleLineWidthRef.current > 0) {
+      textarea.style.width = originalWidth;
+    }
+
+    const nextIsAdjusted = checkHeight > singleLineRef.current;
+
+    if (nextIsAdjusted !== isAdjusted) {
+      setIsAdjusted(nextIsAdjusted);
+    } else {
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    }
+
+    const nextIsScrollable = textarea.scrollHeight >= 136;
+
+    if (nextIsScrollable !== isScrollable) {
+      setIsScrollable(nextIsScrollable);
+    }
+
+    if (!nextIsScrollable && isExpanded) {
+      setIsExpanded(false);
+    }
+
+    if (scrollContainer) {
+      if (isAtBottom) {
+        requestAnimationFrame(() => {
+          scrollContainer.scrollTop = scrollContainer.scrollHeight;
+        });
+      } else {
+        scrollContainer.scrollTop = currentScrollTop;
+      }
+    }
+  }, [value, isAdjusted, isScrollable, isExpanded]);
+
+  useLayoutEffect(() => {
+    if (value === undefined) return;
+
+    recalcTextareaHeight();
+  }, [value, recalcTextareaHeight]);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+
+    if (!vv) return;
+
+    vv.addEventListener("resize", recalcTextareaHeight);
+    vv.addEventListener("scroll", recalcTextareaHeight);
+
+    return () => {
+      vv.removeEventListener("resize", recalcTextareaHeight);
+      vv.removeEventListener("scroll", recalcTextareaHeight);
+    };
+  }, [recalcTextareaHeight]);
 
   const handleTextareaKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement>,
@@ -253,9 +236,8 @@ export default function Ask() {
       e.nativeEvent.isComposing ||
       isComposingRef.current ||
       e.keyCode === 229
-    ) {
+    )
       return;
-    }
 
     const isMobile =
       /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
@@ -516,12 +498,13 @@ export default function Ask() {
             onSubmit={handleSubmit}
             className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
                         ${isExpanded ? "h-full" : "max-h-full"}
-                        ${isAdjusted || isExpanded
-                ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
-                : hasText
-                  ? "grid-cols-[auto_1fr_auto_auto_auto]"
-                  : "grid-cols-[auto_1fr_auto_auto]"
-              }`}
+                        ${
+                          isAdjusted || isExpanded
+                            ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
+                            : hasText
+                              ? "grid-cols-[auto_1fr_auto_auto_auto]"
+                              : "grid-cols-[auto_1fr_auto_auto]"
+                        }`}
           >
             <Menu.Trigger>
               <motion.div
@@ -581,10 +564,11 @@ export default function Ask() {
               </Menu.Content>
             </Menu.Trigger>
 
-            <div
+            <label
+              htmlFor="prompt"
               className={`relative w-full flex justify-start items-start ${isExpanded && "h-full"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}
             >
-              <label htmlFor="prompt" className="sr-only">プロンプトを入力</label>
+              <span className="sr-only">プロンプトを入力</span>
 
               {!hasText && (
                 <AnimatePresence
@@ -624,7 +608,7 @@ export default function Ask() {
                       maskPosition: "var(--mask-x) 0%",
                       WebkitMaskPosition: "var(--mask-x) 0%",
                     }}
-                    className="absolute inset-0 p-2 w-full pointer-events-none text-lg leading-normal text-fore-9 text-left font-sans-serif font-medium truncate block"
+                    className="absolute inset-0 p-2 w-full pointer-events-none text-lg text-fore-9 text-left font-sans-serif font-medium truncate block"
                   >
                     {PLACEHOLDERS[placeholderIndex]}
                   </motion.span>
@@ -635,12 +619,7 @@ export default function Ask() {
                 layout="position"
                 transition={TRANSITION}
                 ref={scrollRef}
-                onPointerDown={handleScrollbarPointerDown}
-                onMouseDown={handleScrollbarPointerDown}
-                style={{
-                  maxHeight: isExpanded ? "100%" : dynamicMaxHeight,
-                }}
-                className={`p-2 flex justify-center relative w-full ${isAdjusted || isScrollable || isExpanded ? "items-start" : "items-center"} ${isExpanded ? "h-full" : ""}`}
+                className={`overflow-y-auto p-2 flex justify-center relative w-full ${isAdjusted || isScrollable || isExpanded ? "items-start" : "items-center"} ${isExpanded ? " h-full max-h-full" : "max-h-34"}`}
               >
                 <motion.textarea
                   autoFocus
@@ -664,10 +643,10 @@ export default function Ask() {
                   id="prompt"
                   name="prompt"
                   placeholder=""
-                  className="leading-normal overflow-hidden block outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
+                  className="overflow-y-auto block outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
                 />
               </motion.div>
-            </div>
+            </label>
 
             <AnimatePresence
               mode="popLayout"

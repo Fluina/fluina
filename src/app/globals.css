@@ -56,7 +56,8 @@
   --color-indigo: hsl(255, 100%, 50%);
   --color-violet: hsl(300, 100%, 50%);
 
-  --font-sans-serif: "D-DIN-Pro", "Mamelon", "ipamjm", sans-serif, ui-sans-serif, system-ui;
+  --font-sans-serif:
+    "D-DIN-Pro", "Mamelon", "ipamjm", sans-serif, ui-sans-serif, system-ui;
   --font-serif: "ipamjm", serif, ui-serif, system-ui;
 
   --transition-duration: 500ms;
@@ -183,7 +184,7 @@
 
   html,
   body {
-    @apply antialiased scroll-smooth
+    @apply antialiased scroll-smooth;
   }
 
   body * {
@@ -192,6 +193,146 @@
 
   body {
     @apply w-dvw h-dvh overflow-hidden overscroll-none font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-300-Light.woff2") format("woff2");
+    font-weight: 300;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-400-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-500-Medium.woff2") format("woff2");
+    font-weight: 500;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-600-SemiBold.woff2") format("woff2");
+    font-weight: 600;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-700-Bold.woff2") format("woff2");
+    font-weight: 700;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-800-ExtraBold.woff2") format("woff2");
+    font-weight: 800;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-900-Heavy.woff2") format("woff2");
+    font-weight: 900;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-300-Light.woff2")
+      format("woff2");
+    font-weight: 300;
+    font-style: italic;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-400-Regular.woff2")
+      format("woff2");
+    font-weight: 400;
+    font-style: italic;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-500-Medium.woff2")
+      format("woff2");
+    font-weight: 500;
+    font-style: italic;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-600-SemiBold.woff2")
+      format("woff2");
+    font-weight: 600;
+    font-style: italic;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-700-Bold.woff2")
+      format("woff2");
+    font-weight: 700;
+    font-style: italic;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-800-ExtraBold.woff2")
+      format("woff2");
+    font-weight: 800;
+    font-style: italic;
+  }
+
+  @font-face {
+    font-family: "D-DIN-Pro";
+    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-900-Heavy.woff2")
+      format("woff2");
+    font-weight: 900;
+    font-style: italic;
+  }
+
+  @font-face {
+    font-family: "Mamelon";
+    src: url("/fonts/sans-serif/Mamelon-3HiRegular.woff2") format("woff2");
+    font-weight: 300;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "Mamelon";
+    src: url("/fonts/sans-serif/Mamelon-3.5HiRegular.woff2") format("woff2");
+    font-weight: 300;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "Mamelon";
+    src: url("/fonts/sans-serif/Mamelon-4HiRegular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "Mamelon";
+    src: url("/fonts/sans-serif/Mamelon-5-Hi-Regular.woff2") format("woff2");
+    font-weight: 500;
+    font-style: normal;
+  }
+
+  @font-face {
+    font-family: "ipamjm";
+    src: url("/fonts/serif/ipamjm.woff2") format("woff2");
+    font-weight: 500;
+    font-style: normal;
   }
 
   *::selection {
@@ -231,26 +372,6 @@
 
 [data-overlayscrollbars-viewport] {
   scroll-behavior: auto;
-  touch-action: pan-y;
-}
-
-.os-scrollbar,
-.os-scrollbar-track,
-.os-scrollbar-handle {
-  pointer-events: auto !important;
-  user-select: none !important;
-  -webkit-user-select: none !important;
-}
-
-body:has(.os-scrollbar-active),
-body:has(.os-scrollbar-active) * {
-  user-select: none !important;
-  -webkit-user-select: none !important;
-}
-
-body:has(.os-scrollbar-active) textarea {
-  user-select: none !important;
-  -webkit-user-select: none !important;
 }
 
 .os-theme,
@@ -269,18 +390,26 @@ body:has(.os-scrollbar-active) textarea {
 .os-theme .os-scrollbar-handle,
 .os-theme-textarea .os-scrollbar-handle {
   transition-property: opacity, background-color, width, height;
-  transition-duration: calc(var(--transition-duration) * .5);
+  transition-duration: calc(var(--transition-duration) * 0.5);
   transition-timing-function: var(--transition-timing-function);
 }
 
 .os-theme {
   --os-handle-bg: color-mix(in srgb, var(--color-fore-2) 50%, transparent);
   --os-handle-bg-hover: color-mix(in srgb, var(--color-fore-4) 50%, transparent);
-  --os-handle-bg-active: color-mix(in srgb, var(--color-fore-3) 50%, transparent);
+  --os-handle-bg-active: color-mix(
+    in srgb,
+    var(--color-fore-3) 50%,
+    transparent
+  );
 }
 
 .os-theme-textarea {
   --os-handle-bg: color-mix(in srgb, var(--color-fore-3) 50%, transparent);
   --os-handle-bg-hover: color-mix(in srgb, var(--color-fore-5) 50%, transparent);
-  --os-handle-bg-active: color-mix(in srgb, var(--color-fore-4) 50%, transparent);
+  --os-handle-bg-active: color-mix(
+    in srgb,
+    var(--color-fore-4) 50%,
+    transparent
+  );
 }
