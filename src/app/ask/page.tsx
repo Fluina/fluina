@@ -188,7 +188,10 @@ export default function Ask() {
       textarea.style.height = `${textarea.scrollHeight}px`;
     }
 
-    const nextIsScrollable = textarea.scrollHeight >= 136;
+    const MAX_LINES = 5;
+    const maxScrollHeight = singleLineRef.current * MAX_LINES;
+
+    const nextIsScrollable = textarea.scrollHeight >= maxScrollHeight;
 
     if (nextIsScrollable !== isScrollable) {
       setIsScrollable(nextIsScrollable);
@@ -619,7 +622,12 @@ export default function Ask() {
                 layout="position"
                 transition={TRANSITION}
                 ref={scrollRef}
-                className={`overflow-y-auto p-2 flex justify-center relative w-full ${isAdjusted || isScrollable || isExpanded ? "items-start" : "items-center"} ${isExpanded ? " h-full max-h-full" : "max-h-34"}`}
+                className={`overflow-y-auto p-2 flex justify-center items-start relative w-full ${isExpanded && " h-full max-h-full"}`}
+                style={
+                  !isExpanded && singleLineRef.current > 0
+                    ? { maxHeight: `${singleLineRef.current * 5 + 16}px` }
+                    : undefined
+                }
               >
                 <motion.textarea
                   autoFocus
@@ -643,7 +651,7 @@ export default function Ask() {
                   id="prompt"
                   name="prompt"
                   placeholder=""
-                  className="overflow-y-auto block outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
+                  className="block outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
                 />
               </motion.div>
             </label>

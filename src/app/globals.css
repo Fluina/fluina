@@ -195,6 +195,15 @@
     @apply w-dvw h-dvh overflow-hidden overscroll-none font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
   }
 
+  *::selection {
+    color: var(--back-1);
+    background-color: var(--fore-1);
+  }
+
+  *::-ms-reveal {
+    display: none;
+  }
+
   @font-face {
     font-family: "D-DIN-Pro";
     src: url("/fonts/sans-serif/D-DIN-PRO-300-Light.woff2") format("woff2");
@@ -335,15 +344,6 @@
     font-style: normal;
   }
 
-  *::selection {
-    color: var(--back-1);
-    background-color: var(--fore-1);
-  }
-
-  *::-ms-reveal {
-    display: none;
-  }
-
   @keyframes caret-fade {
     0%,
     100% {
@@ -412,4 +412,14 @@
     var(--color-fore-4) 50%,
     transparent
   );
+}
+
+body.os-interacting textarea {
+  pointer-events: none;
+}
+
+body.os-interacting,
+body.os-interacting * {
+  user-select: none;
+  -webkit-user-select: none;
 }
