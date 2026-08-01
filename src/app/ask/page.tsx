@@ -628,7 +628,7 @@ export default function Ask() {
                       maskPosition: "var(--mask-x) 0%",
                       WebkitMaskPosition: "var(--mask-x) 0%",
                     }}
-                    className="absolute overflow-y-hidden inset-0 p-2 w-full pointer-events-none text-lg text-fore-9 text-left font-sans-serif font-medium truncate block"
+                    className="absolute inset-0 p-2 w-full pointer-events-none text-lg text-fore-9 text-left font-sans-serif font-medium truncate block"
                   >
                     {PLACEHOLDERS[placeholderIndex]}
                   </motion.span>
@@ -668,7 +668,7 @@ export default function Ask() {
                   id="prompt"
                   name="prompt"
                   placeholder=""
-                  className="block outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
+                  className="block overflow-y-hidden outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
                 />
               </motion.div>
             </label>
