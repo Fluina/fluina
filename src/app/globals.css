@@ -57,8 +57,11 @@
   --color-violet: hsl(300, 100%, 50%);
 
   --font-sans-serif:
-    "D-DIN-Pro", "Mamelon", "ipamjm", sans-serif, ui-sans-serif, system-ui;
-  --font-serif: "ipamjm", serif, ui-serif, system-ui;
+    var(--font-din-pro), var(--font-mamelon), "Fluent Emoji Color", sans-serif,
+    ui-sans-serif, system-ui;
+  --font-serif:
+    var(--font-din-pro), var(--font-mamelon), "Fluent Emoji Color", serif,
+    ui-serif, system-ui;
 
   --transition-duration: 500ms;
   --transition-timing-function: ease-out;
@@ -115,27 +118,27 @@
 
 @utility all {
   --tw-ease: var(--ease-out);
-  @apply transition-all duration-(--transition-duration) delay-(--transition-delay);
+  @apply transition-all duration-(--transition-duration);
 }
 
 @utility colors {
   --tw-ease: var(--ease-out);
-  @apply transition-colors duration-(--transition-duration) delay-(--transition-delay);
+  @apply transition-colors duration-(--transition-duration);
 }
 
 @utility opacity {
   --tw-ease: var(--ease-out);
-  @apply transition-opacity duration-(--transition-duration) delay-(--transition-delay);
+  @apply transition-opacity duration-(--transition-duration);
 }
 
 @utility shadow {
   --tw-ease: var(--ease-out);
-  @apply transition-shadow duration-(--transition-duration) delay-(--transition-delay);
+  @apply transition-shadow duration-(--transition-duration);
 }
 
 @utility transform {
   --tw-ease: var(--ease-out);
-  @apply transition-transform duration-(--transition-duration) delay-(--transition-delay);
+  @apply transition-transform duration-(--transition-duration);
 }
 
 @utility none {
@@ -195,6 +198,14 @@
     @apply w-dvw h-dvh overflow-hidden overscroll-none font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
   }
 
+  input,
+  textarea,
+  select,
+  button,
+  [contenteditable] {
+    font-family: inherit;
+  }
+
   *::selection {
     color: var(--back-1);
     background-color: var(--fore-1);
@@ -202,146 +213,6 @@
 
   *::-ms-reveal {
     display: none;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-300-Light.woff2") format("woff2");
-    font-weight: 300;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-400-Regular.woff2") format("woff2");
-    font-weight: 400;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-500-Medium.woff2") format("woff2");
-    font-weight: 500;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-600-SemiBold.woff2") format("woff2");
-    font-weight: 600;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-700-Bold.woff2") format("woff2");
-    font-weight: 700;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-800-ExtraBold.woff2") format("woff2");
-    font-weight: 800;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-900-Heavy.woff2") format("woff2");
-    font-weight: 900;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-300-Light.woff2")
-      format("woff2");
-    font-weight: 300;
-    font-style: italic;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-400-Regular.woff2")
-      format("woff2");
-    font-weight: 400;
-    font-style: italic;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-500-Medium.woff2")
-      format("woff2");
-    font-weight: 500;
-    font-style: italic;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-600-SemiBold.woff2")
-      format("woff2");
-    font-weight: 600;
-    font-style: italic;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-700-Bold.woff2")
-      format("woff2");
-    font-weight: 700;
-    font-style: italic;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-800-ExtraBold.woff2")
-      format("woff2");
-    font-weight: 800;
-    font-style: italic;
-  }
-
-  @font-face {
-    font-family: "D-DIN-Pro";
-    src: url("/fonts/sans-serif/D-DIN-PRO-Italic-900-Heavy.woff2")
-      format("woff2");
-    font-weight: 900;
-    font-style: italic;
-  }
-
-  @font-face {
-    font-family: "Mamelon";
-    src: url("/fonts/sans-serif/Mamelon-3HiRegular.woff2") format("woff2");
-    font-weight: 300;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "Mamelon";
-    src: url("/fonts/sans-serif/Mamelon-3.5HiRegular.woff2") format("woff2");
-    font-weight: 300;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "Mamelon";
-    src: url("/fonts/sans-serif/Mamelon-4HiRegular.woff2") format("woff2");
-    font-weight: 400;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "Mamelon";
-    src: url("/fonts/sans-serif/Mamelon-5-Hi-Regular.woff2") format("woff2");
-    font-weight: 500;
-    font-style: normal;
-  }
-
-  @font-face {
-    font-family: "ipamjm";
-    src: url("/fonts/serif/ipamjm.woff2") format("woff2");
-    font-weight: 500;
-    font-style: normal;
   }
 
   @keyframes caret-fade {
@@ -370,56 +241,88 @@
   }
 }
 
+@property --os-fade-top {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --os-fade-bottom {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --os-fade-left {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --os-fade-right {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
 [data-overlayscrollbars-viewport] {
   scroll-behavior: auto;
 }
 
-.os-theme,
-.os-theme-textarea {
+.os-theme {
   --os-size: 0.6rem;
   --os-padding-perpendicular: 0.1rem;
-  --os-padding-axis: 0.5rem;
+  --os-padding-axis: 0.1rem;
   --os-track-bg: transparent;
   --os-handle-border-radius: 1rem;
   --os-handle-min-size: 1rem;
   --os-handle-perpendicular-size: 0.3rem;
   --os-handle-perpendicular-size-hover: 0.5rem;
   --os-handle-perpendicular-size-active: 0.4rem;
+  --os-handle-bg: color-mix(in srgb, var(--color-fore-2) 50%, transparent);
+  --os-handle-bg-hover: color-mix(in srgb, var(--color-fore-4) 50%, transparent);
+  --os-handle-bg-active: color-mix(in srgb, var(--color-fore-3) 50%, transparent);
 }
 
-.os-theme .os-scrollbar-handle,
-.os-theme-textarea .os-scrollbar-handle {
+.os-theme .os-scrollbar-handle {
   transition-property: opacity, background-color, width, height;
   transition-duration: calc(var(--transition-duration) * 0.5);
   transition-timing-function: var(--transition-timing-function);
 }
 
-.os-theme {
-  --os-handle-bg: color-mix(in srgb, var(--color-fore-2) 50%, transparent);
-  --os-handle-bg-hover: color-mix(in srgb, var(--color-fore-4) 50%, transparent);
-  --os-handle-bg-active: color-mix(
-    in srgb,
-    var(--color-fore-3) 50%,
-    transparent
-  );
+.os-edge-fade {
+  --os-fade-size: 2.5rem;
+  --os-fade-top: 0;
+  --os-fade-bottom: 0;
+  --os-fade-left: 0;
+  --os-fade-right: 0;
 }
 
-.os-theme-textarea {
-  --os-handle-bg: color-mix(in srgb, var(--color-fore-3) 50%, transparent);
-  --os-handle-bg-hover: color-mix(in srgb, var(--color-fore-5) 50%, transparent);
-  --os-handle-bg-active: color-mix(
-    in srgb,
-    var(--color-fore-4) 50%,
-    transparent
-  );
-}
+.os-edge-fade > [data-overlayscrollbars-viewport] {
+  mask-image:
+    linear-gradient(to bottom, transparent 0, var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))),
+    linear-gradient(to top, transparent 0, var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))),
+    linear-gradient(to right, transparent 0, var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))),
+    linear-gradient(to left, transparent 0, var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size)));
+  mask-composite: intersect;
 
-body.os-interacting textarea {
-  pointer-events: none;
+  -webkit-mask-image:
+    linear-gradient(to bottom, transparent 0, var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))),
+    linear-gradient(to top, transparent 0, var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))),
+    linear-gradient(to right, transparent 0, var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))),
+    linear-gradient(to left, transparent 0, var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size)));
+  -webkit-mask-composite: source-in;
+
+  transition:
+    --os-fade-top var(--transition-duration) var(--transition-timing-function),
+    --os-fade-bottom var(--transition-duration) var(--transition-timing-function),
+    --os-fade-left var(--transition-duration) var(--transition-timing-function),
+    --os-fade-right var(--transition-duration) var(--transition-timing-function);
 }
 
 body.os-interacting,
 body.os-interacting * {
+  pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
 }

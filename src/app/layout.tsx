@@ -5,7 +5,9 @@ import type { Metadata, Viewport } from "next";
 import "overlayscrollbars/overlayscrollbars.css";
 import "./globals.css";
 import Client from "@/app/client";
+import { dinPro, mamelon } from "@/app/fonts";
 import Server from "@/app/server";
+import "../../public/fonts/emoji/FluentEmojiColor.css";
 
 export const metadata: Metadata = {
   title: "Fluina",
@@ -27,7 +29,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ja" data-scroll-behavior="smooth" suppressHydrationWarning>
+    <html
+      lang="ja"
+      data-scroll-behavior="smooth"
+      suppressHydrationWarning
+      className={`${dinPro.variable} ${mamelon.variable}`}
+    >
       <head>
         <Server />
         <link id="theme-favicon" rel="icon" href="/favicon/light.ico" />

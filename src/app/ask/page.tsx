@@ -13,15 +13,18 @@ import {
   Plug,
   Plus,
   Puzzle,
+  Trash2,
+  X,
   Zap,
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
-import { OverlayScrollbars } from "overlayscrollbars";
+import type { SyntheticEvent } from "react";
 import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -30,7 +33,7 @@ import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_sm
 import { Button, Menu, Tooltip } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useOS } from "@/lib/os";
-import { OS_THEME_TEXTAREA } from "@/lib/overlayscrollbars";
+import { useOverlayScroll } from "@/lib/overlayscrollbars";
 
 const PLACEHOLDERS = [
   "Fluinaに訊いてみて！",
@@ -43,6 +46,11 @@ const PLACEHOLDERS = [
   "今日も、おつかれ様。",
 ];
 
+type AttachedFile = {
+  id: string;
+  file: File;
+};
+
 export default function Ask() {
   const os = useOS();
 
@@ -52,52 +60,73 @@ export default function Ask() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [dragFileCount, setDragFileCount] = useState(0);
+  const [files, setFiles] = useState<AttachedFile[]>([]);
 
   const [aiReply, setAiReply] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
   const formRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollTopRef = useRef(0);
+  const pendingCaretRef = useRef<{
+    caretTop: number;
+    caretRatio: number | null;
+  } | null>(null);
 
   const hasText = value.length > 0;
   const hasInput = value.trim().length > 0;
+  const hasFiles = files.length > 0;
 
   const singleLineRef = useRef<number>(0);
   const singleLineWidthRef = useRef<number>(0);
   const isComposingRef = useRef(false);
+  const pendingLineBreakTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
 
-  const osInstanceRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null);
+  const { elementRef: scrollRef } = useOverlayScroll<HTMLDivElement>(
+    {
+      axis: "y",
+      onScroll: (viewport) => {
+        scrollTopRef.current = viewport.scrollTop;
+      },
+      onInit: (el) => {
+        const prevScrollTop = scrollTopRef.current;
+        const pending = pendingCaretRef.current;
+        const caretTop = pending?.caretTop ?? 0;
+        const caretRatio = pending?.caretRatio ?? null;
+
+        pendingCaretRef.current = null;
+
+        const restore = () => {
+          const maxScrollTop = Math.max(el.scrollHeight - el.clientHeight, 0);
+
+          const target =
+            caretRatio !== null
+              ? caretTop - caretRatio * el.clientHeight
+              : prevScrollTop;
+
+          const clamped = Math.min(Math.max(target, 0), maxScrollTop);
+          el.scrollTop = clamped;
+          scrollTopRef.current = clamped;
+        };
+
+        restore();
+
+        const timer = setTimeout(restore, 500);
+
+        return () => clearTimeout(timer);
+      },
+    },
+    [isExpanded],
+  );
 
   //  ================================================================
-  //    Textarea
+  //    送信
   //  ================================================================
 
-  useEffect(() => {
-    if (!scrollRef.current) return;
-
-    const osInstance = OverlayScrollbars(scrollRef.current, {
-      scrollbars: {
-        theme: OS_THEME_TEXTAREA,
-        autoHide: "leave",
-      },
-      overflow: {
-        x: "hidden",
-        y: "scroll",
-      },
-    });
-
-    osInstanceRef.current = osInstance;
-
-    return () => {
-      osInstance.destroy();
-      osInstanceRef.current = null;
-    };
-  }, []);
-
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: SyntheticEvent<HTMLFormElement>) => {
     if (e) e.preventDefault();
     if (!hasInput || isLoading) return;
 
@@ -105,6 +134,7 @@ export default function Ask() {
 
     setValue("");
     setIsExpanded(false);
+    setFiles([]);
 
     setIsLoading(true);
     setAiReply("Fluinaが考え中...");
@@ -136,9 +166,12 @@ export default function Ask() {
     }
   };
 
-  const recalcTextareaHeight = useCallback(() => {
-    const textarea = textareaRef.current;
+  //  ================================================================
+  //    テキストエリア
+  //  ================================================================
 
+  const calcTextarea = useCallback(() => {
+    const textarea = textareaRef.current;
     const scrollContainer =
       scrollRef.current?.querySelector("[data-overlayscrollbars-viewport]") ||
       scrollRef.current;
@@ -146,12 +179,11 @@ export default function Ask() {
     if (!textarea) return;
 
     const currentScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
-
     const isAtBottom = scrollContainer
       ? scrollContainer.scrollHeight -
       scrollContainer.scrollTop -
       scrollContainer.clientHeight <
-      15
+      18
       : false;
 
     if (singleLineRef.current === 0) {
@@ -195,7 +227,6 @@ export default function Ask() {
 
     const MAX_LINES = 5;
     const maxScrollHeight = singleLineRef.current * MAX_LINES;
-
     const nextIsScrollable = textarea.scrollHeight >= maxScrollHeight;
 
     if (nextIsScrollable !== isScrollable) {
@@ -215,37 +246,232 @@ export default function Ask() {
         scrollContainer.scrollTop = currentScrollTop;
       }
     }
-  }, [value, isAdjusted, isScrollable, isExpanded]);
+  }, [value, isAdjusted, isScrollable, isExpanded, scrollRef]);
 
   useLayoutEffect(() => {
     if (value === undefined) return;
 
-    recalcTextareaHeight();
-  }, [value, recalcTextareaHeight]);
+    calcTextarea();
+  }, [value, calcTextarea]);
 
   useEffect(() => {
     const vv = window.visualViewport;
 
     if (!vv) return;
 
-    vv.addEventListener("resize", recalcTextareaHeight);
-    vv.addEventListener("scroll", recalcTextareaHeight);
+    vv.addEventListener("resize", calcTextarea);
+    vv.addEventListener("scroll", calcTextarea);
 
     return () => {
-      vv.removeEventListener("resize", recalcTextareaHeight);
-      vv.removeEventListener("scroll", recalcTextareaHeight);
+      vv.removeEventListener("resize", calcTextarea);
+      vv.removeEventListener("scroll", calcTextarea);
     };
-  }, [recalcTextareaHeight]);
+  }, [calcTextarea]);
+
+  const captureCaretPosition = useCallback(() => {
+    const lineHeight = singleLineRef.current || 0;
+    const textarea = textareaRef.current;
+    const selectionStart = textarea?.selectionStart ?? 0;
+    const caretLine = lineHeight
+      ? (textarea?.value.slice(0, selectionStart).split("\n").length ?? 1) - 1
+      : 0;
+    const caretTop = caretLine * lineHeight;
+
+    const viewportEl =
+      scrollRef.current?.querySelector<HTMLElement>(
+        "[data-overlayscrollbars-viewport]",
+      ) ?? scrollRef.current;
+
+    const clientHeight = viewportEl?.clientHeight ?? 0;
+    const scrollTop = viewportEl?.scrollTop ?? scrollTopRef.current;
+
+    const caretRatio =
+      lineHeight && clientHeight > 0
+        ? Math.min(Math.max((caretTop - scrollTop) / clientHeight, 0), 1)
+        : null;
+
+    pendingCaretRef.current = { caretTop, caretRatio };
+  }, [scrollRef]);
+
+  //  ================================================================
+  //    添付ファイル
+  //  ================================================================
+
+  const { elementRef: filesScrollRef } = useOverlayScroll<HTMLDivElement>(
+    { axis: "x", enabled: hasFiles },
+    [files.length],
+  );
+
+  const filePreviewUrls = useMemo(() => {
+    return files.map((item) =>
+      item.file.type.startsWith("image/") ? URL.createObjectURL(item.file) : null,
+    );
+  }, [files]);
 
   useEffect(() => {
-    if (isExpanded !== undefined) {
-      const timer = setTimeout(() => {
-        osInstanceRef.current?.update(true);
-      }, 500);
+    return () => {
+      filePreviewUrls.forEach((url) => {
+        if (url) URL.revokeObjectURL(url);
+      });
+    };
+  }, [filePreviewUrls]);
 
-      return () => clearTimeout(timer);
-    }
-  }, [isExpanded]);
+  const handleFilesAdded = useCallback((newFiles: FileList | File[]) => {
+    const newAttachedFiles: AttachedFile[] = Array.from(newFiles).map((file) => ({
+      id: typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      file,
+    }));
+    setFiles((prev) => [...prev, ...newAttachedFiles]);
+  }, []);
+
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) {
+        handleFilesAdded(e.target.files);
+      }
+
+      e.target.value = "";
+    },
+    [handleFilesAdded],
+  );
+
+  const handleRemoveFile = useCallback((index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleClearFiles = useCallback(() => {
+    setFiles([]);
+  }, []);
+
+  //  ================================================================
+  //    ドラッグ＆ドロップ
+  //  ================================================================
+
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [dragFileCount, setDragFileCount] = useState(0);
+
+  const dragCounterRef = useRef(0);
+
+  useEffect(() => {
+    const hasFilesCheck = (e: DragEvent) => {
+      if (!e.dataTransfer) return false;
+
+      return e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files");
+    };
+
+    const getActualFileCount = (e: DragEvent) => {
+      if (!e.dataTransfer) return 0;
+
+      if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+        return Array.from(e.dataTransfer.items).filter(
+          (item) => item.kind === "file",
+        ).length;
+      }
+
+      return e.dataTransfer.files?.length || 0;
+    };
+
+    const handleWindowDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!hasFilesCheck(e)) return;
+
+      dragCounterRef.current += 1;
+
+      const fileCount = getActualFileCount(e);
+      setIsDragOver(true);
+      if (fileCount > 0) {
+        setDragFileCount(fileCount);
+      }
+    };
+
+    const handleWindowDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!hasFilesCheck(e)) return;
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = "copy";
+      }
+
+      const fileCount = getActualFileCount(e);
+
+      if (fileCount > 0 && fileCount !== dragFileCount) {
+        setDragFileCount(fileCount);
+      }
+    };
+
+    const handleWindowDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      dragCounterRef.current -= 1;
+
+      if (dragCounterRef.current <= 0) {
+        dragCounterRef.current = 0;
+        setIsDragOver(false);
+        setDragFileCount(0);
+      }
+    };
+
+    const handleWindowDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      dragCounterRef.current = 0;
+
+      setIsDragOver(false);
+      setDragFileCount(0);
+
+      const dt = e.dataTransfer;
+      if (!dt) return;
+
+      let droppedFiles: File[] = [];
+
+      if (dt.files && dt.files.length > 0) {
+        droppedFiles = Array.from(dt.files);
+      } else if (dt.items && dt.items.length > 0) {
+        droppedFiles = Array.from(dt.items)
+          .filter((item) => item.kind === "file")
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => file !== null);
+      }
+
+      if (droppedFiles.length > 0) {
+        handleFilesAdded(droppedFiles);
+      }
+    };
+
+    window.addEventListener("dragenter", handleWindowDragEnter);
+    window.addEventListener("dragover", handleWindowDragOver);
+    window.addEventListener("dragleave", handleWindowDragLeave);
+    window.addEventListener("drop", handleWindowDrop);
+
+    return () => {
+      window.removeEventListener("dragenter", handleWindowDragEnter);
+      window.removeEventListener("dragover", handleWindowDragOver);
+      window.removeEventListener("dragleave", handleWindowDragLeave);
+      window.removeEventListener("drop", handleWindowDrop);
+    };
+  }, [handleFilesAdded, dragFileCount]);
+
+  //  ================================================================
+  //    キーボードショートカット
+  //  ================================================================
+
+  const isMobileDevice = useCallback(() => {
+    return (
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent,
+      ) ||
+      ("maxTouchPoints" in navigator &&
+        navigator.maxTouchPoints > 0 &&
+        window.innerWidth <= 768)
+    );
+  }, []);
 
   const handleTextareaKeyDown = (
     e: React.KeyboardEvent<HTMLTextAreaElement>,
@@ -257,15 +483,7 @@ export default function Ask() {
     )
       return;
 
-    const isMobile =
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-        navigator.userAgent,
-      ) ||
-      ("maxTouchPoints" in navigator &&
-        navigator.maxTouchPoints > 0 &&
-        window.innerWidth <= 768);
-
-    if (isMobile) return;
+    if (isMobileDevice()) return;
 
     if (
       e.key === "Enter" &&
@@ -285,62 +503,80 @@ export default function Ask() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInputFocused =
+        activeEl?.tagName === "INPUT" ||
+        activeEl?.tagName === "TEXTAREA" ||
+        (activeEl as HTMLElement)?.isContentEditable;
+
       const modifierPressed =
         os === "mac"
           ? e.metaKey && e.shiftKey && e.altKey
           : e.ctrlKey && e.shiftKey && e.altKey;
 
-      if (!modifierPressed) return;
+      if (modifierPressed) {
+        const key = e.key.toLowerCase();
 
-      const key = e.key.toLowerCase();
+        if (e.key === "Backspace") {
+          e.preventDefault();
+          setValue("");
+          setIsExpanded(false);
 
-      if (e.key === "Backspace") {
-        e.preventDefault();
-        setValue("");
-        setIsExpanded(false);
+          textareaRef.current?.focus();
 
-        textareaRef.current?.focus();
-
-        return;
-      }
-
-      if (e.code === "Space") {
-        e.preventDefault();
-
-        if (isScrollable || isExpanded) {
-          setIsExpanded((prev) => !prev);
+          return;
         }
 
-        return;
-      }
-
-      if (key === "a") {
-        e.preventDefault();
-        return;
-      }
-
-      if (key === "m") {
-        e.preventDefault();
-        return;
-      }
-
-      if (key === "s") {
-        e.preventDefault();
-
-        if (hasInput) {
-          formRef.current?.requestSubmit();
+        if (e.code === "Space") {
+          e.preventDefault();
+          if (isScrollable || isExpanded) {
+            captureCaretPosition();
+            setIsExpanded((prev) => !prev);
+          }
+          return;
         }
 
-        return;
+        if (key === "a") {
+          e.preventDefault();
+
+          return;
+        }
+
+        if (key === "m") {
+          e.preventDefault();
+
+          return;
+        }
+
+        if (key === "s") {
+          e.preventDefault();
+
+          if (hasInput) {
+            formRef.current?.requestSubmit();
+          }
+
+          return;
+        }
+
+        if (key === "x") {
+          e.preventDefault();
+          handleClearFiles();
+
+          return;
+        }
+      }
+
+      if (!isInputFocused) {
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          textareaRef.current?.focus();
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
 
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [os, isScrollable, isExpanded, hasInput]);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [os, isScrollable, isExpanded, hasInput, captureCaretPosition, handleClearFiles]);
 
   useEffect(() => {
     if (hasText) return;
@@ -352,82 +588,25 @@ export default function Ask() {
     return () => clearInterval(interval);
   }, [hasText]);
 
-  const handleClear = () => {
+  const handleClearText = () => {
     setValue("");
+    setIsAdjusted(false);
     setIsExpanded(false);
 
     textareaRef.current?.focus();
   };
 
-  //  ================================================================
-  //    Drag and Drop
-  //  ================================================================
-
   useEffect(() => {
-    const handleWindowDragEnter = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.dataTransfer?.types.includes("Files")) {
-        const fileCount = e.dataTransfer.items?.length || 0;
-
-        setDragFileCount(fileCount);
-        setIsDragOver(true);
-      }
-    };
-
-    const handleWindowDragOver = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.dataTransfer?.types.includes("Files")) {
-        const fileCount = e.dataTransfer.items?.length || 0;
-
-        setDragFileCount(fileCount);
-      }
-    };
-
-    const handleWindowDragLeave = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.clientX === 0 && e.clientY === 0) {
-        setIsDragOver(false);
-      }
-    };
-
-    const handleWindowDrop = (e: DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setIsDragOver(false);
-
-      const files = e.dataTransfer?.files;
-
-      if (files && files.length > 0) {
-        console.log("Dropped files:", files);
-      }
-    };
-
-    window.addEventListener("dragenter", handleWindowDragEnter);
-    window.addEventListener("dragover", handleWindowDragOver);
-    window.addEventListener("dragleave", handleWindowDragLeave);
-    window.addEventListener("drop", handleWindowDrop);
-
     return () => {
-      window.removeEventListener("dragenter", handleWindowDragEnter);
-      window.removeEventListener("dragover", handleWindowDragOver);
-      window.removeEventListener("dragleave", handleWindowDragLeave);
-      window.removeEventListener("drop", handleWindowDrop);
+      if (pendingLineBreakTimeoutRef.current) {
+        clearTimeout(pendingLineBreakTimeoutRef.current);
+      }
     };
   }, []);
 
   return (
     <>
-      <AnimatePresence
-        mode="popLayout"
-        initial={false}
-        presenceAffectsLayout={false}
-      >
+      <AnimatePresence mode="popLayout" initial={false}>
         {isDragOver && (
           <motion.div
             initial={{ opacity: 0, backdropFilter: "blur(0)" }}
@@ -443,7 +622,7 @@ export default function Ask() {
               />
 
               <p className="text-center font-sans-serif text-2xl font-medium text-fore-1 text-shadow-lg">
-                {dragFileCount}ファイルをドロップして追加
+                {dragFileCount}ファイルをドロップして添付！
               </p>
             </div>
           </motion.div>
@@ -452,19 +631,15 @@ export default function Ask() {
 
       <div className="size-full flex flex-col p-4 gap-8 items-center max-w-3xl justify-center">
         <LayoutGroup>
-          <AnimatePresence
-            mode="popLayout"
-            initial={false}
-            presenceAffectsLayout={false}
-          >
+          <AnimatePresence mode="popLayout">
             {!isExpanded && (
               <motion.div
                 layout="position"
-                initial={{ opacity: 0, y: -50 }}
+                initial={{ opacity: 0, y: 25 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -50 }}
+                exit={{ opacity: 0, y: -25 }}
                 transition={TRANSITION}
-                className="max-md:mt-auto flex flex-col justify-center items-center gap-4 z-10"
+                className="max-md:mt-auto flex flex-col justify-center items-center gap-4"
               >
                 <motion.div
                   layout="position"
@@ -510,27 +685,37 @@ export default function Ask() {
           )}
 
           <motion.form
+            onSubmit={handleSubmit}
+            ref={formRef}
             layout
             transition={TRANSITION}
-            ref={formRef}
-            onSubmit={handleSubmit}
-            onLayoutAnimationComplete={() => {
-              osInstanceRef.current?.update(true);
-            }}
             className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
-                        ${isExpanded ? "h-full" : "max-h-full"}
-                        ${isAdjusted || isExpanded
-                ? "grid-cols-[1fr_auto_auto] grid-rows-[auto_1fr_auto]"
-                : hasText
-                  ? "grid-cols-[auto_1fr_auto_auto_auto]"
-                  : "grid-cols-[auto_1fr_auto_auto]"
+              ${isExpanded ? "h-full" : "max-h-full"}
+              ${hasFiles
+                ? isAdjusted || isExpanded
+                  ? "grid-cols-[auto_1fr_auto] grid-rows-[auto_auto_1fr_auto]"
+                  : hasText
+                    ? "grid-cols-[auto_1fr_auto_auto_auto] grid-rows-[auto_auto]"
+                    : "grid-cols-[auto_1fr_auto_auto] grid-rows-[auto_auto]"
+                : isAdjusted || isExpanded
+                  ? "grid-cols-[auto_1fr_auto] grid-rows-[auto_1fr_auto]"
+                  : hasText
+                    ? "grid-cols-[auto_1fr_auto_auto_auto]"
+                    : "grid-cols-[auto_1fr_auto_auto]"
               }`}
           >
             <Menu.Trigger>
               <motion.div
                 layout="position"
                 transition={TRANSITION}
-                className={`${isAdjusted && "col-start-1 row-start-3"}`}
+                className={`${hasFiles
+                  ? isAdjusted || isExpanded
+                    ? "col-start-1 row-start-4"
+                    : "col-start-1 row-start-2"
+                  : isAdjusted || isExpanded
+                    ? "col-start-1 row-start-3"
+                    : "col-start-1 row-start-1"
+                  }`}
               >
                 <Tooltip
                   content="添付"
@@ -550,7 +735,11 @@ export default function Ask() {
               </motion.div>
 
               <Menu.Content>
-                <Menu.Item icon={<Paperclip />} shortcut="Ctrl+Shift+Alt+U">
+                <Menu.Item
+                  icon={<Paperclip />}
+                  shortcut="Ctrl+Shift+Alt+U"
+                  onAction={() => fileInputRef.current?.click()}
+                >
                   ファイルまたは写真を追加
                 </Menu.Item>
                 <Menu.Item icon={<Camera />}>
@@ -584,18 +773,160 @@ export default function Ask() {
               </Menu.Content>
             </Menu.Trigger>
 
-            <label
-              htmlFor="prompt"
-              className={`relative w-full flex justify-start items-start ${isExpanded && "h-full"} ${isAdjusted || isExpanded ? "col-span-2 row-span-2" : "col-span-1"}`}
+            <input
+              onChange={handleFileInputChange}
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+            />
+
+            <AnimatePresence mode="popLayout" initial={false}>
+              {hasFiles && (
+                <motion.div
+                  ref={filesScrollRef}
+                  layout="position"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={TRANSITION}
+                  className={`flex items-center justify-center overflow-x-auto p-px w-full col-start-1 row-start-1 ${isAdjusted || isExpanded
+                    ? "col-span-2"
+                    : hasText
+                      ? "col-span-4"
+                      : "col-span-3"
+                    }`}
+                >
+                  <motion.div
+                    layout="position"
+                    transition={TRANSITION}
+                    className="flex flex-row flex-nowrap justify-start items-center gap-2 w-full"
+                  >
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      {files.map(({ id, file }, fileIndex) => {
+                        const lastDotIndex = file.name.lastIndexOf(".");
+                        const hasExtension =
+                          lastDotIndex !== -1 && lastDotIndex !== 0;
+                        const fileNameWithoutExt = hasExtension
+                          ? file.name.slice(0, lastDotIndex)
+                          : file.name;
+                        const fileExtension = hasExtension
+                          ? file.name.slice(lastDotIndex + 1).toUpperCase()
+                          : "";
+
+                        return (
+                          <motion.div
+                            key={id}
+                            layout="position"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={TRANSITION}
+                            className="group size-30 relative flex-none flex justify-start items-center rounded-3xl bg-back-2 border border-back-5 overflow-clip"
+                          >
+                            <Tooltip content={file.name} placement="bottom">
+                              <Button
+                                aria-label={file.name}
+                                className="size-full flex justify-center items-center scale-100! [&>*:not(:first-child)]:scale-100! none"
+                              >
+                                {filePreviewUrls[fileIndex] ? (
+                                  <Image
+                                    src={filePreviewUrls[fileIndex] ?? ""}
+                                    alt={file.name}
+                                    fill
+                                    unoptimized
+                                    className="size-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="p-2 size-full flex flex-col justify-between overflow-hidden">
+                                    <span className="line-clamp-3 p-1 break-all text-ellipsis overflow-hidden text-sm text-fore-1 text-left font-sans-serif font-medium">
+                                      {fileNameWithoutExt}
+                                    </span>
+
+                                    {fileExtension && (
+                                      <span className="text-xs text-fore-1 text-center font-sans-serif font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-full">
+                                        {fileExtension}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </Button>
+                            </Tooltip>
+
+                            <Tooltip
+                              content="削除"
+                              placement="left"
+                            >
+                              <Button
+                                onPress={() => handleRemoveFile(fileIndex)}
+                                aria-label="Remove the file"
+                                shape="circle"
+                                className="absolute top-1 right-1 bg-fore-1 md:opacity-0 max-md:opacity-100 group-focus-within:opacity-100 md:group-hover:opacity-100"
+                              >
+                                <X className="text-back-1 all" />
+                              </Button>
+                            </Tooltip>
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence mode="popLayout" initial={false}>
+              {hasFiles && (
+                <motion.div
+                  layout="position"
+                  initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                  animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                  exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                  transition={TRANSITION}
+                  className={`row-start-1 ${isAdjusted || isExpanded
+                    ? "col-start-3"
+                    : hasText
+                      ? "col-start-5"
+                      : "col-start-4"
+                    }`}
+                >
+                  <Tooltip
+                    content="消去"
+                    placement="left"
+                    shortcut={{
+                      mac: ["⌘", "Shift", "Option", "X"],
+                      windows: ["Ctrl", "Shift", "Alt", "X"],
+                    }}
+                  >
+                    <Button
+                      onPress={handleClearFiles}
+                      aria-label="Clear Files"
+                      shape="circle"
+                    >
+                      <Trash2 className="text-fore-1 all" />
+                    </Button>
+                  </Tooltip>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <motion.label
+              layout="position"
+              transition={TRANSITION}
+              className={`relative w-full flex flex-col justify-start items-start ${isExpanded ? "h-full" : ""
+                } ${hasFiles
+                  ? isAdjusted || isExpanded
+                    ? "col-start-1 col-span-2 row-start-2 row-span-2"
+                    : "col-start-2 row-start-2"
+                  : isAdjusted || isExpanded
+                    ? "col-start-1 col-span-2 row-start-1 row-span-2"
+                    : "col-start-2 row-start-1"
+                }`}
             >
               <span className="sr-only">プロンプトを入力</span>
 
               {!hasText && (
-                <AnimatePresence
-                  mode="wait"
-                  initial={false}
-                  presenceAffectsLayout={false}
-                >
+                <AnimatePresence mode="wait" initial={false}>
                   <motion.span
                     key={placeholderIndex}
                     layout={false}
@@ -636,9 +967,9 @@ export default function Ask() {
               )}
 
               <motion.div
+                ref={scrollRef}
                 layout="position"
                 transition={TRANSITION}
-                ref={scrollRef}
                 className={`overflow-y-auto p-2 flex justify-center items-start relative w-full ${isExpanded && " h-full max-h-full"}`}
                 style={
                   !isExpanded && singleLineRef.current > 0
@@ -647,15 +978,9 @@ export default function Ask() {
                 }
               >
                 <motion.textarea
-                  autoFocus
-                  rows={1}
-                  spellCheck={false}
-                  ref={textareaRef}
-                  value={value}
                   onChange={(e) => {
                     setValue(e.target.value);
                   }}
-                  disabled={isLoading}
                   onKeyDown={handleTextareaKeyDown}
                   onCompositionStart={() => {
                     isComposingRef.current = true;
@@ -665,19 +990,20 @@ export default function Ask() {
                       isComposingRef.current = false;
                     }, 0);
                   }}
+                  ref={textareaRef}
+                  value={value}
+                  autoFocus
+                  rows={1}
+                  spellCheck={false}
                   id="prompt"
                   name="prompt"
                   placeholder=""
-                  className="block overflow-y-hidden outline-none resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
+                  className="block outline-none overflow-y-clip resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
                 />
               </motion.div>
-            </label>
+            </motion.label>
 
-            <AnimatePresence
-              mode="popLayout"
-              initial={false}
-              presenceAffectsLayout={false}
-            >
+            <AnimatePresence mode="popLayout" initial={false}>
               {hasText && (
                 <motion.div
                   layout="position"
@@ -685,7 +1011,14 @@ export default function Ask() {
                   animate={{ opacity: 1, scale: 1, rotate: 0 }}
                   exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                   transition={TRANSITION}
-                  className={`${isAdjusted ? "col-start-3 row-start-1 self-start" : ""}`}
+                  className={`${hasFiles
+                    ? isAdjusted || isExpanded
+                      ? "col-start-3 row-start-2 justify-self-end"
+                      : "col-start-3 row-start-2"
+                    : isAdjusted || isExpanded
+                      ? "col-start-3 row-start-1 justify-self-end"
+                      : "col-start-3 row-start-1"
+                    }`}
                 >
                   <Tooltip
                     content="削除"
@@ -696,8 +1029,8 @@ export default function Ask() {
                     }}
                   >
                     <Button
-                      aria-label="Clear"
-                      onPress={handleClear}
+                      onPress={handleClearText}
+                      aria-label="Clear Text"
                       shape="circle"
                     >
                       <Delete className="text-fore-1 all" />
@@ -707,11 +1040,7 @@ export default function Ask() {
               )}
             </AnimatePresence>
 
-            <AnimatePresence
-              mode="popLayout"
-              initial={false}
-              presenceAffectsLayout={false}
-            >
+            <AnimatePresence mode="popLayout" initial={false}>
               {(isScrollable || isExpanded) && (
                 <motion.div
                   layout="position"
@@ -719,7 +1048,14 @@ export default function Ask() {
                   animate={{ opacity: 1, scale: 1, rotate: 0 }}
                   exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                   transition={TRANSITION}
-                  className={`${isAdjusted ? "col-start-3 row-start-2 self-start" : ""}`}
+                  className={`self-start ${hasFiles
+                    ? hasText
+                      ? "col-start-3 row-start-3 justify-self-end"
+                      : "col-start-3 row-start-2 justify-self-end"
+                    : hasText
+                      ? "col-start-3 row-start-2 justify-self-end"
+                      : "col-start-3 row-start-1 justify-self-end"
+                    }`}
                 >
                   <Tooltip
                     content={isExpanded ? "縮小" : "拡大"}
@@ -730,15 +1066,14 @@ export default function Ask() {
                     }}
                   >
                     <Button
+                      onPress={() => {
+                        captureCaretPosition();
+                        setIsExpanded(!isExpanded);
+                      }}
                       aria-label={isExpanded ? "Minimize" : "Maximize"}
-                      onPress={() => setIsExpanded(!isExpanded)}
                       shape="circle"
                     >
-                      <AnimatePresence
-                        mode="popLayout"
-                        initial={false}
-                        presenceAffectsLayout={false}
-                      >
+                      <AnimatePresence mode="popLayout" initial={false}>
                         {isExpanded ? (
                           <motion.div
                             key="maximize"
@@ -772,7 +1107,18 @@ export default function Ask() {
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`${isAdjusted ? "col-start-2 row-start-3" : ""}`}
+              className={`${hasFiles
+                ? isAdjusted || isExpanded
+                  ? "col-start-2 row-start-4 justify-self-end"
+                  : hasText
+                    ? "col-start-4 row-start-2"
+                    : "col-start-3 row-start-2"
+                : isAdjusted || isExpanded
+                  ? "col-start-2 row-start-3 justify-self-end"
+                  : hasText
+                    ? "col-start-4 row-start-1"
+                    : "col-start-3 row-start-1"
+                }`}
             >
               <Tooltip
                 content="マイク"
@@ -790,7 +1136,18 @@ export default function Ask() {
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`${isAdjusted ? "col-start-3 row-start-3" : ""}`}
+              className={`${hasFiles
+                ? isAdjusted || isExpanded
+                  ? "col-start-3 row-start-4 justify-self-end"
+                  : hasText
+                    ? "col-start-5 row-start-2"
+                    : "col-start-4 row-start-2"
+                : isAdjusted || isExpanded
+                  ? "col-start-3 row-start-3 justify-self-end"
+                  : hasText
+                    ? "col-start-5 row-start-1"
+                    : "col-start-4 row-start-1"
+                }`}
             >
               <Tooltip
                 content={hasInput ? "送信" : "会話"}
@@ -800,17 +1157,13 @@ export default function Ask() {
                 }}
               >
                 <Button
-                  type="submit"
                   isDisabled={isLoading}
+                  type="submit"
                   aria-label={hasInput ? "Send" : "Converse"}
                   shape="circle"
                   color="primary"
                 >
-                  <AnimatePresence
-                    mode="popLayout"
-                    initial={false}
-                    presenceAffectsLayout={false}
-                  >
+                  <AnimatePresence mode="popLayout" initial={false}>
                     {hasInput ? (
                       <motion.div
                         key="send"
