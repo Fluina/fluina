@@ -72,6 +72,8 @@ export default function Ask() {
   const [aiReply, setAiReply] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
+  const [isMobile, setIsMobile] = useState(false);
+
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -384,6 +386,10 @@ export default function Ask() {
       }
 
       e.target.value = "";
+
+      requestAnimationFrame(() => {
+        editorRef.current?.focus();
+      });
     },
     [handleFilesAdded],
   );
@@ -510,7 +516,7 @@ export default function Ask() {
   }, [handleFilesAdded, dragFileCount]);
 
   //  ================================================================
-  //    キーボードショートカット
+  //    キーボードショートカット＆モバイル判定
   //  ================================================================
 
   const isMobileDevice = useCallback(() => {
@@ -523,6 +529,10 @@ export default function Ask() {
         window.innerWidth <= 768)
     );
   }, []);
+
+  useEffect(() => {
+    setIsMobile(isMobileDevice());
+  }, [isMobileDevice]);
 
   const handleTextareaKeyDown = (
     e: React.KeyboardEvent<HTMLDivElement>,
@@ -970,9 +980,12 @@ export default function Ask() {
                     >
                       ファイルを添付
                     </Menu.Item>
-                    <Menu.Item onAction={handleTakeScreenshot} icon={<Camera />}>
-                      スクリーンショットを撮影
-                    </Menu.Item>
+
+                    {!isMobile && (
+                      <Menu.Item onAction={handleTakeScreenshot} icon={<Camera />}>
+                        スクリーンショットを撮影
+                      </Menu.Item>
+                    )}
 
                     <Menu.Separator />
 
@@ -1471,7 +1484,7 @@ export default function Ask() {
             </motion.div>
           </motion.form>
         </LayoutGroup>
-      </div >
+      </div>
     </>
   );
 }
