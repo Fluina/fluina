@@ -1,5 +1,6 @@
 "use client";
 import { Check, ChevronRight } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import type { ReactElement, ReactNode } from "react";
 import {
   Menu as AriaMenu,
@@ -18,6 +19,7 @@ import {
 } from "react-aria-components";
 import { tv } from "tailwind-variants";
 import { cn } from "@/lib/cn";
+import { TRANSITION } from "@/lib/motion";
 
 type MenuTriggerProps = AriaMenuTriggerProps;
 
@@ -54,21 +56,28 @@ function Content<T extends object>({
       placement={placement}
       offset={offset}
       crossOffset={crossOffset}
-      className={cn(
-        "min-w-56 max-w-80 rounded-2xl border border-back-5 bg-back-2 p-1.5 shadow-lg outline-none all",
-        "data-[placement=top]:origin-bottom data-[placement=bottom]:origin-top",
-        "data-entering:opacity-0 data-entering:scale-95",
-        "data-exiting:opacity-0 data-exiting:scale-95",
-        popoverClassName,
-      )}
+      className={cn("outline-none z-50", popoverClassName)}
     >
-      <AriaMenu
-        {...menuProps}
-        className={cn(
-          "flex max-h-[inherit] flex-col gap-0.5 overflow-y-auto outline-none",
-          className,
-        )}
-      />
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={TRANSITION}
+          className={cn(
+            "min-w-56 max-w-80 rounded-2xl border border-back-5 bg-back-2 p-1.5 shadow-lg outline-none",
+            "data-[placement=top]:origin-bottom data-[placement=bottom]:origin-top data-[placement=left]:origin-right data-[placement=right]:origin-left",
+          )}
+        >
+          <AriaMenu
+            {...menuProps}
+            className={cn(
+              "flex max-h-[inherit] flex-col gap-0.5 overflow-y-auto outline-none",
+              className,
+            )}
+          />
+        </motion.div>
+      </AnimatePresence>
     </AriaPopover>
   );
 }

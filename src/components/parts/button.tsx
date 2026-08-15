@@ -32,7 +32,7 @@ const buttonVariants = tv({
 
 export interface ButtonProps
   extends Omit<RACButtonProps, "color">,
-    VariantProps<typeof buttonVariants> {
+  VariantProps<typeof buttonVariants> {
   ripple?: boolean;
 }
 
@@ -110,8 +110,15 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       >
         {(renderProps) => (
           <>
-            {ripple && <Ripple ripples={ripples} />}
             {typeof children === "function" ? children(renderProps) : children}
+
+            {ripple && (
+              <Ripple
+                ripples={ripples}
+                className="pointer-events-none absolute inset-0"
+                data-ripple
+              />
+            )}
           </>
         )}
       </RACButton>

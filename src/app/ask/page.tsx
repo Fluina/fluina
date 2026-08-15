@@ -49,6 +49,7 @@ const PLACEHOLDERS = [
 type AttachedFile = {
   id: string;
   file: File;
+  source: "input" | "paste" | "drag";
 };
 
 export default function Ask() {
@@ -67,7 +68,7 @@ export default function Ask() {
 
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const scrollTopRef = useRef(0);
   const pendingCaretRef = useRef<{
     caretTop: number;
@@ -167,16 +168,16 @@ export default function Ask() {
   };
 
   //  ================================================================
-  //    テキストエリア
+  //    テキストエリア (div.contentEditable) の高さ・スクロール計算
   //  ================================================================
 
   const calcTextarea = useCallback(() => {
-    const textarea = textareaRef.current;
+    const editor = editorRef.current;
     const scrollContainer =
       scrollRef.current?.querySelector("[data-overlayscrollbars-viewport]") ||
       scrollRef.current;
 
-    if (!textarea) return;
+    if (!editor) return;
 
     const currentScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
     const isAtBottom = scrollContainer
@@ -187,34 +188,30 @@ export default function Ask() {
       : false;
 
     if (singleLineRef.current === 0) {
-      const originalValue = textarea.value;
+      const originalText = editor.innerText;
 
-      if (originalValue && originalValue !== value) {
-        setValue(originalValue);
-      }
-
-      textarea.value = "";
-      textarea.style.height = "auto";
-      singleLineRef.current = textarea.scrollHeight;
-      textarea.value = originalValue;
+      editor.innerText = "A";
+      editor.style.height = "auto";
+      singleLineRef.current = editor.scrollHeight;
+      editor.innerText = originalText;
     }
 
     if (!isAdjusted) {
-      singleLineWidthRef.current = textarea.getBoundingClientRect().width;
+      singleLineWidthRef.current = editor.getBoundingClientRect().width;
     }
 
-    const originalWidth = textarea.style.width;
+    const originalWidth = editor.style.width;
 
     if (isAdjusted && singleLineWidthRef.current > 0) {
-      textarea.style.width = `${singleLineWidthRef.current}px`;
+      editor.style.width = `${singleLineWidthRef.current}px`;
     }
 
-    textarea.style.height = "auto";
+    editor.style.height = "auto";
 
-    const checkHeight = textarea.scrollHeight;
+    const checkHeight = editor.scrollHeight;
 
     if (isAdjusted && singleLineWidthRef.current > 0) {
-      textarea.style.width = originalWidth;
+      editor.style.width = originalWidth;
     }
 
     const nextIsAdjusted = checkHeight > singleLineRef.current;
@@ -222,12 +219,12 @@ export default function Ask() {
     if (nextIsAdjusted !== isAdjusted) {
       setIsAdjusted(nextIsAdjusted);
     } else {
-      textarea.style.height = `${textarea.scrollHeight}px`;
+      editor.style.height = `${editor.scrollHeight}px`;
     }
 
     const MAX_LINES = 5;
     const maxScrollHeight = singleLineRef.current * MAX_LINES;
-    const nextIsScrollable = textarea.scrollHeight >= maxScrollHeight;
+    const nextIsScrollable = editor.scrollHeight >= maxScrollHeight;
 
     if (nextIsScrollable !== isScrollable) {
       setIsScrollable(nextIsScrollable);
@@ -246,13 +243,30 @@ export default function Ask() {
         scrollContainer.scrollTop = currentScrollTop;
       }
     }
-  }, [value, isAdjusted, isScrollable, isExpanded, scrollRef]);
+  }, [isAdjusted, isScrollable, isExpanded, scrollRef]);
 
   useLayoutEffect(() => {
     if (value === undefined) return;
 
     calcTextarea();
   }, [value, calcTextarea]);
+
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    const currentDomText = editorRef.current.innerText;
+
+    if (value === "") {
+      if (currentDomText !== "") {
+        editorRef.current.textContent = "";
+      }
+      return;
+    }
+
+    if (currentDomText !== value) {
+      editorRef.current.innerText = value;
+    }
+  }, [value]);
 
   useEffect(() => {
     const vv = window.visualViewport;
@@ -270,11 +284,19 @@ export default function Ask() {
 
   const captureCaretPosition = useCallback(() => {
     const lineHeight = singleLineRef.current || 0;
-    const textarea = textareaRef.current;
-    const selectionStart = textarea?.selectionStart ?? 0;
-    const caretLine = lineHeight
-      ? (textarea?.value.slice(0, selectionStart).split("\n").length ?? 1) - 1
-      : 0;
+    const editor = editorRef.current;
+
+    let caretLine = 0;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editor) {
+      const range = sel.getRangeAt(0);
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(editor);
+      preCaretRange.setEnd(range.endContainer, range.endOffset);
+      const text = preCaretRange.toString();
+      caretLine = text.split("\n").length - 1;
+    }
+
     const caretTop = caretLine * lineHeight;
 
     const viewportEl =
@@ -297,15 +319,31 @@ export default function Ask() {
   //    添付ファイル
   //  ================================================================
 
+  const filesScrollLeftRef = useRef(0);
+
   const { elementRef: filesScrollRef } = useOverlayScroll<HTMLDivElement>(
-    { axis: "x", enabled: hasFiles },
-    [files.length],
+    {
+      axis: "x",
+      enabled: hasFiles,
+      onScroll: (viewport) => {
+        filesScrollLeftRef.current = viewport.scrollLeft;
+      },
+      onInit: (el) => {
+        if (filesScrollLeftRef.current > 0) {
+          el.scrollLeft = filesScrollLeftRef.current;
+        }
+      },
+    },
+    [hasFiles],
   );
 
   const filePreviewUrls = useMemo(() => {
-    return files.map((item) =>
-      item.file.type.startsWith("image/") ? URL.createObjectURL(item.file) : null,
-    );
+    return files.map((item) => {
+      const isImage = item.file.type.startsWith("image/");
+      const isVideo = item.file.type.startsWith("video/");
+
+      return isImage || isVideo ? URL.createObjectURL(item.file) : null;
+    });
   }, [files]);
 
   useEffect(() => {
@@ -316,15 +354,19 @@ export default function Ask() {
     };
   }, [filePreviewUrls]);
 
-  const handleFilesAdded = useCallback((newFiles: FileList | File[]) => {
-    const newAttachedFiles: AttachedFile[] = Array.from(newFiles).map((file) => ({
-      id: typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-      file,
-    }));
-    setFiles((prev) => [...prev, ...newAttachedFiles]);
-  }, []);
+  const handleFilesAdded = useCallback(
+    (newFiles: FileList | File[], source: AttachedFile["source"] = "input") => {
+      const newAttachedFiles: AttachedFile[] = Array.from(newFiles).map((file) => ({
+        id: typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        file,
+        source,
+      }));
+      setFiles((prev) => [...prev, ...newAttachedFiles]);
+    },
+    [],
+  );
 
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -441,7 +483,7 @@ export default function Ask() {
       }
 
       if (droppedFiles.length > 0) {
-        handleFilesAdded(droppedFiles);
+        handleFilesAdded(droppedFiles, "drag");
       }
     };
 
@@ -474,7 +516,7 @@ export default function Ask() {
   }, []);
 
   const handleTextareaKeyDown = (
-    e: React.KeyboardEvent<HTMLTextAreaElement>,
+    e: React.KeyboardEvent<HTMLDivElement>,
   ) => {
     if (
       e.nativeEvent.isComposing ||
@@ -497,17 +539,150 @@ export default function Ask() {
       e.preventDefault();
 
       formRef.current?.requestSubmit();
-      textareaRef.current?.focus();
+      editorRef.current?.focus();
     }
   };
 
+  const handlePasteClipboardAsFile = useCallback(async () => {
+    try {
+      const fetchedFiles: File[] = [];
+
+      if (navigator.clipboard?.read) {
+        const clipboardItems = await navigator.clipboard.read();
+
+        for (const item of clipboardItems) {
+          for (const type of item.types) {
+            const blob = await item.getType(type);
+            const now = Date.now();
+
+            if (type.startsWith("image/")) {
+              const ext = type.split("/")[1] || "png";
+
+              fetchedFiles.push(
+                new File([blob], `pasted-${now}.${ext}`, { type }),
+              );
+            } else if (type === "text/plain") {
+              const text = await blob.text();
+
+              if (text.trim()) {
+                fetchedFiles.push(
+                  new File([text], `pasted-${now}.txt`, {
+                    type: "text/plain",
+                  }),
+                );
+              }
+            } else if (type !== "text/html") {
+              const ext = type.split("/")[1] || "bin";
+
+              fetchedFiles.push(
+                new File([blob], `pasted-${now}.${ext}`, { type }),
+              );
+            }
+          }
+        }
+      } else if (navigator.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+
+        if (text.trim()) {
+          const now = Date.now();
+
+          fetchedFiles.push(
+            new File([text], `pasted-${now}.txt`, {
+              type: "text/plain",
+            }),
+          );
+        }
+      }
+
+      if (fetchedFiles.length > 0) {
+        handleFilesAdded(fetchedFiles, "paste");
+      }
+    } catch (err) {
+      console.error("Failed to read clipboard contents: ", err);
+    }
+  }, [handleFilesAdded]);
+
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleGlobalPaste = (e: ClipboardEvent) => {
       const activeEl = document.activeElement;
       const isInputFocused =
         activeEl?.tagName === "INPUT" ||
         activeEl?.tagName === "TEXTAREA" ||
         (activeEl as HTMLElement)?.isContentEditable;
+
+      if (isInputFocused && activeEl !== editorRef.current) {
+        return;
+      }
+
+      const clipboardData = e.clipboardData;
+      if (!clipboardData) return;
+
+      if (clipboardData.files && clipboardData.files.length > 0) {
+        e.preventDefault();
+        const pastedFiles: File[] = [];
+        const now = Date.now();
+
+        Array.from(clipboardData.files).forEach((file, index) => {
+          const ext = file.name.includes(".")
+            ? file.name.split(".").pop()
+            : "bin";
+          pastedFiles.push(
+            new File([file], `pasted-${now}-${index}.${ext}`, {
+              type: file.type,
+            }),
+          );
+        });
+
+        handleFilesAdded(pastedFiles, "paste");
+
+        return;
+      }
+
+      if (!isInputFocused) {
+        const text = clipboardData.getData("text/plain");
+        if (text) {
+          e.preventDefault();
+
+          const editor = editorRef.current;
+
+          if (!editor) return;
+
+          editor.focus();
+          setValue((prev) => prev + text);
+        }
+      }
+    };
+
+    window.addEventListener("paste", handleGlobalPaste);
+    return () => window.removeEventListener("paste", handleGlobalPaste);
+  }, [handleFilesAdded]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isOtherInputFocused =
+        (activeEl?.tagName === "INPUT" ||
+          activeEl?.tagName === "TEXTAREA" ||
+          ((activeEl as HTMLElement)?.isContentEditable && activeEl !== editorRef.current));
+
+      if (isOtherInputFocused) return;
+
+      const isFilePasteShortcut =
+        os === "mac"
+          ? e.metaKey &&
+          e.shiftKey &&
+          e.altKey &&
+          (e.key.toLowerCase() === "v" || e.code === "KeyV")
+          : e.ctrlKey &&
+          e.shiftKey &&
+          e.altKey &&
+          (e.key.toLowerCase() === "v" || e.code === "KeyV");
+
+      if (isFilePasteShortcut) {
+        e.preventDefault();
+        handlePasteClipboardAsFile();
+        return;
+      }
 
       const modifierPressed =
         os === "mac"
@@ -522,7 +697,7 @@ export default function Ask() {
           setValue("");
           setIsExpanded(false);
 
-          textareaRef.current?.focus();
+          editorRef.current?.focus();
 
           return;
         }
@@ -538,37 +713,37 @@ export default function Ask() {
 
         if (key === "a") {
           e.preventDefault();
-
           return;
         }
 
         if (key === "m") {
           e.preventDefault();
-
           return;
         }
 
         if (key === "s") {
           e.preventDefault();
-
           if (hasInput) {
             formRef.current?.requestSubmit();
           }
-
           return;
         }
 
         if (key === "x") {
           e.preventDefault();
           handleClearFiles();
-
           return;
         }
       }
 
+      const isInputFocused =
+        activeEl?.tagName === "INPUT" ||
+        activeEl?.tagName === "TEXTAREA" ||
+        (activeEl as HTMLElement)?.isContentEditable;
+
       if (!isInputFocused) {
         if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          textareaRef.current?.focus();
+          editorRef.current?.focus();
         }
       }
     };
@@ -576,7 +751,15 @@ export default function Ask() {
     window.addEventListener("keydown", handleKeyDown);
 
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [os, isScrollable, isExpanded, hasInput, captureCaretPosition, handleClearFiles]);
+  }, [
+    os,
+    isScrollable,
+    isExpanded,
+    hasInput,
+    captureCaretPosition,
+    handleClearFiles,
+    handlePasteClipboardAsFile,
+  ]);
 
   useEffect(() => {
     if (hasText) return;
@@ -593,7 +776,10 @@ export default function Ask() {
     setIsAdjusted(false);
     setIsExpanded(false);
 
-    textareaRef.current?.focus();
+    if (editorRef.current) {
+      editorRef.current.innerText = "";
+      editorRef.current.focus();
+    }
   };
 
   useEffect(() => {
@@ -651,7 +837,7 @@ export default function Ask() {
                     alt="Frame Fluina small dark"
                     width={60}
                     height={60}
-                    className="absolute inset-0 dark:opacity-0 opacity-100 opacity"
+                    className="absolute inset-0 dark:opacity-0 opacity-100 opacity rounded-2xl"
                   />
 
                   <Image
@@ -659,7 +845,7 @@ export default function Ask() {
                     alt="Frame Fluina small light"
                     width={60}
                     height={60}
-                    className="absolute inset-0 dark:opacity-100 opacity-0 opacity"
+                    className="absolute inset-0 dark:opacity-100 opacity-0 opacity rounded-2xl"
                   />
                 </motion.div>
 
@@ -704,26 +890,26 @@ export default function Ask() {
                     : "grid-cols-[auto_1fr_auto_auto]"
               }`}
           >
-            <Menu.Trigger>
-              <motion.div
-                layout="position"
-                transition={TRANSITION}
-                className={`${hasFiles
-                  ? isAdjusted || isExpanded
-                    ? "col-start-1 row-start-4"
-                    : "col-start-1 row-start-2"
-                  : isAdjusted || isExpanded
-                    ? "col-start-1 row-start-3"
-                    : "col-start-1 row-start-1"
-                  }`}
+            <motion.div
+              layout="position"
+              transition={TRANSITION}
+              className={`${hasFiles
+                ? isAdjusted || isExpanded
+                  ? "col-start-1 row-start-4"
+                  : "col-start-1 row-start-2"
+                : isAdjusted || isExpanded
+                  ? "col-start-1 row-start-3"
+                  : "col-start-1 row-start-1"
+                }`}
+            >
+              <Tooltip
+                content="添付"
+                shortcut={{
+                  mac: ["⌘", "Shift", "Option", "A"],
+                  windows: ["Ctrl", "Shift", "Alt", "A"],
+                }}
               >
-                <Tooltip
-                  content="添付"
-                  shortcut={{
-                    mac: ["⌘", "Shift", "Option", "A"],
-                    windows: ["Ctrl", "Shift", "Alt", "A"],
-                  }}
-                >
+                <Menu.Trigger>
                   <Button
                     aria-label="Attatch"
                     shape="circle"
@@ -731,47 +917,47 @@ export default function Ask() {
                   >
                     <Plus className="text-fore-1 all" />
                   </Button>
-                </Tooltip>
-              </motion.div>
 
-              <Menu.Content>
-                <Menu.Item
-                  icon={<Paperclip />}
-                  shortcut="Ctrl+Shift+Alt+U"
-                  onAction={() => fileInputRef.current?.click()}
-                >
-                  ファイルまたは写真を追加
-                </Menu.Item>
-                <Menu.Item icon={<Camera />}>
-                  スクリーンショットを撮る
-                </Menu.Item>
-
-                <Menu.Separator />
-
-                <Menu.SubmenuTrigger>
-                  <Menu.Item icon={<Folder />}>プロジェクトに追加</Menu.Item>
                   <Menu.Content>
-                    <Menu.Item>プロジェクト A</Menu.Item>
-                    <Menu.Item>プロジェクト B</Menu.Item>
+                    <Menu.Item
+                      icon={<Paperclip />}
+                      shortcut="Ctrl+Shift+Alt+U"
+                      onAction={() => fileInputRef.current?.click()}
+                    >
+                      ファイルまたは写真を追加
+                    </Menu.Item>
+                    <Menu.Item icon={<Camera />}>
+                      スクリーンショットを撮る
+                    </Menu.Item>
+
+                    <Menu.Separator />
+
+                    <Menu.SubmenuTrigger>
+                      <Menu.Item icon={<Folder />}>プロジェクトに追加</Menu.Item>
+                      <Menu.Content>
+                        <Menu.Item>プロジェクト A</Menu.Item>
+                        <Menu.Item>プロジェクト B</Menu.Item>
+                      </Menu.Content>
+                    </Menu.SubmenuTrigger>
+
+                    <Menu.Item icon={<Puzzle />}>スキル</Menu.Item>
+                    <Menu.Item icon={<Plug />}>コネクタを追加</Menu.Item>
+                    <Menu.Item icon={<Zap />}>プラグインを追加...</Menu.Item>
+
+                    <Menu.Separator />
+
+                    <Menu.Section
+                      selectionMode="single"
+                      defaultSelectedKeys={["web-search"]}
+                    >
+                      <Menu.Item id="web-search" icon={<Globe />}>
+                        ウェブ検索
+                      </Menu.Item>
+                    </Menu.Section>
                   </Menu.Content>
-                </Menu.SubmenuTrigger>
-
-                <Menu.Item icon={<Puzzle />}>スキル</Menu.Item>
-                <Menu.Item icon={<Plug />}>コネクタを追加</Menu.Item>
-                <Menu.Item icon={<Zap />}>プラグインを追加...</Menu.Item>
-
-                <Menu.Separator />
-
-                <Menu.Section
-                  selectionMode="single"
-                  defaultSelectedKeys={["web-search"]}
-                >
-                  <Menu.Item id="web-search" icon={<Globe />}>
-                    ウェブ検索
-                  </Menu.Item>
-                </Menu.Section>
-              </Menu.Content>
-            </Menu.Trigger>
+                </Menu.Trigger>
+              </Tooltip>
+            </motion.div>
 
             <input
               onChange={handleFileInputChange}
@@ -805,14 +991,28 @@ export default function Ask() {
                     <AnimatePresence mode="popLayout" initial={false}>
                       {files.map(({ id, file }, fileIndex) => {
                         const lastDotIndex = file.name.lastIndexOf(".");
+                        const isExtensionOnly =
+                          file.name.startsWith(".") && lastDotIndex === 0;
                         const hasExtension =
                           lastDotIndex !== -1 && lastDotIndex !== 0;
-                        const fileNameWithoutExt = hasExtension
-                          ? file.name.slice(0, lastDotIndex)
-                          : file.name;
-                        const fileExtension = hasExtension
-                          ? file.name.slice(lastDotIndex + 1).toUpperCase()
-                          : "";
+
+                        let fileNameWithoutExt = "";
+                        let fileExtension = "";
+
+                        if (isExtensionOnly) {
+                          fileNameWithoutExt = "";
+                          fileExtension = file.name.slice(1).toUpperCase();
+                        } else if (hasExtension) {
+                          fileNameWithoutExt = file.name.slice(0, lastDotIndex);
+                          fileExtension = file.name
+                            .slice(lastDotIndex + 1)
+                            .toUpperCase();
+                        } else {
+                          fileNameWithoutExt = file.name;
+                          fileExtension = "";
+                        }
+
+                        const displayBadge = fileExtension;
 
                         return (
                           <motion.div
@@ -822,32 +1022,58 @@ export default function Ask() {
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             transition={TRANSITION}
-                            className="group size-30 relative flex-none flex justify-start items-center rounded-3xl bg-back-2 border border-back-5 overflow-clip"
+                            className="group size-30 relative flex-none overflow-clip flex justify-start items-center rounded-3xl bg-back-2 border border-back-5 focus-within:border-fore-1"
                           >
                             <Tooltip content={file.name} placement="bottom">
                               <Button
+                                onKeyDown={(e) => {
+                                  if (e.key === "Backspace" || e.key === "Delete") {
+                                    e.preventDefault();
+                                    handleRemoveFile(fileIndex);
+                                  }
+                                }}
                                 aria-label={file.name}
-                                className="size-full flex justify-center items-center scale-100! [&>*:not(:first-child)]:scale-100! none"
+                                className="size-full scale-100! [&>*:not(:first-child)]:scale-100! none"
                               >
                                 {filePreviewUrls[fileIndex] ? (
-                                  <Image
-                                    src={filePreviewUrls[fileIndex] ?? ""}
-                                    alt={file.name}
-                                    fill
-                                    unoptimized
-                                    className="size-full object-cover"
-                                  />
+                                  <div className="relative size-full">
+                                    {file.type.startsWith("video/") ? (
+                                      <video
+                                        src={filePreviewUrls[fileIndex] ?? ""}
+                                        className="size-full object-cover"
+                                        preload="metadata"
+                                      >
+                                        <track kind="captions" />
+                                      </video>
+                                    ) : (
+                                      <Image
+                                        src={filePreviewUrls[fileIndex] ?? ""}
+                                        alt={file.name}
+                                        fill
+                                        unoptimized
+                                        className="size-full object-cover"
+                                      />
+                                    )}
+
+                                    {displayBadge && (
+                                      <div className="absolute left-2 right-2 bottom-2">
+                                        <span className="block text-xs text-fore-1 text-center font-sans-serif font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-full">
+                                          {displayBadge}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
                                 ) : (
-                                  <div className="p-2 size-full flex flex-col justify-between overflow-hidden">
-                                    <span className="line-clamp-3 p-1 break-all text-ellipsis overflow-hidden text-sm text-fore-1 text-left font-sans-serif font-medium">
-                                      {fileNameWithoutExt}
+                                  <div className="p-2 size-full flex flex-col justify-between">
+                                    <span className="line-clamp-3 p-1 break-all text-ellipsis text-sm text-fore-1 text-left font-sans-serif font-medium">
+                                      {fileNameWithoutExt || file.name}
                                     </span>
 
-                                    {fileExtension && (
+                                    {displayBadge ? (
                                       <span className="text-xs text-fore-1 text-center font-sans-serif font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-full">
-                                        {fileExtension}
+                                        {displayBadge}
                                       </span>
-                                    )}
+                                    ) : null}
                                   </div>
                                 )}
                               </Button>
@@ -856,6 +1082,10 @@ export default function Ask() {
                             <Tooltip
                               content="削除"
                               placement="left"
+                              shortcut={{
+                                mac: ["Delete"],
+                                windows: ["Backspace"],
+                              }}
                             >
                               <Button
                                 onPress={() => handleRemoveFile(fileIndex)}
@@ -910,7 +1140,7 @@ export default function Ask() {
               )}
             </AnimatePresence>
 
-            <motion.label
+            <motion.div
               layout="position"
               transition={TRANSITION}
               className={`relative w-full flex flex-col justify-start items-start ${isExpanded ? "h-full" : ""
@@ -923,8 +1153,6 @@ export default function Ask() {
                     : "col-start-2 row-start-1"
                 }`}
             >
-              <span className="sr-only">プロンプトを入力</span>
-
               {!hasText && (
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.span
@@ -977,9 +1205,20 @@ export default function Ask() {
                     : undefined
                 }
               >
-                <motion.textarea
-                  onChange={(e) => {
-                    setValue(e.target.value);
+                <motion.div
+                  autoFocus
+                  contentEditable
+                  suppressContentEditableWarning
+                  ref={editorRef}
+                  onInput={(e) => {
+                    const text = e.currentTarget.innerText;
+
+                    if (text === "\n" || text === "\r\n") {
+                      e.currentTarget.textContent = "";
+                      setValue("");
+                    } else {
+                      setValue(text);
+                    }
                   }}
                   onKeyDown={handleTextareaKeyDown}
                   onCompositionStart={() => {
@@ -990,18 +1229,13 @@ export default function Ask() {
                       isComposingRef.current = false;
                     }, 0);
                   }}
-                  ref={textareaRef}
-                  value={value}
-                  autoFocus
-                  rows={1}
                   spellCheck={false}
+                  aria-multiline="true"
                   id="prompt"
-                  name="prompt"
-                  placeholder=""
                   className="block outline-none overflow-y-clip resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
                 />
               </motion.div>
-            </motion.label>
+            </motion.div>
 
             <AnimatePresence mode="popLayout" initial={false}>
               {hasText && (
@@ -1024,7 +1258,7 @@ export default function Ask() {
                     content="削除"
                     placement={isAdjusted ? "left" : "bottom"}
                     shortcut={{
-                      mac: ["⌘", "Shift", "Option", "Backspace"],
+                      mac: ["⌘", "Shift", "Option", "Delete"],
                       windows: ["Ctrl", "Shift", "Alt", "Backspace"],
                     }}
                   >
@@ -1193,7 +1427,7 @@ export default function Ask() {
             </motion.div>
           </motion.form>
         </LayoutGroup>
-      </div>
+      </div >
     </>
   );
 }
