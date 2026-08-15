@@ -46,6 +46,12 @@ const PLACEHOLDERS = [
   "今日も、おつかれ様。",
 ];
 
+interface ImageCaptureConstructor {
+  new(track: MediaStreamTrack): {
+    grabFrame(): Promise<ImageBitmap>;
+  };
+}
+
 type AttachedFile = {
   id: string;
   file: File;
@@ -168,7 +174,7 @@ export default function Ask() {
   };
 
   //  ================================================================
-  //    テキストエリア (div.contentEditable) の高さ・スクロール計算
+  //    テキストエリア
   //  ================================================================
 
   const calcTextarea = useCallback(() => {
@@ -259,14 +265,17 @@ export default function Ask() {
     if (value === "") {
       if (currentDomText !== "") {
         editorRef.current.textContent = "";
+        calcTextarea();
       }
       return;
     }
 
     if (currentDomText !== value) {
       editorRef.current.innerText = value;
+
+      calcTextarea();
     }
-  }, [value]);
+  }, [value, calcTextarea]);
 
   useEffect(() => {
     const vv = window.visualViewport;
@@ -790,6 +799,41 @@ export default function Ask() {
     };
   }, []);
 
+  const handleTakeScreenshot = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: "browser" },
+      });
+      const track = stream.getVideoTracks()[0];
+      const ImageCaptureClass = (window as unknown as { ImageCapture?: ImageCaptureConstructor }).ImageCapture;
+
+      if (!ImageCaptureClass) {
+        throw new Error("ImageCapture API is not supported in this browser.");
+      }
+
+      const imageCapture = new ImageCaptureClass(track);
+      const bitmap = await imageCapture.grabFrame();
+      const canvas = document.createElement("canvas");
+
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+
+      const context = canvas.getContext("2d");
+
+      context?.drawImage(bitmap, 0, 0);
+      track.stop();
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const file = new File([blob], `screenshot-${Date.now()}.png`, {
+          type: "image/png",
+        });
+        handleFilesAdded([file], "input");
+      }, "image/png");
+    } catch (err) {
+      console.warn("Screenshot capture cancelled or failed:", err);
+    }
+  }, [handleFilesAdded]);
+
   return (
     <>
       <AnimatePresence mode="popLayout" initial={false}>
@@ -924,10 +968,10 @@ export default function Ask() {
                       shortcut="Ctrl+Shift+Alt+U"
                       onAction={() => fileInputRef.current?.click()}
                     >
-                      ファイルまたは写真を追加
+                      ファイルを添付
                     </Menu.Item>
-                    <Menu.Item icon={<Camera />}>
-                      スクリーンショットを撮る
+                    <Menu.Item onAction={handleTakeScreenshot} icon={<Camera />}>
+                      スクリーンショットを撮影
                     </Menu.Item>
 
                     <Menu.Separator />
@@ -1022,7 +1066,7 @@ export default function Ask() {
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             transition={TRANSITION}
-                            className="group size-30 relative flex-none overflow-clip flex justify-start items-center rounded-3xl bg-back-2 border border-back-5 focus-within:border-fore-1"
+                            className="group size-30 relative flex-none overflow-clip flex justify-start items-center rounded-3xl bg-back-2 border border-back-5 focus-within:border-2 focus-within:border-fore-1"
                           >
                             <Tooltip content={file.name} placement="bottom">
                               <Button
@@ -1033,7 +1077,7 @@ export default function Ask() {
                                   }
                                 }}
                                 aria-label={file.name}
-                                className="size-full scale-100! [&>*:not(:first-child)]:scale-100! none"
+                                className="size-full scale-100! [&>*:not(:first-child)]:scale-100!"
                               >
                                 {filePreviewUrls[fileIndex] ? (
                                   <div className="relative size-full">
