@@ -49,11 +49,12 @@ configureOverlayScrollbars();
 
 export type ScrollAxis = "x" | "y" | "both" | "none";
 
-export interface UseOverlayScrollOptions {
+export interface UseOverlayScrollOptions<T extends HTMLElement = HTMLElement> {
   axis: ScrollAxis;
   enabled?: boolean;
   autoHide?: "never" | "scroll" | "leave" | "move";
   enableEdgeFade?: boolean;
+  elementRef?: RefObject<T | null>;
   onScroll?: (
     viewport: HTMLElement,
     instance: OverlayScrollbarsInstance,
@@ -108,15 +109,18 @@ export function useOverlayScroll<T extends HTMLElement = HTMLDivElement>(
     enabled = true,
     autoHide = "leave",
     enableEdgeFade = true,
+    elementRef: externalRef,
     onScroll,
     onInit,
-  }: UseOverlayScrollOptions,
+  }: UseOverlayScrollOptions<T>,
   deps: DependencyList = [],
 ): UseOverlayScrollResult<T> {
-  const elementRef = useRef<T>(null);
+  const internalRef = useRef<T>(null);
+  const elementRef = externalRef ?? internalRef;
   const osInstanceRef = useRef<OverlayScrollbarsInstance | null>(null);
   const onScrollRef = useRef(onScroll);
   const onInitRef = useRef(onInit);
+  const initCleanupRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => {
     onScrollRef.current = onScroll;
@@ -160,20 +164,32 @@ export function useOverlayScroll<T extends HTMLElement = HTMLDivElement>(
       });
     }
 
-    const cleanupInit = onInitRef.current?.(
-      osInstance.elements().viewport,
-      osInstance,
-    );
-
     return () => {
-      cleanupInit?.();
+      initCleanupRef.current?.();
+      initCleanupRef.current = undefined;
 
       if (osInstanceRef.current === osInstance) {
         osInstance.destroy();
         osInstanceRef.current = null;
       }
     };
-  }, [axis, enabled, autoHide, enableEdgeFade, ...deps]);
+  }, [axis, enabled, autoHide, enableEdgeFade, elementRef]);
+
+  useEffect(() => {
+    const instance = osInstanceRef.current;
+    if (!instance) return;
+
+    initCleanupRef.current?.();
+    initCleanupRef.current = onInitRef.current?.(
+      instance.elements().viewport,
+      instance,
+    );
+
+    return () => {
+      initCleanupRef.current?.();
+      initCleanupRef.current = undefined;
+    };
+  }, [...deps]);
 
   return { elementRef, osInstanceRef };
 }

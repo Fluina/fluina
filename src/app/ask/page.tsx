@@ -30,7 +30,7 @@ import {
 } from "react";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
-import { Button, Menu, Tooltip } from "@/components/parts";
+import { Button, Menu, Tooltip, ScrollArea } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useOS } from "@/lib/os";
 import { useOverlayScroll } from "@/lib/overlayscrollbars";
@@ -58,21 +58,25 @@ type AttachedFile = {
   source: "input" | "paste" | "drag";
 };
 
+type Message = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
 export default function Ask() {
   const os = useOS();
+  const [isMobile, setIsMobile] = useState(false);
 
+  const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [value, setValue] = useState("");
   const [isAdjusted, setIsAdjusted] = useState(false);
   const [isScrollable, setIsScrollable] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [placeholderIndex, setPlaceholderIndex] = useState(0);
-
   const [files, setFiles] = useState<AttachedFile[]>([]);
 
-  const [aiReply, setAiReply] = useState<string>("");
+  const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-
-  const [isMobile, setIsMobile] = useState(false);
 
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -82,17 +86,16 @@ export default function Ask() {
     caretTop: number;
     caretRatio: number | null;
   } | null>(null);
-
-  const hasText = value.length > 0;
-  const hasInput = value.trim().length > 0;
-  const hasFiles = files.length > 0;
-
   const singleLineRef = useRef<number>(0);
   const singleLineWidthRef = useRef<number>(0);
   const isComposingRef = useRef(false);
   const pendingLineBreakTimeoutRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+
+  const hasText = value.length > 0;
+  const hasInput = value.trim().length > 0;
+  const hasFiles = files.length > 0;
 
   const { elementRef: scrollRef } = useOverlayScroll<HTMLDivElement>(
     {
@@ -110,12 +113,10 @@ export default function Ask() {
 
         const restore = () => {
           const maxScrollTop = Math.max(el.scrollHeight - el.clientHeight, 0);
-
           const target =
             caretRatio !== null
               ? caretTop - caretRatio * el.clientHeight
               : prevScrollTop;
-
           const clamped = Math.min(Math.max(target, 0), maxScrollTop);
           el.scrollTop = clamped;
           scrollTopRef.current = clamped;
@@ -140,37 +141,149 @@ export default function Ask() {
     if (!hasInput || isLoading) return;
 
     const userPrompt = value.trim();
+    const userMessageId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
+    if (typeof window !== "undefined" && !navigator.onLine) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: userMessageId,
+          role: "user",
+          content: userPrompt,
+        },
+        {
+          id: `${userMessageId}-error`,
+          role: "assistant",
+          content:
+            "ネットワークに接続されていないため、接続環境を確認してください。",
+        },
+      ]);
+
+      return;
+    }
+
+    const newUserMessage: Message = {
+      id: userMessageId,
+      role: "user",
+      content: userPrompt,
+    };
+
+    setMessages((prev) => [...prev, newUserMessage]);
     setValue("");
+    setIsAdjusted(false);
+    setIsScrollable(false);
     setIsExpanded(false);
     setFiles([]);
-
     setIsLoading(true);
-    setAiReply("Fluinaが考え中...");
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const assistantMessageId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const apiUrl =
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
+      if (!apiUrl.startsWith("http")) {
+        throw new Error("CONFIG_ERROR: APIのURL設定が不正です。");
+      }
 
       const response = await fetch(`${apiUrl}/api/ask`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt: userPrompt }),
+        body: JSON.stringify({
+          prompt: userPrompt,
+          history: [...messages, newUserMessage],
+        }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
-        throw new Error("Failed to fetch response from Elysia server");
+        const status = response.status;
+        const errorMessages: Record<number, string> = {
+          400: "400: 入力内容またはリクエストのフォーマットが不正です。",
+          401: "401: 認証エラーが発生しました。ログインし直してください。",
+          403: "403: アクセスが拒否されました。",
+          404: "404: 該当するAPIエンドポイントが見つかりませんでした。",
+          413: "413: 送信データまたはファイルのサイズが大きすぎます。",
+          422: "422: 入力内容のバリデーションエラーです。",
+          429: "429: リクエスト回数の制限を超えました。少し時間を置いてお試しください。",
+          500: "500: サーバー内部でエラーが発生しました。",
+          502: "502: サーバーが一時的に利用できないか、メンテナンス中です。",
+          503: "503: サーバーが一時的に利用できないか、メンテナンス中です。",
+          504: "504: サーバーの処理がタイムアウトしました。",
+        };
+        const message =
+          errorMessages[status] ||
+          `${status}: 未定義のエラーが発生しました。`;
+        throw new Error(message);
       }
 
-      const data = await response.json();
-      setAiReply(data.reply);
-    } catch (error) {
-      console.error("Connection Error:", error);
-      setAiReply(
-        "エラーが発生しました。バックエンドサーバーが起動しているか確認してください。",
-      );
+      let data: unknown;
+
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(
+          "PARSE_ERROR: サーバーからの返答データを正しく読み込めませんでした。",
+        );
+      }
+
+      if (
+        !data ||
+        typeof data !== "object" ||
+        !("reply" in data) ||
+        typeof (data as { reply: unknown }).reply !== "string"
+      ) {
+        throw new Error("SCHEMA_ERROR: サーバーの返答形式が想定と異なります。");
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          content: (data as { reply: string }).reply,
+        },
+      ]);
+    } catch (error: unknown) {
+      console.error("Submit Error:", error);
+
+      let errorMessage = "予期せぬエラーが発生しました。";
+
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          errorMessage =
+            "応答時間が長すぎたため処理を中断しました（タイムアウト）。";
+        } else if (
+          error.name === "TypeError" &&
+          error.message.includes("fetch")
+        ) {
+          errorMessage =
+            "サーバーに接続できませんでした。CORS設定またはサーバーの起動状態を確認してください。";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          content: errorMessage,
+        },
+      ]);
     } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   };
@@ -186,7 +299,6 @@ export default function Ask() {
       scrollRef.current;
 
     if (!editor) return;
-
     const currentScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
     const isAtBottom = scrollContainer
       ? scrollContainer.scrollHeight -
@@ -262,17 +374,16 @@ export default function Ask() {
   useEffect(() => {
     if (!editorRef.current) return;
 
-    const currentDomText = editorRef.current.innerText;
-
     if (value === "") {
-      if (currentDomText !== "") {
-        editorRef.current.textContent = "";
+      if (editorRef.current.innerText !== "") {
+        editorRef.current.innerText = "";
+
         calcTextarea();
       }
       return;
     }
 
-    if (currentDomText !== value) {
+    if (document.activeElement !== editorRef.current && editorRef.current.innerText !== value) {
       editorRef.current.innerText = value;
 
       calcTextarea();
@@ -298,6 +409,7 @@ export default function Ask() {
     const editor = editorRef.current;
 
     let caretLine = 0;
+
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0 && editor) {
       const range = sel.getRangeAt(0);
@@ -420,7 +532,6 @@ export default function Ask() {
 
     const getActualFileCount = (e: DragEvent) => {
       if (!e.dataTransfer) return 0;
-
       if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
         return Array.from(e.dataTransfer.items).filter(
           (item) => item.kind === "file",
@@ -439,7 +550,9 @@ export default function Ask() {
       dragCounterRef.current += 1;
 
       const fileCount = getActualFileCount(e);
+
       setIsDragOver(true);
+
       if (fileCount > 0) {
         setDragFileCount(fileCount);
       }
@@ -484,6 +597,7 @@ export default function Ask() {
       setDragFileCount(0);
 
       const dt = e.dataTransfer;
+
       if (!dt) return;
 
       let droppedFiles: File[] = [];
@@ -871,15 +985,20 @@ export default function Ask() {
 
       <div className="size-full flex flex-col p-4 gap-8 items-center max-w-3xl justify-center">
         <LayoutGroup>
-          <AnimatePresence mode="popLayout">
-            {!isExpanded && (
+          <AnimatePresence mode="popLayout" initial={false}>
+            {messages.length === 0 && !isExpanded && (
               <motion.div
                 layout="position"
                 initial={{ opacity: 0, y: 25 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -25 }}
                 transition={TRANSITION}
-                className="max-md:mt-auto flex flex-col justify-center items-center gap-4"
+                className={`flex flex-col justify-center items-center gap-4
+                  ${messages.length === 0
+                    ? "max-md:mt-auto"
+                    : "mt-auto"
+                  }
+                  `}
               >
                 <motion.div
                   layout="position"
@@ -914,22 +1033,62 @@ export default function Ask() {
             )}
           </AnimatePresence>
 
-          {aiReply && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`w-full p-4 rounded-2xl bg-back-2 border border-back-5 text-fore-1 font-sans-serif text-left ${isLoading ? "animate-pulse opacity-70" : ""}`}
-            >
-              <p className="whitespace-pre-wrap">{aiReply}</p>
-            </motion.div>
-          )}
+          <ScrollArea
+            overlayScroll={{ axis: "y" }}
+            autoScroll={{
+              enabled: true,
+              behavior: "smooth",
+              deps: [messages.length, isLoading],
+            }}
+            className="w-full"
+          >
+            <AnimatePresence mode="popLayout" initial={false}>
+              {!isExpanded && (
+                <motion.div
+                  layout="size"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={TRANSITION}
+                  className="flex flex-col gap-4"
+                >
+                  {messages.map((msg) => (
+                    <motion.div
+                      key={msg.id}
+                      layout="position"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={TRANSITION}
+                      className={`p-4 rounded-2xl font-sans-serif text-left ${msg.role === "user"
+                        ? "bg-fore-1 text-back-1 self-end"
+                        : "bg-back-2 border border-back-5 text-fore-1 self-start"
+                        }`}
+                    >
+                      <p className="whitespace-pre-wrap wrap-break-word">{msg.content}</p>
+                    </motion.div>
+                  ))}
+
+                  {isLoading && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-4 rounded-2xl bg-back-2 border border-back-5 text-fore-1 font-sans-serif self-start animate-pulse"
+                    >
+                      <p>Fluinaが考えています...</p>
+                    </motion.div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </ScrollArea>
 
           <motion.form
             onSubmit={handleSubmit}
             ref={formRef}
             layout
             transition={TRANSITION}
-            className={`max-md:mt-auto grid gap-1 min-h-0 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
+            className={`flex-none grid gap-1 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
               ${isExpanded ? "h-full" : "max-h-full"}
               ${hasFiles
                 ? isAdjusted || isExpanded
@@ -942,7 +1101,9 @@ export default function Ask() {
                   : hasText
                     ? "grid-cols-[auto_1fr_auto_auto_auto]"
                     : "grid-cols-[auto_1fr_auto_auto]"
-              }`}
+              }
+              ${messages.length === 0 ? "max-md:mt-auto" : "mt-auto"}
+              `}
           >
             <motion.div
               layout="position"
@@ -1268,13 +1429,12 @@ export default function Ask() {
                   suppressContentEditableWarning
                   ref={editorRef}
                   onInput={(e) => {
-                    const text = e.currentTarget.innerText;
+                    const rawText = e.currentTarget.innerText;
 
-                    if (text === "\n" || text === "\r\n") {
-                      e.currentTarget.textContent = "";
+                    if (rawText === "\n" || rawText === "\r\n") {
                       setValue("");
                     } else {
-                      setValue(text);
+                      setValue(rawText);
                     }
                   }}
                   onKeyDown={handleTextareaKeyDown}
@@ -1483,8 +1643,8 @@ export default function Ask() {
               </Tooltip>
             </motion.div>
           </motion.form>
-        </LayoutGroup>
-      </div>
+        </LayoutGroup >
+      </div >
     </>
   );
 }
