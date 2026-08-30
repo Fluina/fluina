@@ -1,6 +1,6 @@
 "use client";
 import { Check, ChevronRight } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import type { ReactElement, ReactNode } from "react";
 import {
   Menu as AriaMenu,

@@ -32,7 +32,7 @@ const buttonVariants = tv({
 
 export interface ButtonProps
   extends Omit<RACButtonProps, "color">,
-  VariantProps<typeof buttonVariants> {
+    VariantProps<typeof buttonVariants> {
   ripple?: boolean;
 }
 

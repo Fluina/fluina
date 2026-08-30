@@ -195,7 +195,7 @@
   }
 
   body {
-    @apply w-dvw h-dvh overflow-hidden overscroll-none font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
+    @apply w-dvw h-dvh overflow-hidden overscroll-none text-left font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
   }
 
   input,
@@ -209,6 +209,11 @@
   *::selection {
     color: var(--back-1);
     background-color: var(--fore-1);
+  }
+
+  .theme-selection::selection {
+    color: var(--fore-1);
+    background-color: var(--color-blue);
   }
 
   *::-ms-reveal {
@@ -281,7 +286,11 @@
   --os-handle-perpendicular-size-active: 0.4rem;
   --os-handle-bg: color-mix(in srgb, var(--color-fore-2) 50%, transparent);
   --os-handle-bg-hover: color-mix(in srgb, var(--color-fore-4) 50%, transparent);
-  --os-handle-bg-active: color-mix(in srgb, var(--color-fore-3) 50%, transparent);
+  --os-handle-bg-active: color-mix(
+    in srgb,
+    var(--color-fore-3) 50%,
+    transparent
+  );
 }
 
 .os-theme .os-scrollbar-handle {
@@ -300,22 +309,55 @@
 
 .os-edge-fade > [data-overlayscrollbars-viewport] {
   mask-image:
-    linear-gradient(to bottom, transparent 0, var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))),
-    linear-gradient(to top, transparent 0, var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))),
-    linear-gradient(to right, transparent 0, var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))),
-    linear-gradient(to left, transparent 0, var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size)));
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))
+    ),
+    linear-gradient(
+      to top,
+      transparent 0,
+      var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))
+    ),
+    linear-gradient(
+      to right,
+      transparent 0,
+      var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))
+    ),
+    linear-gradient(
+      to left,
+      transparent 0,
+      var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size))
+    );
   mask-composite: intersect;
 
   -webkit-mask-image:
-    linear-gradient(to bottom, transparent 0, var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))),
-    linear-gradient(to top, transparent 0, var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))),
-    linear-gradient(to right, transparent 0, var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))),
-    linear-gradient(to left, transparent 0, var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size)));
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))
+    ),
+    linear-gradient(
+      to top,
+      transparent 0,
+      var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))
+    ),
+    linear-gradient(
+      to right,
+      transparent 0,
+      var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))
+    ),
+    linear-gradient(
+      to left,
+      transparent 0,
+      var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size))
+    );
   -webkit-mask-composite: source-in;
 
   transition:
     --os-fade-top var(--transition-duration) var(--transition-timing-function),
-    --os-fade-bottom var(--transition-duration) var(--transition-timing-function),
+    --os-fade-bottom var(--transition-duration)
+    var(--transition-timing-function),
     --os-fade-left var(--transition-duration) var(--transition-timing-function),
     --os-fade-right var(--transition-duration) var(--transition-timing-function);
 }

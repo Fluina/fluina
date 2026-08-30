@@ -3,6 +3,8 @@ import {
   ArrowUp,
   AudioLines,
   Camera,
+  Check,
+  Copy,
   Delete,
   Folder,
   Globe,
@@ -10,9 +12,11 @@ import {
   Mic,
   Minimize2,
   Paperclip,
+  Pencil,
   Plug,
   Plus,
   Puzzle,
+  RotateCcw,
   Trash2,
   X,
   Zap,
@@ -30,7 +34,7 @@ import {
 } from "react";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
-import { Button, Menu, Tooltip, ScrollArea } from "@/components/parts";
+import { Button, Menu, ScrollArea, Tooltip } from "@/components/parts";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useOS } from "@/lib/os";
 import { useOverlayScroll } from "@/lib/overlayscrollbars";
@@ -47,7 +51,9 @@ const PLACEHOLDERS = [
 ];
 
 interface ImageCaptureConstructor {
-  new(track: MediaStreamTrack): {
+  new(
+    track: MediaStreamTrack,
+  ): {
     grabFrame(): Promise<ImageBitmap>;
   };
 }
@@ -62,6 +68,46 @@ type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  timestamp: number;
+};
+
+const generateId = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+// contentEditable への貼り付け時、クリップボードのHTML装飾（太字・色・リンク等）を
+// 破棄してプレーンテキストのみ挿入する。装飾はこちら側が用意したものだけを許可したいため、
+// 外部からの持ち込みはここで一律に無効化する。
+const pastePlainText = (e: React.ClipboardEvent<HTMLDivElement>) => {
+  e.preventDefault();
+
+  const text = e.clipboardData.getData("text/plain");
+  const selection = window.getSelection();
+
+  if (!selection || selection.rangeCount === 0) return;
+
+  const range = selection.getRangeAt(0);
+
+  range.deleteContents();
+
+  const textNode = document.createTextNode(text);
+
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.setEndAfter(textNode);
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  // DOMを直接書き換えただけでは input イベントが発火せず、
+  // React 側の state（value / editingValue）が更新されないため手動で発火させる。
+  e.currentTarget.dispatchEvent(
+    new InputEvent("input", {
+      bubbles: true,
+      inputType: "insertText",
+      data: text,
+    }),
+  );
 };
 
 export default function Ask() {
@@ -77,6 +123,10 @@ export default function Ask() {
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const editingRef = useRef<HTMLDivElement>(null);
+  const editingInitialValueRef = useRef("");
 
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -136,15 +186,135 @@ export default function Ask() {
   //    送信
   //  ================================================================
 
+  const formatMessageTime = (timestamp: number) =>
+    new Date(timestamp).toLocaleTimeString("ja-JP", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+
+  const requestAssistantReply = useCallback(
+    async (promptContent: string, historyForApi: Message[]) => {
+      setIsLoading(true);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const assistantMessageId = generateId();
+
+      try {
+        const apiUrl =
+          process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
+        if (!apiUrl.startsWith("http")) {
+          throw new Error("CONFIG_ERROR: APIのURL設定が不正です。");
+        }
+
+        const response = await fetch(`${apiUrl}/api/ask`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            prompt: promptContent,
+            history: historyForApi,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const status = response.status;
+          const errorMessages: Record<number, string> = {
+            400: "400: 入力内容またはリクエストのフォーマットが不正です。",
+            401: "401: 認証エラーが発生しました。ログインし直してください。",
+            403: "403: アクセスが拒否されました。",
+            404: "404: 該当するAPIエンドポイントが見つかりませんでした。",
+            413: "413: 送信データまたはファイルのサイズが大きすぎます。",
+            422: "422: 入力内容のバリデーションエラーです。",
+            429: "429: リクエスト回数の制限を超えました。少し時間を置いてお試しください。",
+            500: "500: サーバー内部でエラーが発生しました。",
+            502: "502: サーバーが一時的に利用できないか、メンテナンス中です。",
+            503: "503: サーバーが一時的に利用できないか、メンテナンス中です。",
+            504: "504: サーバーの処理がタイムアウトしました。",
+          };
+          const message =
+            errorMessages[status] ||
+            `${status}: 未定義のエラーが発生しました。`;
+          throw new Error(message);
+        }
+
+        let data: unknown;
+
+        try {
+          data = await response.json();
+        } catch {
+          throw new Error(
+            "PARSE_ERROR: サーバーからの返答データを正しく読み込めませんでした。",
+          );
+        }
+
+        if (
+          !data ||
+          typeof data !== "object" ||
+          !("reply" in data) ||
+          typeof (data as { reply: unknown }).reply !== "string"
+        ) {
+          throw new Error(
+            "SCHEMA_ERROR: サーバーの返答形式が想定と異なります。",
+          );
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantMessageId,
+            role: "assistant",
+            content: (data as { reply: string }).reply,
+            timestamp: Date.now(),
+          },
+        ]);
+      } catch (error: unknown) {
+        console.error("Submit Error:", error);
+
+        let errorMessage = "予期せぬエラーが発生しました。";
+
+        if (error instanceof Error) {
+          if (error.name === "AbortError") {
+            errorMessage =
+              "応答時間が長すぎたため処理を中断しました（タイムアウト）。";
+          } else if (
+            error.name === "TypeError" &&
+            error.message.includes("fetch")
+          ) {
+            errorMessage =
+              "サーバーに接続できませんでした。CORS設定またはサーバーの起動状態を確認してください。";
+          } else {
+            errorMessage = error.message;
+          }
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: assistantMessageId,
+            role: "assistant",
+            content: errorMessage,
+            timestamp: Date.now(),
+          },
+        ]);
+      } finally {
+        clearTimeout(timeoutId);
+        setIsLoading(false);
+      }
+    },
+    [],
+  );
+
   const handleSubmit = async (e?: SyntheticEvent<HTMLFormElement>) => {
     if (e) e.preventDefault();
     if (!hasInput || isLoading) return;
 
     const userPrompt = value.trim();
-    const userMessageId =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const userMessageId = generateId();
 
     if (typeof window !== "undefined" && !navigator.onLine) {
       setMessages((prev) => [
@@ -153,12 +323,14 @@ export default function Ask() {
           id: userMessageId,
           role: "user",
           content: userPrompt,
+          timestamp: Date.now(),
         },
         {
           id: `${userMessageId}-error`,
           role: "assistant",
           content:
             "ネットワークに接続されていないため、接続環境を確認してください。",
+          timestamp: Date.now(),
         },
       ]);
 
@@ -169,6 +341,7 @@ export default function Ask() {
       id: userMessageId,
       role: "user",
       content: userPrompt,
+      timestamp: Date.now(),
     };
 
     setMessages((prev) => [...prev, newUserMessage]);
@@ -177,116 +350,79 @@ export default function Ask() {
     setIsScrollable(false);
     setIsExpanded(false);
     setFiles([]);
-    setIsLoading(true);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    const assistantMessageId =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-    try {
-      const apiUrl =
-        process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-
-      if (!apiUrl.startsWith("http")) {
-        throw new Error("CONFIG_ERROR: APIのURL設定が不正です。");
-      }
-
-      const response = await fetch(`${apiUrl}/api/ask`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: userPrompt,
-          history: [...messages, newUserMessage],
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const status = response.status;
-        const errorMessages: Record<number, string> = {
-          400: "400: 入力内容またはリクエストのフォーマットが不正です。",
-          401: "401: 認証エラーが発生しました。ログインし直してください。",
-          403: "403: アクセスが拒否されました。",
-          404: "404: 該当するAPIエンドポイントが見つかりませんでした。",
-          413: "413: 送信データまたはファイルのサイズが大きすぎます。",
-          422: "422: 入力内容のバリデーションエラーです。",
-          429: "429: リクエスト回数の制限を超えました。少し時間を置いてお試しください。",
-          500: "500: サーバー内部でエラーが発生しました。",
-          502: "502: サーバーが一時的に利用できないか、メンテナンス中です。",
-          503: "503: サーバーが一時的に利用できないか、メンテナンス中です。",
-          504: "504: サーバーの処理がタイムアウトしました。",
-        };
-        const message =
-          errorMessages[status] ||
-          `${status}: 未定義のエラーが発生しました。`;
-        throw new Error(message);
-      }
-
-      let data: unknown;
-
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error(
-          "PARSE_ERROR: サーバーからの返答データを正しく読み込めませんでした。",
-        );
-      }
-
-      if (
-        !data ||
-        typeof data !== "object" ||
-        !("reply" in data) ||
-        typeof (data as { reply: unknown }).reply !== "string"
-      ) {
-        throw new Error("SCHEMA_ERROR: サーバーの返答形式が想定と異なります。");
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          content: (data as { reply: string }).reply,
-        },
-      ]);
-    } catch (error: unknown) {
-      console.error("Submit Error:", error);
-
-      let errorMessage = "予期せぬエラーが発生しました。";
-
-      if (error instanceof Error) {
-        if (error.name === "AbortError") {
-          errorMessage =
-            "応答時間が長すぎたため処理を中断しました（タイムアウト）。";
-        } else if (
-          error.name === "TypeError" &&
-          error.message.includes("fetch")
-        ) {
-          errorMessage =
-            "サーバーに接続できませんでした。CORS設定またはサーバーの起動状態を確認してください。";
-        } else {
-          errorMessage = error.message;
-        }
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          content: errorMessage,
-        },
-      ]);
-    } finally {
-      clearTimeout(timeoutId);
-      setIsLoading(false);
-    }
+    await requestAssistantReply(userPrompt, [...messages, newUserMessage]);
   };
+
+  //  ================================================================
+  //    メッセージ
+  //  ================================================================
+
+  const handleCopyMessage = useCallback(async (content: string) => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(content);
+      }
+    } catch (error) {
+      console.error("Copy Error:", error);
+    }
+  }, []);
+  const handleStartEdit = useCallback(
+    (msg: Message) => {
+      if (isLoading) return;
+      editingInitialValueRef.current = msg.content;
+      setEditingMessageId(msg.id);
+      setEditingValue(msg.content);
+    },
+    [isLoading],
+  );
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+    setEditingValue("");
+  }, []);
+
+  const handleSubmitEdit = useCallback(
+    async (id: string) => {
+      const trimmed = editingValue.trim();
+
+      if (!trimmed || isLoading) return;
+
+      const index = messages.findIndex((m) => m.id === id);
+
+      if (index === -1) return;
+
+      const updatedMessage: Message = {
+        ...messages[index],
+        content: trimmed,
+        timestamp: Date.now(),
+      };
+      const truncatedHistory = [...messages.slice(0, index), updatedMessage];
+
+      setMessages(truncatedHistory);
+      setEditingMessageId(null);
+      setEditingValue("");
+
+      await requestAssistantReply(trimmed, truncatedHistory);
+    },
+    [editingValue, isLoading, messages, requestAssistantReply],
+  );
+
+  const handleRetryMessage = useCallback(
+    async (id: string) => {
+      if (isLoading) return;
+
+      const index = messages.findIndex((m) => m.id === id);
+      if (index === -1) return;
+
+      const targetMessage = messages[index];
+      const truncatedHistory = messages.slice(0, index + 1);
+
+      setMessages(truncatedHistory);
+
+      await requestAssistantReply(targetMessage.content, truncatedHistory);
+    },
+    [isLoading, messages, requestAssistantReply],
+  );
 
   //  ================================================================
   //    テキストエリア
@@ -383,7 +519,10 @@ export default function Ask() {
       return;
     }
 
-    if (document.activeElement !== editorRef.current && editorRef.current.innerText !== value) {
+    if (
+      document.activeElement !== editorRef.current &&
+      editorRef.current.innerText !== value
+    ) {
       editorRef.current.innerText = value;
 
       calcTextarea();
@@ -479,13 +618,16 @@ export default function Ask() {
 
   const handleFilesAdded = useCallback(
     (newFiles: FileList | File[], source: AttachedFile["source"] = "input") => {
-      const newAttachedFiles: AttachedFile[] = Array.from(newFiles).map((file) => ({
-        id: typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-        file,
-        source,
-      }));
+      const newAttachedFiles: AttachedFile[] = Array.from(newFiles).map(
+        (file) => ({
+          id:
+            typeof crypto !== "undefined" && crypto.randomUUID
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          file,
+          source,
+        }),
+      );
       setFiles((prev) => [...prev, ...newAttachedFiles]);
     },
     [],
@@ -527,7 +669,10 @@ export default function Ask() {
     const hasFilesCheck = (e: DragEvent) => {
       if (!e.dataTransfer) return false;
 
-      return e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files");
+      return (
+        e.dataTransfer.types &&
+        Array.from(e.dataTransfer.types).includes("Files")
+      );
     };
 
     const getActualFileCount = (e: DragEvent) => {
@@ -648,9 +793,7 @@ export default function Ask() {
     setIsMobile(isMobileDevice());
   }, [isMobileDevice]);
 
-  const handleTextareaKeyDown = (
-    e: React.KeyboardEvent<HTMLDivElement>,
-  ) => {
+  const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (
       e.nativeEvent.isComposing ||
       isComposingRef.current ||
@@ -794,9 +937,10 @@ export default function Ask() {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
       const isOtherInputFocused =
-        (activeEl?.tagName === "INPUT" ||
-          activeEl?.tagName === "TEXTAREA" ||
-          ((activeEl as HTMLElement)?.isContentEditable && activeEl !== editorRef.current));
+        activeEl?.tagName === "INPUT" ||
+        activeEl?.tagName === "TEXTAREA" ||
+        ((activeEl as HTMLElement)?.isContentEditable &&
+          activeEl !== editorRef.current);
 
       if (isOtherInputFocused) return;
 
@@ -904,6 +1048,25 @@ export default function Ask() {
     return () => clearInterval(interval);
   }, [hasText]);
 
+  useEffect(() => {
+    if (!editingMessageId || !editingRef.current) return;
+
+    const el = editingRef.current;
+
+    el.textContent = editingInitialValueRef.current;
+    el.focus();
+
+    const range = document.createRange();
+
+    range.selectNodeContents(el);
+    range.collapse(false);
+
+    const selection = window.getSelection();
+
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, [editingMessageId]);
+
   const handleClearText = () => {
     setValue("");
     setIsAdjusted(false);
@@ -929,7 +1092,9 @@ export default function Ask() {
         video: { displaySurface: "browser" },
       });
       const track = stream.getVideoTracks()[0];
-      const ImageCaptureClass = (window as unknown as { ImageCapture?: ImageCaptureConstructor }).ImageCapture;
+      const ImageCaptureClass = (
+        window as unknown as { ImageCapture?: ImageCaptureConstructor }
+      ).ImageCapture;
 
       if (!ImageCaptureClass) {
         throw new Error("ImageCapture API is not supported in this browser.");
@@ -994,10 +1159,7 @@ export default function Ask() {
                 exit={{ opacity: 0, y: -25 }}
                 transition={TRANSITION}
                 className={`flex flex-col justify-center items-center gap-4
-                  ${messages.length === 0
-                    ? "max-md:mt-auto"
-                    : "mt-auto"
-                  }
+                  ${messages.length === 0 ? "max-md:mt-auto" : "mt-auto"}
                   `}
               >
                 <motion.div
@@ -1050,30 +1212,141 @@ export default function Ask() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={TRANSITION}
-                  className="flex flex-col gap-4"
+                  className="flex flex-col gap-2"
                 >
-                  {messages.map((msg) => (
-                    <motion.div
-                      key={msg.id}
-                      layout="position"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={TRANSITION}
-                      className={`p-4 rounded-2xl font-sans-serif text-left ${msg.role === "user"
-                        ? "bg-fore-1 text-back-1 self-end"
-                        : "bg-back-2 border border-back-5 text-fore-1 self-start"
-                        }`}
-                    >
-                      <p className="whitespace-pre-wrap wrap-break-word">{msg.content}</p>
-                    </motion.div>
-                  ))}
+                  {messages.map((msg) => {
+                    const isEditing = editingMessageId === msg.id;
+                    const isUser = msg.role === "user";
+
+                    return (
+                      <motion.div
+                        key={msg.id}
+                        layout="position"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={TRANSITION}
+                        className={`group/message flex flex-col gap-1 w-full ${isUser ? "items-end" : "items-start"
+                          }`}
+                      >
+                        <motion.div
+                          layout
+                          transition={TRANSITION}
+                          className={`rounded-4xl ${isUser && "bg-back-2 px-6 py-4 "
+                            }`}
+                        >
+                          {isEditing ? (
+                            <motion.div
+                              ref={editingRef}
+                              onInput={(e) => {
+                                setEditingValue(
+                                  e.currentTarget.textContent ?? "",
+                                );
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && !e.shiftKey) {
+                                  e.preventDefault();
+                                  handleSubmitEdit(msg.id);
+                                } else if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  handleCancelEdit();
+                                }
+                              }}
+                              onPaste={pastePlainText}
+                              autoFocus
+                              contentEditable
+                              suppressContentEditableWarning
+                              spellCheck={false}
+                              aria-multiline="true"
+                              id="reprompt"
+                              className="animate-caret outline-none select-text"
+                            />
+                          ) : (
+                            <p className="select-text">{msg.content}</p>
+                          )}
+                        </motion.div>
+
+                        {isUser && isEditing && (
+                          <div className="flex justify-center items-center gap-2 p-2">
+                            <Tooltip content="取消" placement="bottom">
+                              <Button
+                                onPress={handleCancelEdit}
+                                aria-label="Cancel Edit"
+                                shape="circle"
+                                className="bg-back-2"
+                              >
+                                <X className="all" />
+                              </Button>
+                            </Tooltip>
+
+                            <Tooltip content="送信" placement="bottom">
+                              <Button
+                                onPress={() => handleSubmitEdit(msg.id)}
+                                isDisabled={!editingValue.trim() || isLoading}
+                                aria-label="Save Edit"
+                                shape="circle"
+                                color="primary"
+                              >
+                                <Check className="text-back-1_ all" />
+                              </Button>
+                            </Tooltip>
+                          </div>
+                        )}
+
+                        {isUser && !isEditing && (
+                          <div className="flex justify-center items-center gap-2 p-2 group-focus-within:opacity-100 md:opacity-0 max-md:opacity-100 md:group-hover/message:opacity-100 opacity">
+                            <span className="text-sm text-fore-5">
+                              {formatMessageTime(msg.timestamp)}
+                            </span>
+
+                            <Tooltip content="再試行" placement="bottom">
+                              <Button
+                                onPress={() => handleRetryMessage(msg.id)}
+                                isDisabled={isLoading}
+                                aria-label="Retry"
+                                shape="circle"
+                                className="size-5"
+                              >
+                                <RotateCcw
+                                  size={16}
+                                  className="text-fore-5 all"
+                                />
+                              </Button>
+                            </Tooltip>
+
+                            <Tooltip content="編集" placement="bottom">
+                              <Button
+                                onPress={() => handleStartEdit(msg)}
+                                isDisabled={isLoading}
+                                aria-label="Edit"
+                                shape="circle"
+                                className="size-5"
+                              >
+                                <Pencil size={16} className="text-fore-5 all" />
+                              </Button>
+                            </Tooltip>
+
+                            <Tooltip content="コピー" placement="bottom">
+                              <Button
+                                onPress={() => handleCopyMessage(msg.content)}
+                                aria-label="Copy"
+                                shape="circle"
+                                className="size-5"
+                              >
+                                <Copy size={16} className="text-fore-5 all" />
+                              </Button>
+                            </Tooltip>
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })}
 
                   {isLoading && (
                     <motion.div
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="p-4 rounded-2xl bg-back-2 border border-back-5 text-fore-1 font-sans-serif self-start animate-pulse"
+                      className="p-4 rounded-2xl bg-back-2 border border-back-5 self-start animate-pulse"
                     >
                       <p>Fluinaが考えています...</p>
                     </motion.div>
@@ -1143,7 +1416,10 @@ export default function Ask() {
                     </Menu.Item>
 
                     {!isMobile && (
-                      <Menu.Item onAction={handleTakeScreenshot} icon={<Camera />}>
+                      <Menu.Item
+                        onAction={handleTakeScreenshot}
+                        icon={<Camera />}
+                      >
                         スクリーンショットを撮影
                       </Menu.Item>
                     )}
@@ -1151,7 +1427,9 @@ export default function Ask() {
                     <Menu.Separator />
 
                     <Menu.SubmenuTrigger>
-                      <Menu.Item icon={<Folder />}>プロジェクトに追加</Menu.Item>
+                      <Menu.Item icon={<Folder />}>
+                        プロジェクトに追加
+                      </Menu.Item>
                       <Menu.Content>
                         <Menu.Item>プロジェクト A</Menu.Item>
                         <Menu.Item>プロジェクト B</Menu.Item>
@@ -1245,7 +1523,10 @@ export default function Ask() {
                             <Tooltip content={file.name} placement="bottom">
                               <Button
                                 onKeyDown={(e) => {
-                                  if (e.key === "Backspace" || e.key === "Delete") {
+                                  if (
+                                    e.key === "Backspace" ||
+                                    e.key === "Delete"
+                                  ) {
                                     e.preventDefault();
                                     handleRemoveFile(fileIndex);
                                   }
@@ -1275,7 +1556,7 @@ export default function Ask() {
 
                                     {displayBadge && (
                                       <div className="absolute left-2 right-2 bottom-2">
-                                        <span className="block text-xs text-fore-1 text-center font-sans-serif font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-full">
+                                        <span className="block text-xs text-center font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-full">
                                           {displayBadge}
                                         </span>
                                       </div>
@@ -1283,12 +1564,12 @@ export default function Ask() {
                                   </div>
                                 ) : (
                                   <div className="p-2 size-full flex flex-col justify-between">
-                                    <span className="line-clamp-3 p-1 break-all text-ellipsis text-sm text-fore-1 text-left font-sans-serif font-medium">
+                                    <span className="line-clamp-3 p-1 break-all text-ellipsis text-sm">
                                       {fileNameWithoutExt || file.name}
                                     </span>
 
                                     {displayBadge ? (
-                                      <span className="text-xs text-fore-1 text-center font-sans-serif font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-full">
+                                      <span className="text-xs text-cente font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-full">
                                         {displayBadge}
                                       </span>
                                     ) : null}
@@ -1309,7 +1590,7 @@ export default function Ask() {
                                 onPress={() => handleRemoveFile(fileIndex)}
                                 aria-label="Remove the file"
                                 shape="circle"
-                                className="absolute top-1 right-1 bg-fore-1 md:opacity-0 max-md:opacity-100 group-focus-within:opacity-100 md:group-hover:opacity-100"
+                                className="absolute top-1 right-1 bg-fore-1 opacity md:opacity-0 max-md:opacity-100 group-focus-within:opacity-100 md:group-hover:opacity-100"
                               >
                                 <X className="text-back-1 all" />
                               </Button>
@@ -1351,7 +1632,7 @@ export default function Ask() {
                       aria-label="Clear Files"
                       shape="circle"
                     >
-                      <Trash2 className="text-fore-1 all" />
+                      <Trash2 className="all" />
                     </Button>
                   </Tooltip>
                 </motion.div>
@@ -1361,8 +1642,8 @@ export default function Ask() {
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`relative w-full flex flex-col justify-start items-start ${isExpanded ? "h-full" : ""
-                } ${hasFiles
+              className={`relative w-full flex flex-col justify-start items-start ${isExpanded && "h-full"}
+              ${hasFiles
                   ? isAdjusted || isExpanded
                     ? "col-start-1 col-span-2 row-start-2 row-span-2"
                     : "col-start-2 row-start-2"
@@ -1405,7 +1686,7 @@ export default function Ask() {
                       maskPosition: "var(--mask-x) 0%",
                       WebkitMaskPosition: "var(--mask-x) 0%",
                     }}
-                    className="absolute inset-0 p-2 w-full pointer-events-none text-lg text-fore-9 text-left font-sans-serif font-medium truncate block"
+                    className="absolute inset-0 p-2 w-full pointer-events-none text-fore-9 truncate block"
                   >
                     {PLACEHOLDERS[placeholderIndex]}
                   </motion.span>
@@ -1424,9 +1705,6 @@ export default function Ask() {
                 }
               >
                 <motion.div
-                  autoFocus
-                  contentEditable
-                  suppressContentEditableWarning
                   ref={editorRef}
                   onInput={(e) => {
                     const rawText = e.currentTarget.innerText;
@@ -1438,6 +1716,7 @@ export default function Ask() {
                     }
                   }}
                   onKeyDown={handleTextareaKeyDown}
+                  onPaste={pastePlainText}
                   onCompositionStart={() => {
                     isComposingRef.current = true;
                   }}
@@ -1446,10 +1725,13 @@ export default function Ask() {
                       isComposingRef.current = false;
                     }, 0);
                   }}
+                  autoFocus
+                  contentEditable
+                  suppressContentEditableWarning
                   spellCheck={false}
                   aria-multiline="true"
                   id="prompt"
-                  className="block outline-none overflow-y-clip resize-none w-full animate-caret text-lg text-fore-1 text-left font-sans-serif font-medium"
+                  className="block outline-none overflow-y-clip resize-none w-full animate-caret"
                 />
               </motion.div>
             </motion.div>
@@ -1484,7 +1766,7 @@ export default function Ask() {
                       aria-label="Clear Text"
                       shape="circle"
                     >
-                      <Delete className="text-fore-1 all" />
+                      <Delete className="all" />
                     </Button>
                   </Tooltip>
                 </motion.div>
@@ -1534,7 +1816,7 @@ export default function Ask() {
                             transition={TRANSITION}
                             className="all"
                           >
-                            <Minimize2 className="text-fore-1" />
+                            <Minimize2 />
                           </motion.div>
                         ) : (
                           <motion.div
@@ -1545,7 +1827,7 @@ export default function Ask() {
                             transition={TRANSITION}
                             className="all"
                           >
-                            <Maximize2 className="text-fore-1" />
+                            <Maximize2 />
                           </motion.div>
                         )}
                       </AnimatePresence>
@@ -1579,7 +1861,7 @@ export default function Ask() {
                 }}
               >
                 <Button aria-label="Mic" shape="circle" className="bg-back-2">
-                  <Mic className="text-fore-1 all" />
+                  <Mic className="all" />
                 </Button>
               </Tooltip>
             </motion.div>
@@ -1643,8 +1925,8 @@ export default function Ask() {
               </Tooltip>
             </motion.div>
           </motion.form>
-        </LayoutGroup >
-      </div >
+        </LayoutGroup>
+      </div>
     </>
   );
 }

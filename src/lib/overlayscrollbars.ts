@@ -83,8 +83,18 @@ function getOverflowConfig(axis: ScrollAxis) {
   }
 }
 
-function updateScrollFadeVariables(targetEl: HTMLElement, viewport: HTMLElement) {
-  const { scrollTop, scrollLeft, scrollHeight, scrollWidth, clientHeight, clientWidth } = viewport;
+function updateScrollFadeVariables(
+  targetEl: HTMLElement,
+  viewport: HTMLElement,
+) {
+  const {
+    scrollTop,
+    scrollLeft,
+    scrollHeight,
+    scrollWidth,
+    clientHeight,
+    clientWidth,
+  } = viewport;
 
   const maxScrollTop = scrollHeight - clientHeight;
   const isScrollableY = maxScrollTop > 1;
