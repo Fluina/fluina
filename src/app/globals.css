@@ -195,7 +195,7 @@
   }
 
   body {
-    @apply w-dvw h-dvh overflow-hidden overscroll-none text-left font-sans-serif font-medium text-base bg-back-1 text-fore-1 colors;
+    @apply w-dvw h-dvh overflow-hidden overscroll-none text-left font-sans-serif font-medium text-base bg-back-1 text-fore-1 whitespace-pre-wrap wrap-break-word colors;
   }
 
   input,

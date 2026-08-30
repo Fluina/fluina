@@ -69,16 +69,16 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
+  edited?: boolean;
 };
 
 const generateId = () =>
   typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+const BUBBLE_PADDING_X = 48; // px-6 = 24px * 2
+const BUBBLE_PADDING_Y = 32; // py-4 = 16px * 2
 
-// contentEditable への貼り付け時、クリップボードのHTML装飾（太字・色・リンク等）を
-// 破棄してプレーンテキストのみ挿入する。装飾はこちら側が用意したものだけを許可したいため、
-// 外部からの持ち込みはここで一律に無効化する。
 const pastePlainText = (e: React.ClipboardEvent<HTMLDivElement>) => {
   e.preventDefault();
 
@@ -99,8 +99,6 @@ const pastePlainText = (e: React.ClipboardEvent<HTMLDivElement>) => {
   selection.removeAllRanges();
   selection.addRange(range);
 
-  // DOMを直接書き換えただけでは input イベントが発火せず、
-  // React 側の state（value / editingValue）が更新されないため手動で発火させる。
   e.currentTarget.dispatchEvent(
     new InputEvent("input", {
       bubbles: true,
@@ -127,6 +125,11 @@ export default function Ask() {
   const [editingValue, setEditingValue] = useState("");
   const editingRef = useRef<HTMLDivElement>(null);
   const editingInitialValueRef = useRef("");
+  const editMeasureRef = useRef<HTMLDivElement>(null);
+  const [editBoxSize, setEditBoxSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
 
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -186,12 +189,20 @@ export default function Ask() {
   //    送信
   //  ================================================================
 
-  const formatMessageTime = (timestamp: number) =>
-    new Date(timestamp).toLocaleTimeString("ja-JP", {
+  const formatMessageTime = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const weekday = ["日", "月", "火", "水", "木", "金", "土"][date.getDay()];
+    const time = date.toLocaleTimeString("ja-JP", {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
     });
+
+    return `${year}/${month}/${day}(${weekday}) ${time}`;
+  };
 
   const requestAssistantReply = useCallback(
     async (promptContent: string, historyForApi: Message[]) => {
@@ -395,6 +406,7 @@ export default function Ask() {
         ...messages[index],
         content: trimmed,
         timestamp: Date.now(),
+        edited: true,
       };
       const truncatedHistory = [...messages.slice(0, index), updatedMessage];
 
@@ -414,12 +426,16 @@ export default function Ask() {
       const index = messages.findIndex((m) => m.id === id);
       if (index === -1) return;
 
-      const targetMessage = messages[index];
-      const truncatedHistory = messages.slice(0, index + 1);
+      const updatedMessage: Message = {
+        ...messages[index],
+        timestamp: Date.now(),
+        edited: true,
+      };
+      const truncatedHistory = [...messages.slice(0, index), updatedMessage];
 
       setMessages(truncatedHistory);
 
-      await requestAssistantReply(targetMessage.content, truncatedHistory);
+      await requestAssistantReply(updatedMessage.content, truncatedHistory);
     },
     [isLoading, messages, requestAssistantReply],
   );
@@ -1067,6 +1083,21 @@ export default function Ask() {
     selection?.addRange(range);
   }, [editingMessageId]);
 
+  useLayoutEffect(() => {
+    if (!editingMessageId || !editMeasureRef.current) {
+      setEditBoxSize(null);
+
+      return;
+    }
+
+    const rect = editMeasureRef.current.getBoundingClientRect();
+
+    setEditBoxSize({
+      width: rect.width + BUBBLE_PADDING_X,
+      height: rect.height + BUBBLE_PADDING_Y,
+    });
+  }, [editingValue, editingMessageId]);
+
   const handleClearText = () => {
     setValue("");
     setIsAdjusted(false);
@@ -1230,9 +1261,15 @@ export default function Ask() {
                           }`}
                       >
                         <motion.div
-                          layout
+                          initial={false}
+                          animate={
+                            isEditing && editBoxSize
+                              ? { width: editBoxSize.width, height: editBoxSize.height }
+                              : { width: "auto", height: "auto" }
+                          }
                           transition={TRANSITION}
-                          className={`rounded-4xl ${isUser && "bg-back-2 px-6 py-4 "
+                          style={{ overflow: "hidden" }}
+                          className={`max-w-full ${isUser && "bg-back-2 px-6 py-4 rounded-4xl"
                             }`}
                         >
                           {isEditing ? (
@@ -1240,7 +1277,7 @@ export default function Ask() {
                               ref={editingRef}
                               onInput={(e) => {
                                 setEditingValue(
-                                  e.currentTarget.textContent ?? "",
+                                  e.currentTarget.innerText ?? "",
                                 );
                               }}
                               onKeyDown={(e) => {
@@ -1265,6 +1302,16 @@ export default function Ask() {
                             <p className="select-text">{msg.content}</p>
                           )}
                         </motion.div>
+
+                        {isEditing && (
+                          <div
+                            ref={editMeasureRef}
+                            aria-hidden="true"
+                            className="pointer-events-none absolute opacity-0"
+                          >
+                            {editingValue || "\u200b"}
+                          </div>
+                        )}
 
                         {isUser && isEditing && (
                           <div className="flex justify-center items-center gap-2 p-2">
@@ -1295,6 +1342,12 @@ export default function Ask() {
 
                         {isUser && !isEditing && (
                           <div className="flex justify-center items-center gap-2 p-2 group-focus-within:opacity-100 md:opacity-0 max-md:opacity-100 md:group-hover/message:opacity-100 opacity">
+                            {msg.edited && (
+                              <span className="text-sm text-fore-5">
+                                編集済
+                              </span>
+                            )}
+
                             <span className="text-sm text-fore-5">
                               {formatMessageTime(msg.timestamp)}
                             </span>
