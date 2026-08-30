@@ -76,8 +76,6 @@ const generateId = () =>
   typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-const BUBBLE_PADDING_X = 48; // px-6 = 24px * 2
-const BUBBLE_PADDING_Y = 32; // py-4 = 16px * 2
 
 const pastePlainText = (e: React.ClipboardEvent<HTMLDivElement>) => {
   e.preventDefault();
@@ -125,11 +123,6 @@ export default function Ask() {
   const [editingValue, setEditingValue] = useState("");
   const editingRef = useRef<HTMLDivElement>(null);
   const editingInitialValueRef = useRef("");
-  const editMeasureRef = useRef<HTMLDivElement>(null);
-  const [editBoxSize, setEditBoxSize] = useState<{
-    width: number;
-    height: number;
-  } | null>(null);
 
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1083,21 +1076,6 @@ export default function Ask() {
     selection?.addRange(range);
   }, [editingMessageId]);
 
-  useLayoutEffect(() => {
-    if (!editingMessageId || !editMeasureRef.current) {
-      setEditBoxSize(null);
-
-      return;
-    }
-
-    const rect = editMeasureRef.current.getBoundingClientRect();
-
-    setEditBoxSize({
-      width: rect.width + BUBBLE_PADDING_X,
-      height: rect.height + BUBBLE_PADDING_Y,
-    });
-  }, [editingValue, editingMessageId]);
-
   const handleClearText = () => {
     setValue("");
     setIsAdjusted(false);
@@ -1261,12 +1239,7 @@ export default function Ask() {
                           }`}
                       >
                         <motion.div
-                          initial={false}
-                          animate={
-                            isEditing && editBoxSize
-                              ? { width: editBoxSize.width, height: editBoxSize.height }
-                              : { width: "auto", height: "auto" }
-                          }
+                          layout
                           transition={TRANSITION}
                           style={{ overflow: "hidden" }}
                           className={`max-w-full ${isUser && "bg-back-2 px-6 py-4 rounded-4xl"
@@ -1302,16 +1275,6 @@ export default function Ask() {
                             <p className="select-text">{msg.content}</p>
                           )}
                         </motion.div>
-
-                        {isEditing && (
-                          <div
-                            ref={editMeasureRef}
-                            aria-hidden="true"
-                            className="pointer-events-none absolute opacity-0"
-                          >
-                            {editingValue || "\u200b"}
-                          </div>
-                        )}
 
                         {isUser && isEditing && (
                           <div className="flex justify-center items-center gap-2 p-2">
