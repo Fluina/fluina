@@ -4,12 +4,18 @@ const allowedOrigins = [
   "https://fluina.focalrina.com",
   "http://localhost:3000",
 ];
+const vercelPreviewOrigin =
+  /^https:\/\/fluina-[a-z0-9-]+-focalrina\.vercel\.app$/;
 
 export const corsPlugin = cors({
   origin: (request) => {
     const origin = request.headers.get("origin");
 
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (
+      !origin ||
+      allowedOrigins.includes(origin) ||
+      vercelPreviewOrigin.test(origin)
+    ) {
       return true;
     }
 
