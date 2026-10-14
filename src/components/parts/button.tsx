@@ -1,4 +1,4 @@
-import { forwardRef, useRef } from "react";
+import { forwardRef, useCallback, useLayoutEffect, useRef } from "react";
 import {
   type PressEvent,
   Button as RACButton,
@@ -10,14 +10,13 @@ import { Ripple, useRipple } from "@/components/effects/ripple";
 const buttonVariants = tv({
   base: [
     "overflow-clip relative outline-none cursor-pointer all",
-    "data-hovered:scale-110",
-    "data-pressed:scale-90 data-pressed:[&>*:not(:first-child)]:scale-75",
-    "data-focus-visible:scale-110 data-focus-visible:ring-2 data-focus-visible:ring-fore-1",
+    "data-hovered:scale-[var(--button-hover-scale)] data-pressed:scale-[var(--button-press-scale)] data-pressed:[&>*:not(:first-child)]:scale-[var(--button-content-press-scale)]",
+    "data-focus-visible:scale-[var(--button-hover-scale)] data-focus-visible:ring-2 data-focus-visible:ring-fore-1",
   ],
   variants: {
     shape: {
       default: "",
-      circle: "size-10 rounded-full flex justify-center items-center",
+      circle: "size-10 flex justify-center items-center",
     },
     color: {
       default: "",
@@ -30,10 +29,25 @@ const buttonVariants = tv({
   },
 });
 
+const getButtonScales = (size: number) => ({
+  hoverScale: Math.min(1.1, 1 + 10 / size),
+  pressScale: Math.max(0.9, 1 - 10 / size),
+  contentPressScale: Math.max(0.75, 1 - 20 / size),
+});
+
 export interface ButtonProps
-  extends Omit<RACButtonProps, "color">,
+  extends Omit<RACButtonProps, "color" | "onHoverChange">,
     VariantProps<typeof buttonVariants> {
   ripple?: boolean;
+  onHoverChange?: (
+    isHovered: boolean,
+    button: HTMLButtonElement | null,
+    data: {
+      width: number;
+      height: number;
+      hoverScale: number;
+    } | null,
+  ) => void;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
@@ -44,6 +58,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       shape,
       color,
       onPress,
+      onHoverChange,
       className,
       children,
       ...props
@@ -51,6 +66,44 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     ref,
   ) => {
     const { ripples, triggerRipple } = useRipple();
+    const buttonRef = useRef<HTMLButtonElement>(null);
+
+    useLayoutEffect(() => {
+      const button = buttonRef.current;
+      if (!button) return;
+
+      const updatePressScale = () => {
+        const size = Math.max(button.offsetWidth, button.offsetHeight);
+        const { hoverScale, pressScale, contentPressScale } =
+          getButtonScales(size);
+
+        button.style.setProperty("--button-hover-scale", String(hoverScale));
+        button.style.setProperty("--button-press-scale", String(pressScale));
+        button.style.setProperty(
+          "--button-content-press-scale",
+          String(contentPressScale),
+        );
+      };
+
+      const observer = new ResizeObserver(updatePressScale);
+      observer.observe(button);
+      updatePressScale();
+
+      return () => observer.disconnect();
+    }, []);
+
+    const setButtonRef = useCallback(
+      (button: HTMLButtonElement | null) => {
+        buttonRef.current = button;
+
+        if (typeof ref === "function") {
+          ref(button);
+        } else if (ref) {
+          ref.current = button;
+        }
+      },
+      [ref],
+    );
 
     const pointerCoordsRef = useRef<{
       clientX: number;
@@ -95,9 +148,26 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <RACButton
         {...props}
-        ref={ref}
+        ref={setButtonRef}
         type={type}
         onPress={handlePress}
+        onHoverChange={(isHovered) => {
+          const button = buttonRef.current;
+          const size = button
+            ? Math.max(button.offsetWidth, button.offsetHeight)
+            : 0;
+          onHoverChange?.(
+            isHovered,
+            button,
+            button
+              ? {
+                  width: button.offsetWidth,
+                  height: button.offsetHeight,
+                  hoverScale: getButtonScales(size).hoverScale,
+                }
+              : null,
+          );
+        }}
         onPointerDown={handlePointerDown}
         className={(renderProps) => {
           const resolvedClassName =

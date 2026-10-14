@@ -98,7 +98,7 @@ const RippleEffect = ({
   return (
     <span
       className={cn(
-        "all pointer-events-none absolute overflow-clip rounded-full",
+        "all pointer-events-none absolute overflow-clip",
         color,
         isAnimating ? "scale-100 opacity-0" : "scale-0 opacity-50",
       )}

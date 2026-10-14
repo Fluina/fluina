@@ -85,7 +85,7 @@ function Content<T extends object>({
 const menuItemVariants = tv({
   base: [
     "relative flex cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-1.5 outline-none all",
-    "text-sm font-sans-serif font-medium text-fore-1",
+    "text-sm text-fore-1",
     "data-hovered:bg-back-3 data-focus-visible:bg-back-3",
     "data-pressed:bg-back-4",
     "data-disabled:pointer-events-none data-disabled:opacity-40",
@@ -133,7 +133,7 @@ function Item({
       {(renderProps) => (
         <>
           {icon && (
-            <span className="flex size-4 shrink-0 items-center justify-center [&>svg]:size-4 [&>svg]:text-fore-9">
+            <span className="flex size-4 items-center justify-center [&>svg]:size-4 [&>svg]:text-fore-9">
               {icon}
             </span>
           )}
@@ -144,14 +144,14 @@ function Item({
 
           {renderProps.selectionMode !== "none" ? (
             renderProps.isSelected && (
-              <Check className="size-4 shrink-0 text-blue" />
+              <Check className="size-4 text-blue" />
             )
           ) : shortcut ? (
-            <span className="shrink-0 text-xs font-sans-serif text-fore-9">
+            <span className="text-xs text-fore-9">
               {shortcut}
             </span>
           ) : hasSubmenu ? (
-            <ChevronRight className="size-4 shrink-0 text-fore-9" />
+            <ChevronRight className="size-4 text-fore-9" />
           ) : null}
         </>
       )}
@@ -161,7 +161,7 @@ function Item({
 
 function Separator({ className }: { className?: string }) {
   return (
-    <AriaSeparator className={cn("my-1 h-px shrink-0 bg-back-5", className)} />
+    <AriaSeparator className={cn("my-1 h-px bg-back-5", className)} />
   );
 }
 
@@ -185,7 +185,7 @@ function SectionGroup<T extends object>({
       className={cn("flex flex-col gap-0.5", className)}
     >
       {title && (
-        <Header className="px-2.5 pb-1 pt-2 text-xs font-sans-serif font-medium text-fore-9">
+        <Header className="px-2.5 pb-1 pt-2 text-xs text-fore-9">
           {title}
         </Header>
       )}

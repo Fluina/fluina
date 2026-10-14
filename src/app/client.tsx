@@ -3,7 +3,8 @@ import { ThemeProvider, useTheme } from "next-themes";
 import { useOverlayScrollbars } from "overlayscrollbars-react";
 import { useEffect } from "react";
 import "@/lib/overlayscrollbars";
-import { MotionConfig, useReducedMotion } from "motion/react";
+import { MotionConfig } from "motion/react";
+import { PreferencesProvider, usePreferences } from "@/app/preferences";
 
 function ThemeFaviconSync() {
   const { theme, resolvedTheme } = useTheme();
@@ -32,21 +33,32 @@ function BodyOverlayScrollbars() {
   return null;
 }
 
-export default function Client({ children }: { children: React.ReactNode }) {
-  const shouldReduceMotion = useReducedMotion();
+function MotionPreferences({ children }: { children: React.ReactNode }) {
+  const { parallaxEnabled } = usePreferences();
 
   return (
+    <MotionConfig
+      key={parallaxEnabled ? "motion-enabled" : "motion-disabled"}
+      reducedMotion={parallaxEnabled ? "never" : "always"}
+      transition={parallaxEnabled ? undefined : { duration: 0 }}
+    >
+      {children}
+    </MotionConfig>
+  );
+}
+
+export default function Client({ children }: { children: React.ReactNode }) {
+  return (
     <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
-      <MotionConfig
-        reducedMotion="user"
-        transition={shouldReduceMotion ? { duration: 0 } : undefined}
-      >
-        <ThemeFaviconSync />
-        <BodyOverlayScrollbars />
-        <main className="size-full flex justify-center items-center pt-[env(safe-area-inset-top,1rem)] pb-[env(safe-area-inset-bottom,1rem)] pl-[env(safe-area-inset-left,1rem)] pr-[env(safe-area-inset-right,1rem)]">
-          {children}
-        </main>
-      </MotionConfig>
+      <PreferencesProvider>
+        <MotionPreferences>
+          <ThemeFaviconSync />
+          <BodyOverlayScrollbars />
+          <main className="size-full overflow-clip flex justify-center items-center pt-[env(safe-area-inset-top,1rem)] pb-[env(safe-area-inset-bottom,1rem)] pl-[env(safe-area-inset-left,1rem)] pr-[env(safe-area-inset-right,1rem)]">
+            {children}
+          </main>
+        </MotionPreferences>
+      </PreferencesProvider>
     </ThemeProvider>
   );
 }

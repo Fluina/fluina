@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+@custom-variant font-serif (&:where([data-font=serif], [data-font=serif] *));
+@custom-variant font-sans-serif (&:where([data-font=sans-serif], [data-font=sans-serif] *));
+@custom-variant font-monospace (&:where([data-font=monospace], [data-font=monospace] *));
+@custom-variant font-rounded (&:where([data-font=rounded], [data-font=rounded] *));
 
 @theme inline {
   --color-back-0: var(--back-0);
@@ -56,16 +60,56 @@
   --color-indigo: hsl(255, 100%, 50%);
   --color-violet: hsl(300, 100%, 50%);
 
-  --font-sans-serif:
-    var(--font-din-pro), var(--font-mamelon), "Fluent Emoji Color", sans-serif,
-    ui-sans-serif, system-ui;
-  --font-serif:
-    var(--font-din-pro), var(--font-mamelon), "Fluent Emoji Color", serif,
-    ui-serif, system-ui;
+  --font-unifont:
+    var(--font-unifont), var(--font-unifont-jp), var(--font-unifont-t), var(--font-unifont-upper), var(--font-unifont-csur), system-ui;
+  --font-unifont-jp: var(--font-unifont-jp), var(--font-unifont), var(--font-unifont-t), var(--font-unifont-upper), var(--font-unifont-csur), system-ui;
+  --font-serif: serif, ui-serif, system-ui;
+  --font-sans-serif: sans-serif, ui-sans-serif, system-ui;
+  --font-monospace: monospace, ui-monospace, system-ui;
+  --font-rounded: rounded, ui-rounded, system-ui;
 
   --transition-duration: 500ms;
   --transition-timing-function: ease-out;
   --transition-delay: 0ms;
+}
+
+@utility prose-fluina {
+  --tw-prose-body: var(--fore-1);
+  --tw-prose-headings: var(--fore-1);
+  --tw-prose-lead: var(--fore-3);
+  --tw-prose-links: var(--color-blue);
+  --tw-prose-bold: var(--fore-1);
+  --tw-prose-counters: var(--fore-5);
+  --tw-prose-bullets: var(--back-7);
+  --tw-prose-hr: var(--back-4);
+  --tw-prose-quotes: var(--fore-2);
+  --tw-prose-quote-borders: var(--back-4);
+  --tw-prose-captions: var(--fore-5);
+  --tw-prose-kbd: var(--fore-1);
+  --tw-prose-kbd-shadows: color-mix(in oklab, var(--fore-1) 10%, transparent);
+  --tw-prose-code: var(--fore-1);
+  --tw-prose-pre-code: var(--fore-1);
+  --tw-prose-pre-bg: var(--back-2);
+  --tw-prose-th-borders: var(--back-5);
+  --tw-prose-td-borders: var(--back-4);
+  --tw-prose-invert-body: var(--fore-1);
+  --tw-prose-invert-headings: var(--fore-1);
+  --tw-prose-invert-lead: var(--fore-3);
+  --tw-prose-invert-links: var(--color-blue);
+  --tw-prose-invert-bold: var(--fore-1);
+  --tw-prose-invert-counters: var(--fore-1);
+  --tw-prose-invert-bullets: var(--fore-1);
+  --tw-prose-invert-hr: var(--fore-1);
+  --tw-prose-invert-quotes: var(--fore-2);
+  --tw-prose-invert-quote-borders: var(--fore-1);
+  --tw-prose-invert-captions: var(--fore-5);
+  --tw-prose-invert-kbd: var(--fore-1);
+  --tw-prose-invert-kbd-shadows: color-mix(in oklab, var(--fore-1) 10%, transparent);
+  --tw-prose-invert-code: var(--fore-1);
+  --tw-prose-invert-pre-code: var(--fore-1);
+  --tw-prose-invert-pre-bg: var(--back-2);
+  --tw-prose-invert-th-borders: var(--back-5);
+  --tw-prose-invert-td-borders: var(--back-4);
 }
 
 :root {
@@ -114,6 +158,11 @@
   --fore-7: hsl(0, 0%, 65%);
   --fore-8: hsl(0, 0%, 60%);
   --fore-9: hsl(0, 0%, 55%);
+}
+
+[data-transparency="off"] .transparency-effect,
+[data-transparency="off"] .os-edge-blur {
+  backdrop-filter: none !important;
 }
 
 @utility all {
@@ -195,7 +244,8 @@
   }
 
   body {
-    @apply w-dvw h-dvh overflow-hidden overscroll-none text-left font-sans-serif font-medium text-base bg-back-1 text-fore-1 whitespace-pre-wrap wrap-break-word colors;
+    @apply w-dvw h-dvh overflow-hidden overscroll-none text-left font-unifont font-normal text-base bg-back-1 text-fore-1 whitespace-normal wrap-break-word colors;
+    @apply font-sans-serif:font-sans-serif font-serif:font-serif font-monospace:font-monospace font-rounded:font-rounded;
   }
 
   input,
@@ -279,7 +329,6 @@
   --os-padding-perpendicular: 0.1rem;
   --os-padding-axis: 0.1rem;
   --os-track-bg: transparent;
-  --os-handle-border-radius: 1rem;
   --os-handle-min-size: 1rem;
   --os-handle-perpendicular-size: 0.3rem;
   --os-handle-perpendicular-size-hover: 0.5rem;
@@ -299,34 +348,40 @@
   transition-timing-function: var(--transition-timing-function);
 }
 
-.os-edge-fade {
-  --os-fade-size: 2.5rem;
+:root {
+  --os-fade-size: 5rem;
+}
+
+[data-os-edge-fade] {
+  --os-fade-min-alpha: 0;
   --os-fade-top: 0;
   --os-fade-bottom: 0;
   --os-fade-left: 0;
   --os-fade-right: 0;
+
+  position: relative;
 }
 
-.os-edge-fade > [data-overlayscrollbars-viewport] {
+[data-os-edge-fade] > [data-overlayscrollbars-viewport] {
   mask-image:
     linear-gradient(
       to bottom,
-      transparent 0,
+      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
       var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))
     ),
     linear-gradient(
       to top,
-      transparent 0,
+      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
       var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))
     ),
     linear-gradient(
       to right,
-      transparent 0,
+      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
       var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))
     ),
     linear-gradient(
       to left,
-      transparent 0,
+      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
       var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size))
     );
   mask-composite: intersect;
@@ -334,30 +389,53 @@
   -webkit-mask-image:
     linear-gradient(
       to bottom,
-      transparent 0,
+      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
       var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))
     ),
     linear-gradient(
       to top,
-      transparent 0,
+      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
       var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))
     ),
     linear-gradient(
       to right,
-      transparent 0,
+      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
       var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))
     ),
     linear-gradient(
       to left,
-      transparent 0,
+      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
       var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size))
     );
   -webkit-mask-composite: source-in;
 
   transition:
     --os-fade-top var(--transition-duration) var(--transition-timing-function),
-    --os-fade-bottom var(--transition-duration)
-    var(--transition-timing-function),
+    --os-fade-bottom var(--transition-duration) var(--transition-timing-function),
+    --os-fade-left var(--transition-duration) var(--transition-timing-function),
+    --os-fade-right var(--transition-duration) var(--transition-timing-function);
+}
+
+.os-edge-blur {
+  @apply absolute z-10 pointer-events-none backdrop-blur-xs;
+
+  mask-image:
+    linear-gradient(to bottom, var(--color-back-0) 0, transparent calc(var(--os-fade-top) * var(--os-fade-size))),
+    linear-gradient(to top, var(--color-back-0) 0, transparent calc(var(--os-fade-bottom) * var(--os-fade-size))),
+    linear-gradient(to right, var(--color-back-0) 0, transparent calc(var(--os-fade-left) * var(--os-fade-size))),
+    linear-gradient(to left, var(--color-back-0) 0, transparent calc(var(--os-fade-right) * var(--os-fade-size)));
+  mask-composite: add;
+
+  -webkit-mask-image:
+    linear-gradient(to bottom, var(--color-back-0) 0, transparent calc(var(--os-fade-top) * var(--os-fade-size))),
+    linear-gradient(to top, var(--color-back-0) 0, transparent calc(var(--os-fade-bottom) * var(--os-fade-size))),
+    linear-gradient(to right, var(--color-back-0) 0, transparent calc(var(--os-fade-left) * var(--os-fade-size))),
+    linear-gradient(to left, var(--color-back-0) 0, transparent calc(var(--os-fade-right) * var(--os-fade-size)));
+  -webkit-mask-composite: source-over;
+
+  transition:
+    --os-fade-top var(--transition-duration) var(--transition-timing-function),
+    --os-fade-bottom var(--transition-duration) var(--transition-timing-function),
     --os-fade-left var(--transition-duration) var(--transition-timing-function),
     --os-fade-right var(--transition-duration) var(--transition-timing-function);
 }

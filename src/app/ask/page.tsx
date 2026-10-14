@@ -32,6 +32,8 @@ import {
   useRef,
   useState,
 } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
 import { Button, Menu, ScrollArea, Tooltip } from "@/components/parts";
@@ -1132,6 +1134,32 @@ export default function Ask() {
     }
   }, [handleFilesAdded]);
 
+  const messageTurns = messages.reduce<Message[][]>((turns, message) => {
+    const currentTurn = turns.at(-1);
+    const previousMessage = currentTurn?.at(-1);
+
+    if (
+      !currentTurn ||
+      (previousMessage?.role === "assistant" && message.role === "user")
+    ) {
+      turns.push([message]);
+    } else {
+      currentTurn.push(message);
+    }
+
+    return turns;
+  }, []);
+  const loadingMessage = (
+    <motion.div
+      key="assistant-loading"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="p-4 bg-back-2 border border-back-5 self-start animate-pulse"
+    >
+      <p>Fluinaが考えています...</p>
+    </motion.div>
+  );
+
   return (
     <>
       <AnimatePresence mode="popLayout" initial={false}>
@@ -1141,9 +1169,9 @@ export default function Ask() {
             animate={{ opacity: 1, backdropFilter: "blur(1rem)" }}
             exit={{ opacity: 0, backdropFilter: "blur(0)" }}
             transition={TRANSITION}
-            className="fixed inset-0 p-2 bg-back-0/50 z-1000 pointer-events-none flex items-center justify-center"
+            className="transparency-effect fixed inset-0 p-2 bg-back-0/50 z-1000 pointer-events-none flex items-center justify-center"
           >
-            <div className="animate-pulse flex flex-col gap-2 items-center justify-center size-full border-2 border-dashed border-fore-1 rounded-2xl">
+            <div className="animate-pulse flex flex-col gap-2 items-center justify-center size-full border-2 border-dashed border-fore-1">
               <Paperclip
                 className="text-fore-1 text-shadow-lg animate-bounce"
                 size={64}
@@ -1157,7 +1185,7 @@ export default function Ask() {
         )}
       </AnimatePresence>
 
-      <div className="size-full flex flex-col p-4 gap-8 items-center max-w-3xl justify-center">
+      <div className="size-full flex flex-col p-4 items-center max-w-3xl justify-center gap-4">
         <LayoutGroup>
           <AnimatePresence mode="popLayout" initial={false}>
             {messages.length === 0 && !isExpanded && (
@@ -1167,7 +1195,7 @@ export default function Ask() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -25 }}
                 transition={TRANSITION}
-                className={`flex flex-col justify-center items-center gap-4
+                className={`flex flex-col justify-center items-center gap-4 mb-8
                   ${messages.length === 0 ? "max-md:mt-auto" : "mt-auto"}
                   `}
               >
@@ -1181,7 +1209,7 @@ export default function Ask() {
                     alt="Frame Fluina small dark"
                     width={60}
                     height={60}
-                    className="absolute inset-0 dark:opacity-0 opacity-100 opacity rounded-2xl"
+                    className="absolute inset-0 dark:opacity-0 opacity-100 opacity"
                   />
 
                   <Image
@@ -1189,14 +1217,14 @@ export default function Ask() {
                     alt="Frame Fluina small light"
                     width={60}
                     height={60}
-                    className="absolute inset-0 dark:opacity-100 opacity-0 opacity rounded-2xl"
+                    className="absolute inset-0 dark:opacity-100 opacity-0 opacity"
                   />
                 </motion.div>
 
                 <motion.h1
                   layout="position"
                   transition={TRANSITION}
-                  className="text-center font-sans-serif text-3xl font-light text-fore-1"
+                  className="text-center text-3xl text-fore-1"
                 >
                   何でも訊いてみてね！
                 </motion.h1>
@@ -1221,154 +1249,206 @@ export default function Ask() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={TRANSITION}
-                  className="flex flex-col gap-2"
+                  className="flex flex-col gap-8"
                 >
-                  {messages.map((msg) => {
-                    const isEditing = editingMessageId === msg.id;
-                    const isUser = msg.role === "user";
+                  {messageTurns.map((turn, turnIndex) => {
+                    const isLastTurn = turnIndex === messageTurns.length - 1;
 
                     return (
                       <motion.div
-                        key={msg.id}
+                        key={turn[0].id}
                         layout="position"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={TRANSITION}
-                        className={`group/message flex flex-col gap-1 w-full ${isUser ? "items-end" : "items-start"
-                          }`}
+                        className="flex flex-col gap-4"
                       >
-                        <motion.div
-                          layout
-                          transition={TRANSITION}
-                          style={{ overflow: "hidden" }}
-                          className={`max-w-full ${isUser && "bg-back-2 px-6 py-4 rounded-4xl"
-                            }`}
-                        >
-                          {isEditing ? (
-                            <motion.div
-                              ref={editingRef}
-                              onInput={(e) => {
-                                setEditingValue(
-                                  e.currentTarget.innerText ?? "",
-                                );
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" && !e.shiftKey) {
-                                  e.preventDefault();
-                                  handleSubmitEdit(msg.id);
-                                } else if (e.key === "Escape") {
-                                  e.preventDefault();
-                                  handleCancelEdit();
-                                }
-                              }}
-                              onPaste={pastePlainText}
-                              autoFocus
-                              contentEditable
-                              suppressContentEditableWarning
-                              spellCheck={false}
-                              aria-multiline="true"
-                              id="reprompt"
-                              className="animate-caret outline-none select-text"
-                            />
-                          ) : (
-                            <p className="select-text">{msg.content}</p>
-                          )}
-                        </motion.div>
+                        <AnimatePresence mode="popLayout" initial={false}>
+                          {turn.map((msg) => {
+                            const isEditing = editingMessageId === msg.id;
+                            const isUser = msg.role === "user";
+                            const isAssistant = msg.role === "assistant";
 
-                        {isUser && isEditing && (
-                          <div className="flex justify-center items-center gap-2 p-2">
-                            <Tooltip content="取消" placement="bottom">
-                              <Button
-                                onPress={handleCancelEdit}
-                                aria-label="Cancel Edit"
-                                shape="circle"
-                                className="bg-back-2"
+                            return (
+                              <motion.div
+                                key={msg.id}
+                                layout="position"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                transition={TRANSITION}
+                                className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"
+                                  }`}
                               >
-                                <X className="all" />
-                              </Button>
-                            </Tooltip>
+                                <motion.div
+                                  layout
+                                  transition={TRANSITION}
+                                  style={{ overflow: "hidden" }}
+                                  className={`**:select-text ${isUser && "bg-back-2 px-6 py-4"
+                                    }`}
+                                >
+                                  {isEditing ? (
+                                    <motion.div
+                                      ref={editingRef}
+                                      onInput={(e) => {
+                                        setEditingValue(
+                                          e.currentTarget.innerText ?? "",
+                                        );
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !e.shiftKey) {
+                                          e.preventDefault();
+                                          handleSubmitEdit(msg.id);
+                                        } else if (e.key === "Escape") {
+                                          e.preventDefault();
+                                          handleCancelEdit();
+                                        }
+                                      }}
+                                      onPaste={pastePlainText}
+                                      autoFocus
+                                      contentEditable
+                                      suppressContentEditableWarning
+                                      spellCheck={false}
+                                      aria-multiline="true"
+                                      id="reprompt"
+                                      className="animate-caret outline-none"
+                                    />
+                                  ) : isUser ? (
+                                    <p>{msg.content}</p>
+                                  ) : (
+                                    <div className="max-w-none prose prose-fluina dark:prose-invert">
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                        {msg.content}
+                                      </ReactMarkdown>
+                                    </div>
+                                  )}
+                                </motion.div>
 
-                            <Tooltip content="送信" placement="bottom">
-                              <Button
-                                onPress={() => handleSubmitEdit(msg.id)}
-                                isDisabled={!editingValue.trim() || isLoading}
-                                aria-label="Save Edit"
-                                shape="circle"
-                                color="primary"
-                              >
-                                <Check className="text-back-1_ all" />
-                              </Button>
-                            </Tooltip>
-                          </div>
-                        )}
+                                {isUser && isEditing && (
+                                  <div className="flex justify-center items-center gap-2 p-2">
+                                    <Tooltip content="取消" placement="bottom">
+                                      <Button
+                                        onPress={handleCancelEdit}
+                                        aria-label="Cancel Edit"
+                                        shape="circle"
+                                        className="bg-back-2"
+                                      >
+                                        <X />
+                                      </Button>
+                                    </Tooltip>
 
-                        {isUser && !isEditing && (
-                          <div className="flex justify-center items-center gap-2 p-2 group-focus-within:opacity-100 md:opacity-0 max-md:opacity-100 md:group-hover/message:opacity-100 opacity">
-                            {msg.edited && (
-                              <span className="text-sm text-fore-5">
-                                編集済
-                              </span>
-                            )}
+                                    <Tooltip content="送信" placement="bottom">
+                                      <Button
+                                        onPress={() => handleSubmitEdit(msg.id)}
+                                        isDisabled={!editingValue.trim() || isLoading}
+                                        aria-label="Save Edit"
+                                        shape="circle"
+                                        color="primary"
+                                      >
+                                        <Check className="text-back-1_" />
+                                      </Button>
+                                    </Tooltip>
+                                  </div>
+                                )}
 
-                            <span className="text-sm text-fore-5">
-                              {formatMessageTime(msg.timestamp)}
-                            </span>
+                                {isUser && !isEditing && (
+                                  <div className="flex justify-center items-center gap-2 py-2">
+                                    {msg.edited && (
+                                      <span className="text-sm text-fore-5">
+                                        編集済
+                                      </span>
+                                    )}
 
-                            <Tooltip content="再試行" placement="bottom">
-                              <Button
-                                onPress={() => handleRetryMessage(msg.id)}
-                                isDisabled={isLoading}
-                                aria-label="Retry"
-                                shape="circle"
-                                className="size-5"
-                              >
-                                <RotateCcw
-                                  size={16}
-                                  className="text-fore-5 all"
-                                />
-                              </Button>
-                            </Tooltip>
+                                    <span className="text-sm text-fore-5">
+                                      {formatMessageTime(msg.timestamp)}
+                                    </span>
 
-                            <Tooltip content="編集" placement="bottom">
-                              <Button
-                                onPress={() => handleStartEdit(msg)}
-                                isDisabled={isLoading}
-                                aria-label="Edit"
-                                shape="circle"
-                                className="size-5"
-                              >
-                                <Pencil size={16} className="text-fore-5 all" />
-                              </Button>
-                            </Tooltip>
+                                    <Tooltip content="再試行" placement="bottom">
+                                      <Button
+                                        onPress={() => handleRetryMessage(msg.id)}
+                                        isDisabled={isLoading}
+                                        aria-label="Retry"
+                                        shape="circle"
+                                        className="size-5"
+                                      >
+                                        <RotateCcw
+                                          size={16}
+                                          className="text-fore-5"
+                                        />
+                                      </Button>
+                                    </Tooltip>
 
-                            <Tooltip content="コピー" placement="bottom">
-                              <Button
-                                onPress={() => handleCopyMessage(msg.content)}
-                                aria-label="Copy"
-                                shape="circle"
-                                className="size-5"
-                              >
-                                <Copy size={16} className="text-fore-5 all" />
-                              </Button>
-                            </Tooltip>
-                          </div>
-                        )}
+                                    <Tooltip content="編集" placement="bottom">
+                                      <Button
+                                        onPress={() => handleStartEdit(msg)}
+                                        isDisabled={isLoading}
+                                        aria-label="Edit"
+                                        shape="circle"
+                                        className="size-5"
+                                      >
+                                        <Pencil size={16} className="text-fore-5" />
+                                      </Button>
+                                    </Tooltip>
+
+                                    <Tooltip content="コピー" placement="bottom">
+                                      <Button
+                                        onPress={() => handleCopyMessage(msg.content)}
+                                        aria-label="Copy"
+                                        shape="circle"
+                                        className="size-5"
+                                      >
+                                        <Copy size={16} className="text-fore-5" />
+                                      </Button>
+                                    </Tooltip>
+                                  </div>
+                                )}
+
+                                {isAssistant && (
+                                  <div className="flex justify-center items-center gap-2 py-2">
+                                    <Tooltip content="コピー" placement="bottom">
+                                      <Button
+                                        onPress={() => handleCopyMessage(msg.content)}
+                                        aria-label="Copy"
+                                        shape="circle"
+                                        className="size-5"
+                                      >
+                                        <Copy size={16} className="text-fore-5" />
+                                      </Button>
+                                    </Tooltip>
+
+                                    <span className="text-sm text-fore-5">
+                                      {formatMessageTime(msg.timestamp)}
+                                    </span>
+                                  </div>
+                                )}
+                              </motion.div>
+                            );
+                          })}
+                        </AnimatePresence>
+                        {isLoading &&
+                          isLastTurn &&
+                          loadingMessage}
                       </motion.div>
                     );
                   })}
-
-                  {isLoading && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="p-4 rounded-2xl bg-back-2 border border-back-5 self-start animate-pulse"
-                    >
-                      <p>Fluinaが考えています...</p>
-                    </motion.div>
-                  )}
                 </motion.div>
               )}
+            </AnimatePresence>
+
+            <AnimatePresence mode="popLayout" initial={false}>
+              {!isExpanded &&
+                !isLoading &&
+                messages.at(-1)?.role === "assistant" && (
+                <motion.div
+                  key="assistant-disclaimer"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={TRANSITION}
+                  className="py-2"
+                >
+                  <p className="text-xs text-fore-5 p-2 border border-dashed border-back-5">
+                    ⚠ 回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
+                  </p>
+                </motion.div>
+                )}
             </AnimatePresence>
           </ScrollArea>
 
@@ -1377,7 +1457,7 @@ export default function Ask() {
             ref={formRef}
             layout
             transition={TRANSITION}
-            className={`flex-none grid gap-1 w-full items-center rounded-4xl border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
+            className={`flex-none grid gap-1 w-full items-center border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
               ${isExpanded ? "h-full" : "max-h-full"}
               ${hasFiles
                 ? isAdjusted || isExpanded
@@ -1419,7 +1499,7 @@ export default function Ask() {
                     shape="circle"
                     className="bg-back-2"
                   >
-                    <Plus className="text-fore-1 all" />
+                    <Plus className="text-fore-1" />
                   </Button>
 
                   <Menu.Content>
@@ -1488,7 +1568,7 @@ export default function Ask() {
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={TRANSITION}
-                  className={`flex items-center justify-center overflow-x-auto p-px w-full col-start-1 row-start-1 ${isAdjusted || isExpanded
+                  className={`flex items-center justify-center overflow-x-auto p-2 w-full col-start-1 row-start-1 ${isAdjusted || isExpanded
                     ? "col-span-2"
                     : hasText
                       ? "col-span-4"
@@ -1534,7 +1614,7 @@ export default function Ask() {
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             transition={TRANSITION}
-                            className="group size-30 relative flex-none overflow-clip flex justify-start items-center rounded-3xl bg-back-2 border border-back-5 focus-within:border-2 focus-within:border-fore-1"
+                            className="group size-30 relative flex-none overflow-clip flex justify-start items-center bg-back-2 border border-back-5 focus-within:border-2 focus-within:border-fore-1"
                           >
                             <Tooltip content={file.name} placement="bottom">
                               <Button
@@ -1571,21 +1651,21 @@ export default function Ask() {
                                     )}
 
                                     {displayBadge && (
-                                      <div className="absolute left-2 right-2 bottom-2">
-                                        <span className="block text-xs text-center font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-full">
+                                      <div className="absolute left-1 right-1 bottom-1">
+                                        <span className="block text-xs text-center font-light truncate w-full p-1 border border-back-5 bg-back-3">
                                           {displayBadge}
                                         </span>
                                       </div>
                                     )}
                                   </div>
                                 ) : (
-                                  <div className="p-2 size-full flex flex-col justify-between">
+                                  <div className="p-1 size-full flex flex-col justify-between">
                                     <span className="line-clamp-3 p-1 break-all text-ellipsis text-sm">
                                       {fileNameWithoutExt || file.name}
                                     </span>
 
                                     {displayBadge ? (
-                                      <span className="text-xs text-cente font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-full">
+                                      <span className="text-xs text-cente font-light truncate w-full p-1 border border-back-5 bg-back-3">
                                         {displayBadge}
                                       </span>
                                     ) : null}
@@ -1606,9 +1686,9 @@ export default function Ask() {
                                 onPress={() => handleRemoveFile(fileIndex)}
                                 aria-label="Remove the file"
                                 shape="circle"
-                                className="absolute top-1 right-1 bg-fore-1 opacity md:opacity-0 max-md:opacity-100 group-focus-within:opacity-100 md:group-hover:opacity-100"
+                                className="absolute top-1 right-1 border border-back-5 bg-back-3 md:opacity-0 max-md:opacity-100 group-focus-within:opacity-100 md:group-hover:opacity-100"
                               >
-                                <X className="text-back-1 all" />
+                                <X />
                               </Button>
                             </Tooltip>
                           </motion.div>
@@ -1648,7 +1728,7 @@ export default function Ask() {
                       aria-label="Clear Files"
                       shape="circle"
                     >
-                      <Trash2 className="all" />
+                      <Trash2 />
                     </Button>
                   </Tooltip>
                 </motion.div>
@@ -1658,7 +1738,7 @@ export default function Ask() {
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`relative w-full flex flex-col justify-start items-start ${isExpanded && "h-full"}
+              className={`relative w-full flex flex-col justify-start items-start ${isExpanded ? "h-full" : "[--os-fade-size:2.5rem]"}
               ${hasFiles
                   ? isAdjusted || isExpanded
                     ? "col-start-1 col-span-2 row-start-2 row-span-2"
@@ -1782,7 +1862,7 @@ export default function Ask() {
                       aria-label="Clear Text"
                       shape="circle"
                     >
-                      <Delete className="all" />
+                      <Delete />
                     </Button>
                   </Tooltip>
                 </motion.div>
@@ -1830,7 +1910,6 @@ export default function Ask() {
                             animate={{ opacity: 1, scale: 1, rotate: 0 }}
                             exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                             transition={TRANSITION}
-                            className="all"
                           >
                             <Minimize2 />
                           </motion.div>
@@ -1841,7 +1920,6 @@ export default function Ask() {
                             animate={{ opacity: 1, scale: 1, rotate: 0 }}
                             exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                             transition={TRANSITION}
-                            className="all"
                           >
                             <Maximize2 />
                           </motion.div>
@@ -1877,7 +1955,7 @@ export default function Ask() {
                 }}
               >
                 <Button aria-label="Mic" shape="circle" className="bg-back-2">
-                  <Mic className="all" />
+                  <Mic />
                 </Button>
               </Tooltip>
             </motion.div>
@@ -1920,7 +1998,6 @@ export default function Ask() {
                         animate={{ opacity: 1, scale: 1, rotate: 0 }}
                         exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                         transition={TRANSITION}
-                        className="all"
                       >
                         <ArrowUp className="text-back-1_" />
                       </motion.div>
@@ -1931,7 +2008,6 @@ export default function Ask() {
                         animate={{ opacity: 1, scale: 1, rotate: 0 }}
                         exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                         transition={TRANSITION}
-                        className="all"
                       >
                         <AudioLines className="text-back-1_" />
                       </motion.div>

@@ -5,9 +5,14 @@ import type { Metadata, Viewport } from "next";
 import "overlayscrollbars/overlayscrollbars.css";
 import "./globals.css";
 import Client from "@/app/client";
-import { dinPro, mamelon } from "@/app/fonts";
+import {
+  unifont,
+  unifontCsur,
+  unifontJp,
+  unifontT,
+  unifontUpper,
+} from "@/app/fonts";
 import Server from "@/app/server";
-import "../../public/fonts/emoji/FluentEmojiColor.css";
 
 export const metadata: Metadata = {
   title: "Fluina",
@@ -33,7 +38,7 @@ export default function RootLayout({
       lang="ja"
       data-scroll-behavior="smooth"
       suppressHydrationWarning
-      className={`${dinPro.variable} ${mamelon.variable}`}
+      className={`${unifont.variable} ${unifontJp.variable} ${unifontCsur.variable} ${unifontT.variable} ${unifontUpper.variable}`}
     >
       <head>
         <Server />

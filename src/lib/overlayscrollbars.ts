@@ -15,7 +15,7 @@ export function configureOverlayScrollbars(): void {
   const env = OverlayScrollbars.env();
 
   env.setDefaultInitialization({ cancel: { nativeScrollbarsOverlaid: true } });
-  env.setDefaultOptions({ scrollbars: { theme: OS_THEME, autoHide: "never" } });
+  env.setDefaultOptions({ scrollbars: { theme: OS_THEME, autoHide: "leave" } });
 
   const isScrollbarTarget = (target: EventTarget | null) =>
     target instanceof Element &&
@@ -86,6 +86,7 @@ function getOverflowConfig(axis: ScrollAxis) {
 function updateScrollFadeVariables(
   targetEl: HTMLElement,
   viewport: HTMLElement,
+  axis: ScrollAxis,
 ) {
   const {
     scrollTop,
@@ -97,20 +98,52 @@ function updateScrollFadeVariables(
   } = viewport;
 
   const maxScrollTop = scrollHeight - clientHeight;
-  const isScrollableY = maxScrollTop > 1;
+  const isScrollableY = axis === "y" || axis === "both";
+  const canScrollY = isScrollableY && maxScrollTop > 1;
 
   const maxScrollLeft = scrollWidth - clientWidth;
-  const isScrollableX = maxScrollLeft > 1;
+  const isScrollableX = axis === "x" || axis === "both";
+  const canScrollX = isScrollableX && maxScrollLeft > 1;
 
-  const fadeTop = isScrollableY && scrollTop > 1 ? 1 : 0;
-  const fadeBottom = isScrollableY && scrollTop < maxScrollTop - 1 ? 1 : 0;
-  const fadeLeft = isScrollableX && scrollLeft > 1 ? 1 : 0;
-  const fadeRight = isScrollableX && scrollLeft < maxScrollLeft - 1 ? 1 : 0;
+  const fadeTop = canScrollY && scrollTop > 1 ? 1 : 0;
+  const fadeBottom = canScrollY && scrollTop < maxScrollTop - 1 ? 1 : 0;
+  const fadeLeft = canScrollX && scrollLeft > 1 ? 1 : 0;
+  const fadeRight = canScrollX && scrollLeft < maxScrollLeft - 1 ? 1 : 0;
 
-  targetEl.style.setProperty("--os-fade-top", fadeTop.toString());
-  targetEl.style.setProperty("--os-fade-bottom", fadeBottom.toString());
-  targetEl.style.setProperty("--os-fade-left", fadeLeft.toString());
-  targetEl.style.setProperty("--os-fade-right", fadeRight.toString());
+  const blurEl = targetEl.nextElementSibling;
+  const targets =
+    blurEl instanceof HTMLElement && blurEl.classList.contains("os-edge-blur")
+      ? [targetEl, blurEl]
+      : [targetEl];
+
+  for (const el of targets) {
+    el.style.setProperty("--os-fade-top", fadeTop.toString());
+    el.style.setProperty("--os-fade-bottom", fadeBottom.toString());
+    el.style.setProperty("--os-fade-left", fadeLeft.toString());
+    el.style.setProperty("--os-fade-right", fadeRight.toString());
+  }
+}
+
+function syncBlurRect(
+  hostEl: HTMLElement,
+  blurEl: HTMLElement,
+  axis: ScrollAxis,
+) {
+  const verticalBar = hostEl.querySelector<HTMLElement>(
+    ":scope > .os-scrollbar-vertical",
+  );
+  const horizontalBar = hostEl.querySelector<HTMLElement>(
+    ":scope > .os-scrollbar-horizontal",
+  );
+  const barWidth =
+    axis === "y" || axis === "both" ? (verticalBar?.offsetWidth ?? 0) : 0;
+  const barHeight =
+    axis === "x" || axis === "both" ? (horizontalBar?.offsetHeight ?? 0) : 0;
+
+  blurEl.style.top = `${hostEl.offsetTop}px`;
+  blurEl.style.left = `${hostEl.offsetLeft}px`;
+  blurEl.style.width = `${Math.max(hostEl.offsetWidth - barWidth, 0)}px`;
+  blurEl.style.height = `${Math.max(hostEl.offsetHeight - barHeight, 0)}px`;
 }
 
 export function useOverlayScroll<T extends HTMLElement = HTMLDivElement>(
@@ -143,13 +176,13 @@ export function useOverlayScroll<T extends HTMLElement = HTMLDivElement>(
     const hostEl = elementRef.current;
 
     if (enableEdgeFade) {
-      hostEl.classList.add("os-edge-fade");
+      hostEl.setAttribute("data-os-edge-fade", "");
     }
 
     const handleScrollUpdate = (instance: OverlayScrollbarsInstance) => {
       const viewport = instance.elements().viewport;
       if (enableEdgeFade) {
-        updateScrollFadeVariables(hostEl, viewport);
+        updateScrollFadeVariables(hostEl, viewport, axis);
       }
       onScrollRef.current?.(viewport, instance);
     };
@@ -169,9 +202,36 @@ export function useOverlayScroll<T extends HTMLElement = HTMLDivElement>(
     osInstanceRef.current = osInstance;
 
     if (enableEdgeFade) {
-      requestAnimationFrame(() => {
-        updateScrollFadeVariables(hostEl, osInstance.elements().viewport);
-      });
+      const viewport = osInstance.elements().viewport;
+      const blurEl = document.createElement("div");
+
+      blurEl.className = "os-edge-blur";
+      blurEl.setAttribute("aria-hidden", "true");
+      hostEl.after(blurEl);
+
+      const updateEdgeFade = () => {
+        syncBlurRect(hostEl, blurEl, axis);
+        updateScrollFadeVariables(hostEl, viewport, axis);
+      };
+      const resizeObserver = new ResizeObserver(updateEdgeFade);
+
+      resizeObserver.observe(viewport);
+      resizeObserver.observe(hostEl);
+      updateEdgeFade();
+      requestAnimationFrame(updateEdgeFade);
+
+      return () => {
+        resizeObserver.disconnect();
+        blurEl.remove();
+        hostEl.removeAttribute("data-os-edge-fade");
+        initCleanupRef.current?.();
+        initCleanupRef.current = undefined;
+
+        if (osInstanceRef.current === osInstance) {
+          osInstance.destroy();
+          osInstanceRef.current = null;
+        }
+      };
     }
 
     return () => {
