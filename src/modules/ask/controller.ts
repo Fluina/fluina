@@ -6,19 +6,41 @@ export const askController = new Elysia({ prefix: "/ask" }).post(
   "/",
   async ({ body, set }) => {
     try {
-      const reply = await generateAskResponse(body.prompt);
+      const response = generateAskResponse(body.prompt);
+      const iterator = response[Symbol.asyncIterator]();
+      const encoder = new TextEncoder();
 
-      return { reply: reply ?? "" };
+      set.headers["Content-Type"] = "text/plain; charset=utf-8";
+      set.headers["Cache-Control"] = "no-cache, no-transform";
+
+      return new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          try {
+            const { done, value } = await iterator.next();
+
+            if (done) {
+              controller.close();
+            } else {
+              controller.enqueue(encoder.encode(value));
+            }
+          } catch (err) {
+            console.error("Gemini Streaming Error:", err);
+            controller.error(err);
+          }
+        },
+        async cancel() {
+          await iterator.return?.(undefined);
+        },
+      });
     } catch (err) {
       console.error("Gemini Execution Error:", err);
 
       set.status = 500;
 
-      return { reply: "Internal Server Error. Failed to generate response." };
+      return "Internal Server Error. Failed to generate response.";
     }
   },
   {
     body: AskSchema.body,
-    response: AskSchema.response,
   },
 );

@@ -7,7 +7,4 @@ export const AskSchema = {
       error: "Prompt cannot be Empty.",
     }),
   }),
-  response: t.Object({
-    reply: t.String(),
-  }),
 };

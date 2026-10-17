@@ -1,4 +1,5 @@
 "use client";
+import { createMathPlugin } from "@streamdown/math";
 import {
   ArrowUp,
   AudioLines,
@@ -17,6 +18,7 @@ import {
   Plus,
   Puzzle,
   RotateCcw,
+  Timer,
   Trash2,
   X,
   Zap,
@@ -25,6 +27,7 @@ import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
 import type { SyntheticEvent } from "react";
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -32,8 +35,7 @@ import {
   useRef,
   useState,
 } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Streamdown } from "streamdown";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
 import { Button, Menu, ScrollArea, Tooltip } from "@/components/parts";
@@ -71,7 +73,48 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
+  duration?: number;
   edited?: boolean;
+};
+
+const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
+const markdownPlugins = { math: mathPlugin };
+
+const AssistantMarkdown = memo(function AssistantMarkdown({
+  content,
+  isAnimating,
+}: {
+  content: string;
+  isAnimating: boolean;
+}) {
+  return (
+    <div className="max-w-none prose prose-fluina dark:prose-invert">
+      <Streamdown
+        mode={isAnimating ? "streaming" : "static"}
+        isAnimating={isAnimating}
+        plugins={markdownPlugins}
+      >
+        {content}
+      </Streamdown>
+    </div>
+  );
+});
+
+const formatDuration = (ms: number) => {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const parts = [
+    days > 0 ? `${days}d` : "",
+    hours > 0 ? `${hours}h` : "",
+    minutes > 0 ? `${minutes}m` : "",
+    seconds > 0 ? `${seconds}s` : "",
+  ].join("");
+
+  return parts || "0s";
 };
 
 const generateId = () =>
@@ -100,6 +143,49 @@ const pastePlainText = (e: React.ClipboardEvent<HTMLDivElement>) => {
   selection.addRange(range);
 
   e.currentTarget.dispatchEvent(
+    new InputEvent("input", {
+      bubbles: true,
+      inputType: "insertText",
+      data: text,
+    }),
+  );
+};
+
+const insertTextIntoEditor = (editor: HTMLDivElement, text: string) => {
+  const wasFocused = document.activeElement === editor;
+
+  editor.focus();
+
+  const selection = window.getSelection();
+
+  if (!selection) return;
+
+  let range: Range;
+
+  if (
+    !wasFocused ||
+    selection.rangeCount === 0 ||
+    !selection.anchorNode ||
+    !editor.contains(selection.anchorNode)
+  ) {
+    range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+  } else {
+    range = selection.getRangeAt(0);
+  }
+
+  range.deleteContents();
+
+  const textNode = document.createTextNode(text);
+
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.setEndAfter(textNode);
+  selection.removeAllRanges();
+  selection.addRange(range);
+
+  editor.dispatchEvent(
     new InputEvent("input", {
       bubbles: true,
       inputType: "insertText",
@@ -206,6 +292,34 @@ export default function Ask() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
       const assistantMessageId = generateId();
+      const startedAt = Date.now();
+      let reply = "";
+      let renderTimeout: ReturnType<typeof setTimeout> | null = null;
+
+      const flushReply = () => {
+        if (renderTimeout !== null) {
+          clearTimeout(renderTimeout);
+          renderTimeout = null;
+        }
+
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? { ...message, content: reply }
+              : message,
+          ),
+        );
+      };
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          content: "",
+          timestamp: startedAt,
+        },
+      ]);
 
       try {
         const apiUrl =
@@ -248,36 +362,50 @@ export default function Ask() {
           throw new Error(message);
         }
 
-        let data: unknown;
+        const reader = response.body?.getReader();
+
+        if (!reader) {
+          throw new Error(
+            "STREAM_ERROR: サーバーからの返答を読み込めませんでした。",
+          );
+        }
+
+        const decoder = new TextDecoder();
 
         try {
-          data = await response.json();
-        } catch {
-          throw new Error(
-            "PARSE_ERROR: サーバーからの返答データを正しく読み込めませんでした。",
-          );
+          while (true) {
+            const { done, value: chunk } = await reader.read();
+            const text = decoder.decode(chunk, { stream: !done });
+
+            if (text) {
+              reply += text;
+
+              if (renderTimeout === null) {
+                renderTimeout = setTimeout(() => {
+                  renderTimeout = null;
+                  flushReply();
+                }, 50);
+              }
+            }
+
+            if (done) break;
+          }
+        } finally {
+          reader.releaseLock();
         }
 
-        if (
-          !data ||
-          typeof data !== "object" ||
-          !("reply" in data) ||
-          typeof (data as { reply: unknown }).reply !== "string"
-        ) {
-          throw new Error(
-            "SCHEMA_ERROR: サーバーの返答形式が想定と異なります。",
-          );
-        }
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: assistantMessageId,
-            role: "assistant",
-            content: (data as { reply: string }).reply,
-            timestamp: Date.now(),
-          },
-        ]);
+        flushReply();
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? {
+                  ...message,
+                  timestamp: Date.now(),
+                  duration: Date.now() - startedAt,
+                }
+              : message,
+          ),
+        );
       } catch (error: unknown) {
         console.error("Submit Error:", error);
 
@@ -298,15 +426,23 @@ export default function Ask() {
           }
         }
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: assistantMessageId,
-            role: "assistant",
-            content: errorMessage,
-            timestamp: Date.now(),
-          },
-        ]);
+        if (renderTimeout !== null) {
+          clearTimeout(renderTimeout);
+          renderTimeout = null;
+        }
+
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? {
+                  ...message,
+                  content: reply ? `${reply}\n\n${errorMessage}` : errorMessage,
+                  timestamp: Date.now(),
+                  duration: Date.now() - startedAt,
+                }
+              : message,
+          ),
+        );
       } finally {
         clearTimeout(timeoutId);
         setIsLoading(false);
@@ -934,8 +1070,7 @@ export default function Ask() {
 
           if (!editor) return;
 
-          editor.focus();
-          setValue((prev) => prev + text);
+          insertTextIntoEditor(editor, text);
         }
       }
     };
@@ -1237,7 +1372,7 @@ export default function Ask() {
             autoScroll={{
               enabled: true,
               behavior: "smooth",
-              deps: [messages.length, isLoading],
+              deps: [messages.length, messages.at(-1)?.content, isLoading],
             }}
             className="w-full"
           >
@@ -1277,13 +1412,7 @@ export default function Ask() {
                                 className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"
                                   }`}
                               >
-                                <motion.div
-                                  layout
-                                  transition={TRANSITION}
-                                  style={{ overflow: "hidden" }}
-                                  className={`**:select-text ${isUser && "bg-back-2 px-6 py-4"
-                                    }`}
-                                >
+                                <div className={`**:select-text ${isUser && "bg-back-2 px-6 py-4"}`}>
                                   {isEditing ? (
                                     <motion.div
                                       ref={editingRef}
@@ -1313,13 +1442,15 @@ export default function Ask() {
                                   ) : isUser ? (
                                     <p>{msg.content}</p>
                                   ) : (
-                                    <div className="max-w-none prose prose-fluina dark:prose-invert">
-                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                        {msg.content}
-                                      </ReactMarkdown>
-                                    </div>
+                                    <AssistantMarkdown
+                                      content={msg.content}
+                                      isAnimating={
+                                        isLoading &&
+                                        msg.id === messages.at(-1)?.id
+                                      }
+                                    />
                                   )}
-                                </motion.div>
+                                </div>
 
                                 {isUser && isEditing && (
                                   <div className="flex justify-center items-center gap-2 p-2">
@@ -1349,7 +1480,7 @@ export default function Ask() {
                                 )}
 
                                 {isUser && !isEditing && (
-                                  <div className="flex justify-center items-center gap-2 py-2">
+                                  <div className="flex items-center gap-2 py-2">
                                     {msg.edited && (
                                       <span className="text-sm text-fore-5">
                                         編集済
@@ -1401,7 +1532,7 @@ export default function Ask() {
                                 )}
 
                                 {isAssistant && (
-                                  <div className="flex justify-center items-center gap-2 py-2">
+                                  <div className="flex items-center gap-2 py-2">
                                     <Tooltip content="コピー" placement="bottom">
                                       <Button
                                         onPress={() => handleCopyMessage(msg.content)}
@@ -1412,6 +1543,14 @@ export default function Ask() {
                                         <Copy size={16} className="text-fore-5" />
                                       </Button>
                                     </Tooltip>
+
+                                    {msg.duration !== undefined && (
+                                      <span className="flex items-center gap-1 text-sm text-fore-5">
+                                        <Timer size={16} />
+
+                                        {formatDuration(msg.duration)}
+                                      </span>
+                                    )}
 
                                     <span className="text-sm text-fore-5">
                                       {formatMessageTime(msg.timestamp)}
@@ -1424,6 +1563,7 @@ export default function Ask() {
                         </AnimatePresence>
                         {isLoading &&
                           isLastTurn &&
+                          messages.at(-1)?.content === "" &&
                           loadingMessage}
                       </motion.div>
                     );
@@ -1436,18 +1576,19 @@ export default function Ask() {
               {!isExpanded &&
                 !isLoading &&
                 messages.at(-1)?.role === "assistant" && (
-                <motion.div
-                  key="assistant-disclaimer"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={TRANSITION}
-                  className="py-2"
-                >
-                  <p className="text-xs text-fore-5 p-2 border border-dashed border-back-5">
-                    ⚠ 回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
-                  </p>
-                </motion.div>
+                  <motion.div
+                    key="assistant-disclaimer"
+                    layout="position"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={TRANSITION}
+                    className="py-2"
+                  >
+                    <p className="select-text text-xs text-fore-5 p-2 border border-dashed border-back-5">
+                      ⚠ 回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
+                    </p>
+                  </motion.div>
                 )}
             </AnimatePresence>
           </ScrollArea>
@@ -1461,15 +1602,15 @@ export default function Ask() {
               ${isExpanded ? "h-full" : "max-h-full"}
               ${hasFiles
                 ? isAdjusted || isExpanded
-                  ? "grid-cols-[auto_1fr_auto] grid-rows-[auto_auto_1fr_auto]"
+                  ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_1fr_auto]"
                   : hasText
-                    ? "grid-cols-[auto_1fr_auto_auto_auto] grid-rows-[auto_auto]"
-                    : "grid-cols-[auto_1fr_auto_auto] grid-rows-[auto_auto]"
+                    ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] grid-rows-[auto_auto]"
+                    : "grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto]"
                 : isAdjusted || isExpanded
-                  ? "grid-cols-[auto_1fr_auto] grid-rows-[auto_1fr_auto]"
+                  ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_1fr_auto]"
                   : hasText
-                    ? "grid-cols-[auto_1fr_auto_auto_auto]"
-                    : "grid-cols-[auto_1fr_auto_auto]"
+                    ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]"
+                    : "grid-cols-[auto_minmax(0,1fr)_auto_auto]"
               }
               ${messages.length === 0 ? "max-md:mt-auto" : "mt-auto"}
               `}
@@ -1568,7 +1709,7 @@ export default function Ask() {
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={TRANSITION}
-                  className={`flex items-center justify-center overflow-x-auto p-2 w-full col-start-1 row-start-1 ${isAdjusted || isExpanded
+                  className={`flex items-center justify-center p-2 w-full col-start-1 row-start-1 ${isAdjusted || isExpanded
                     ? "col-span-2"
                     : hasText
                       ? "col-span-4"
@@ -1738,7 +1879,7 @@ export default function Ask() {
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`relative w-full flex flex-col justify-start items-start ${isExpanded ? "h-full" : "[--os-fade-size:2.5rem]"}
+              className={`relative w-full min-w-0 flex flex-col justify-start items-start ${isExpanded ? "h-full" : "[--os-fade-size:2.5rem]"}
               ${hasFiles
                   ? isAdjusted || isExpanded
                     ? "col-start-1 col-span-2 row-start-2 row-span-2"
@@ -1793,7 +1934,7 @@ export default function Ask() {
                 ref={scrollRef}
                 layout="position"
                 transition={TRANSITION}
-                className={`overflow-y-auto p-2 flex justify-center items-start relative w-full ${isExpanded && " h-full max-h-full"}`}
+                className={`p-2 flex justify-center items-start relative w-full min-w-0 ${isExpanded && " h-full max-h-full"}`}
                 style={
                   !isExpanded && singleLineRef.current > 0
                     ? { maxHeight: `${singleLineRef.current * 5 + 16}px` }
@@ -1827,7 +1968,7 @@ export default function Ask() {
                   spellCheck={false}
                   aria-multiline="true"
                   id="prompt"
-                  className="block outline-none overflow-y-clip resize-none w-full animate-caret"
+                  className="block outline-none overflow-y-clip resize-none w-full min-w-0 wrap-anywhere animate-caret"
                 />
               </motion.div>
             </motion.div>

@@ -109,10 +109,13 @@ export function ScrollArea<T>({
         align,
         smooth: behavior === "smooth",
       });
-    } else if (viewportEl) {
+    } else {
+      const viewport = viewportEl ?? overlayViewport ?? hostRef.current;
+      if (!viewport) return;
+
       requestAnimationFrame(() => {
-        viewportEl.scrollTo({
-          top: viewportEl.scrollHeight,
+        viewport.scrollTo({
+          top: viewport.scrollHeight,
           behavior,
         });
       });
@@ -121,6 +124,8 @@ export function ScrollArea<T>({
     items,
     virtual,
     viewportEl,
+    overlayViewport,
+    hostRef,
     isAutoScrollEnabled,
     behavior,
     align,
