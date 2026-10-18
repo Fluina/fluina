@@ -16,6 +16,13 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+The API server requires an OpenRouter API key. Set `OPENROUTER_API_KEY` in
+`.env.local` before starting the app. `OPENROUTER_MODEL` is optional and
+defaults to `openrouter/free`, which routes requests to an available free model.
+OpenRouter account privacy settings (including Zero Data Retention) can exclude
+all free providers. If that happens, choose a compatible model/provider or
+review the account's [Privacy Settings](https://openrouter.ai/settings/privacy).
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

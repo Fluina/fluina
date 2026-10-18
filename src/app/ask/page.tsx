@@ -9,6 +9,7 @@ import {
   Delete,
   Folder,
   Globe,
+  Loader,
   Maximize2,
   Mic,
   Minimize2,
@@ -18,6 +19,7 @@ import {
   Plus,
   Puzzle,
   RotateCcw,
+  Square,
   Timer,
   Trash2,
   X,
@@ -39,6 +41,18 @@ import { Streamdown } from "streamdown";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
 import { Button, Menu, ScrollArea, Tooltip } from "@/components/parts";
+import {
+  appendChatMessage,
+  type ChatArchivePage,
+  type ChatArchiveRecord,
+  getChatArchiveSummary,
+  loadLatestChatPage,
+  loadLatestChatTurns,
+  loadMessagesToSummarize,
+  loadOlderChatTurns,
+  requestPersistentChatStorage,
+  saveChatArchiveSummary,
+} from "@/lib/chat-archive";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useOS } from "@/lib/os";
 import { useOverlayScroll } from "@/lib/overlayscrollbars";
@@ -68,6 +82,11 @@ type AttachedFile = {
   source: "input" | "paste" | "drag";
 };
 
+type MessageNotice = {
+  kind: "cancelled" | "error";
+  text: string;
+};
+
 type Message = {
   id: string;
   role: "user" | "assistant";
@@ -75,10 +94,65 @@ type Message = {
   timestamp: number;
   duration?: number;
   edited?: boolean;
+  notice?: MessageNotice;
 };
 
+const USER_CANCEL_REASON = "user-cancelled";
+const CANCELLED_NOTICE_TEXT = "送信が取り消されました。";
+
+const CHAT_PAGE_TURN_LIMIT = 10;
+const CHAT_PAGE_MESSAGE_LIMIT = CHAT_PAGE_TURN_LIMIT * 2;
+const SUMMARY_BATCH_LIMIT = 20;
+const CHAT_MESSAGE_MAX_LENGTH = 4000;
+const EMPTY_ASSISTANT_MESSAGE =
+  "この返答は空で保存されています。元の質問から再試行してください。";
+type ChatScrollBehavior = "instant" | "smooth";
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
+
+const MessageNoticeBox = ({ notice }: { notice: MessageNotice }) => (
+  <p
+    role={notice.kind === "error" ? "alert" : "status"}
+    className={`select-text text-sm p-2 border border-dashed ${
+      notice.kind === "error"
+        ? "text-red border-red bg-red/25"
+        : "text-yellow border-yellow bg-yellow/25"
+    }`}
+  >
+    {notice.text}
+  </p>
+);
 const markdownPlugins = { math: mathPlugin };
+
+const readAssistantError = async (response: Response) => {
+  let detail = "";
+  try {
+    const payload: unknown = await response.json();
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "error" in payload &&
+      typeof payload.error === "string"
+    ) {
+      detail = payload.error;
+    }
+  } catch {
+    detail = "";
+  }
+
+  if (/ZDR violation|Zero Data Retention/i.test(detail)) {
+    return "OpenRouterのプライバシー設定（Zero Data Retention）により、利用可能な無料モデルがありません。アカウント設定に合うモデルを選ぶか、[OpenRouterのPrivacy Settings](https://openrouter.ai/settings/privacy)で制限を確認してください。";
+  }
+
+  if (/Provider returned error|no endpoints out of \d+ requested/i.test(detail)) {
+    return "OpenRouterの無料モデル提供元でエラーが発生しました。少し待って再試行してください。改善しない場合は、[OpenRouterのPrivacy Settings](https://openrouter.ai/settings/privacy)でZero Data Retentionが無料モデルを制限していないか確認してください。";
+  }
+
+  if (/empty chat completion|empty streaming response/i.test(detail)) {
+    return "AIから空の応答が返されました。時間をおいて再度お試しください。";
+  }
+
+  return detail || `AIサーバーでエラーが発生しました（${response.status}）。`;
+};
 
 const AssistantMarkdown = memo(function AssistantMarkdown({
   content,
@@ -121,6 +195,21 @@ const generateId = () =>
   typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+const formatMessageTime = (timestamp: number) => {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const weekday = ["日", "月", "火", "水", "木", "金", "土"][date.getDay()];
+  const time = date.toLocaleTimeString("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  return `${year}/${month}/${day}(${weekday}) ${time}`;
+};
 
 const pastePlainText = (e: React.ClipboardEvent<HTMLDivElement>) => {
   e.preventDefault();
@@ -205,7 +294,23 @@ export default function Ask() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [files, setFiles] = useState<AttachedFile[]>([]);
 
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatArchiveRecord[]>([]);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+  const [firstMessageSequence, setFirstMessageSequence] = useState<
+    number | null
+  >(null);
+  const loadedFirstSequenceRef = useRef<number | null>(null);
+  const hasExpandedHistoryRef = useRef(false);
+  const [archiveReady, setArchiveReady] = useState(false);
+  const [isInitialChatPositioned, setIsInitialChatPositioned] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [persistentStorageGranted, setPersistentStorageGranted] = useState<
+    boolean | null
+  >(null);
+  const [streamingMessage, setStreamingMessage] = useState<Message | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
@@ -216,6 +321,14 @@ export default function Ask() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const scrollTopRef = useRef(0);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const pendingChatScrollToBottomRef = useRef<ChatScrollBehavior | null>(null);
+  const pendingHistoryScrollRef = useRef<{
+    scrollTop: number;
+    scrollHeight: number;
+    anchor: HTMLElement | null;
+    anchorTop: number | null;
+  } | null>(null);
   const pendingCaretRef = useRef<{
     caretTop: number;
     caretRatio: number | null;
@@ -231,6 +344,131 @@ export default function Ask() {
   const hasInput = value.trim().length > 0;
   const hasFiles = files.length > 0;
 
+  // 最新の会話ターンが表示領域の高さを最低限占有するよう、末尾の余白を動的に算出する
+  const updateTailSpacer = useCallback((viewportOverride?: HTMLElement) => {
+    const host = chatScrollRef.current;
+    const viewport =
+      viewportOverride ??
+      host?.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
+      host;
+    const spacer = host?.querySelector<HTMLElement>("[data-chat-tail-spacer]");
+    if (!viewport || !spacer) return;
+
+    const lastTurn = host?.querySelector<HTMLElement>("[data-chat-last-turn]");
+    if (!lastTurn) {
+      spacer.style.height = "0px";
+      return;
+    }
+    const used =
+      spacer.getBoundingClientRect().top - lastTurn.getBoundingClientRect().top;
+    const next = `${Math.max(Math.ceil(viewport.clientHeight - used), 0)}px`;
+    if (spacer.style.height !== next) spacer.style.height = next;
+  }, []);
+
+  const scrollChatToBottom = useCallback(
+    (behavior: ChatScrollBehavior, viewportOverride?: HTMLElement) => {
+      const chatScrollHost = chatScrollRef.current;
+      const viewport =
+        viewportOverride ??
+        chatScrollHost?.querySelector<HTMLElement>(
+          "[data-overlayscrollbars-viewport]",
+        ) ??
+        chatScrollHost;
+      if (!viewport) return;
+
+      updateTailSpacer(viewport);
+
+      const maxScrollTop = Math.max(
+        viewport.scrollHeight - viewport.clientHeight,
+        0,
+      );
+      if (behavior === "smooth") {
+        viewport.scrollTo({ top: maxScrollTop, behavior });
+      } else {
+        viewport.scrollTop = maxScrollTop;
+      }
+      scrollTopRef.current = maxScrollTop;
+    },
+    [updateTailSpacer],
+  );
+
+  const tailObserverRef = useRef<ResizeObserver | null>(null);
+
+  useEffect(() => {
+    const observer = new ResizeObserver(() => updateTailSpacer());
+    tailObserverRef.current = observer;
+    return () => {
+      observer.disconnect();
+      tailObserverRef.current = null;
+    };
+  }, [updateTailSpacer]);
+
+  useLayoutEffect(() => {
+    updateTailSpacer();
+
+    const observer = tailObserverRef.current;
+    const host = chatScrollRef.current;
+    if (!observer || !host) return;
+    observer.disconnect();
+    const viewport =
+      host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
+      host;
+    observer.observe(viewport);
+    const lastTurn = host.querySelector<HTMLElement>("[data-chat-last-turn]");
+    if (lastTurn) observer.observe(lastTurn);
+  });
+
+  const applyArchivePage = useCallback(
+    (
+      page: ChatArchivePage,
+      scrollBehavior: ChatScrollBehavior | null = null,
+    ) => {
+      if (scrollBehavior) {
+        pendingChatScrollToBottomRef.current = scrollBehavior;
+      }
+      setMessages(page.messages);
+      setHasOlderMessages(page.hasOlder);
+      setFirstMessageSequence(page.firstSequence);
+      loadedFirstSequenceRef.current = page.firstSequence;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    const initializeArchive = async () => {
+      try {
+        try {
+          const persistent = await requestPersistentChatStorage();
+          if (active) setPersistentStorageGranted(persistent);
+        } catch (error) {
+          console.warn("Persistent storage request failed:", error);
+          if (active) setPersistentStorageGranted(false);
+        }
+
+        const page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);
+        if (active) {
+          applyArchivePage(page, "instant");
+          setArchiveReady(true);
+        }
+      } catch (error) {
+        console.error("Chat archive initialization failed:", error);
+        if (active) {
+          setArchiveError(
+            "端末内の会話履歴を読み込めませんでした。ブラウザーの保存設定を確認してください。",
+          );
+        }
+      }
+    };
+
+    void initializeArchive();
+
+    return () => {
+      active = false;
+    };
+  }, [applyArchivePage]);
+
   const { elementRef: scrollRef } = useOverlayScroll<HTMLDivElement>(
     {
       axis: "y",
@@ -238,7 +476,6 @@ export default function Ask() {
         scrollTopRef.current = viewport.scrollTop;
       },
       onInit: (el) => {
-        const prevScrollTop = scrollTopRef.current;
         const pending = pendingCaretRef.current;
         const caretTop = pending?.caretTop ?? 0;
         const caretRatio = pending?.caretRatio ?? null;
@@ -250,7 +487,7 @@ export default function Ask() {
           const target =
             caretRatio !== null
               ? caretTop - caretRatio * el.clientHeight
-              : prevScrollTop;
+              : scrollTopRef.current;
           const clamped = Math.min(Math.max(target, 0), maxScrollTop);
           el.scrollTop = clamped;
           scrollTopRef.current = clamped;
@@ -266,35 +503,269 @@ export default function Ask() {
     [isExpanded],
   );
 
+  const refreshVisibleArchivePage = useCallback(
+    async (scrollBehavior: ChatScrollBehavior | null = null) => {
+      const page = await loadLatestChatTurns(
+        CHAT_PAGE_TURN_LIMIT,
+        hasExpandedHistoryRef.current ? loadedFirstSequenceRef.current : null,
+      );
+      applyArchivePage(page, scrollBehavior);
+      return page;
+    },
+    [applyArchivePage],
+  );
+
+  const showOlderMessages = useCallback(async () => {
+    if (
+      firstMessageSequence === null ||
+      !hasOlderMessages ||
+      isLoadingOlderMessages
+    ) {
+      return;
+    }
+
+    const chatScrollHost = chatScrollRef.current;
+    const chatViewport =
+      chatScrollHost?.querySelector<HTMLElement>(
+        "[data-overlayscrollbars-viewport]",
+      ) ?? chatScrollHost;
+    const viewportRect = chatViewport?.getBoundingClientRect();
+    const anchor =
+      chatViewport && viewportRect
+        ? (Array.from(
+            chatViewport.querySelectorAll<HTMLElement>(
+              "[data-chat-message-id]",
+            ),
+          ).find((message) => {
+            const rect = message.getBoundingClientRect();
+            return (
+              rect.bottom > viewportRect.top && rect.top < viewportRect.bottom
+            );
+          }) ?? null)
+        : null;
+    const previousScroll =
+      chatViewport && viewportRect
+        ? {
+            scrollTop: chatViewport.scrollTop,
+            scrollHeight: chatViewport.scrollHeight,
+            anchor,
+            anchorTop: anchor?.getBoundingClientRect().top ?? null,
+          }
+        : null;
+
+    setIsLoadingOlderMessages(true);
+    try {
+      const olderPage = await loadOlderChatTurns(
+        firstMessageSequence,
+        CHAT_PAGE_TURN_LIMIT,
+      );
+      hasExpandedHistoryRef.current = true;
+      pendingHistoryScrollRef.current = previousScroll;
+      setMessages((currentMessages) => [
+        ...olderPage.messages,
+        ...currentMessages,
+      ]);
+      setHasOlderMessages(olderPage.hasOlder);
+      setFirstMessageSequence(olderPage.firstSequence);
+      loadedFirstSequenceRef.current = olderPage.firstSequence;
+    } catch (error) {
+      console.error("Older chat page load failed:", error);
+      setArchiveError("過去の会話を読み込めませんでした。");
+    } finally {
+      setIsLoadingOlderMessages(false);
+    }
+  }, [firstMessageSequence, hasOlderMessages, isLoadingOlderMessages]);
+
+  useLayoutEffect(() => {
+    const scrollBehavior = pendingChatScrollToBottomRef.current;
+    if (scrollBehavior) {
+      scrollChatToBottom(scrollBehavior);
+      pendingChatScrollToBottomRef.current = null;
+      pendingHistoryScrollRef.current = null;
+      return;
+    }
+
+    const previousScroll = pendingHistoryScrollRef.current;
+    if (!previousScroll) return;
+
+    const chatScrollHost = chatScrollRef.current;
+    const chatViewport =
+      chatScrollHost?.querySelector<HTMLElement>(
+        "[data-overlayscrollbars-viewport]",
+      ) ?? chatScrollHost;
+    if (!chatViewport) return;
+
+    const addedHeight =
+      previousScroll.anchor?.isConnected && previousScroll.anchorTop !== null
+        ? previousScroll.anchor.getBoundingClientRect().top -
+            previousScroll.anchorTop
+        : chatViewport.scrollHeight - previousScroll.scrollHeight;
+    const maxScrollTop = Math.max(
+      chatViewport.scrollHeight - chatViewport.clientHeight,
+      0,
+    );
+    const nextScrollTop = Math.min(
+      Math.max(chatViewport.scrollTop + addedHeight, 0),
+      maxScrollTop,
+    );
+
+    chatViewport.scrollTop = nextScrollTop;
+    pendingHistoryScrollRef.current = null;
+  });
+
+  useLayoutEffect(() => {
+    if (!archiveReady || isInitialChatPositioned) return;
+
+    let frame = 0;
+    let stableFrames = 0;
+    let previousHeight = -1;
+    let previousClientHeight = -1;
+    let previousViewport: HTMLElement | null = null;
+
+    const positionInitialChat = () => {
+      const chatScrollHost = chatScrollRef.current;
+      const viewport =
+        chatScrollHost?.querySelector<HTMLElement>(
+          "[data-overlayscrollbars-viewport]",
+        ) ?? chatScrollHost;
+      if (!viewport) {
+        frame = requestAnimationFrame(positionInitialChat);
+        return;
+      }
+
+      scrollChatToBottom("instant", viewport);
+
+      const isAtBottom =
+        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
+      if (
+        isAtBottom &&
+        viewport === previousViewport &&
+        viewport.scrollHeight === previousHeight &&
+        viewport.clientHeight === previousClientHeight
+      ) {
+        stableFrames += 1;
+      } else {
+        stableFrames = 0;
+        previousViewport = viewport;
+        previousHeight = viewport.scrollHeight;
+        previousClientHeight = viewport.clientHeight;
+      }
+
+      if (stableFrames >= 2) {
+        setIsInitialChatPositioned(true);
+        return;
+      }
+
+      frame = requestAnimationFrame(positionInitialChat);
+    };
+
+    frame = requestAnimationFrame(positionInitialChat);
+    return () => cancelAnimationFrame(frame);
+  }, [archiveReady, isInitialChatPositioned, scrollChatToBottom]);
+
+  // 初期表示後に遅れて高さが変わっても、ユーザー操作があるまで最下部に固定する
+  useEffect(() => {
+    if (!isInitialChatPositioned) return;
+
+    const host = chatScrollRef.current;
+    if (!host) return;
+
+    // overlayscrollbars が再生成されても追従できるよう、毎回 viewport を取り直す
+    const stick = () => scrollChatToBottom("instant");
+    const resizeObserver = new ResizeObserver(stick);
+    const observeTargets = () => {
+      resizeObserver.disconnect();
+      resizeObserver.observe(host);
+      for (const child of host.querySelectorAll<HTMLElement>(
+        "[data-overlayscrollbars-viewport], [data-chat-last-turn], [data-chat-tail-spacer]",
+      )) {
+        resizeObserver.observe(child);
+      }
+    };
+    observeTargets();
+
+    const mutationObserver = new MutationObserver(() => {
+      observeTargets();
+      stick();
+    });
+    mutationObserver.observe(host, { childList: true, subtree: true });
+
+    // 自動スクロール以外で最下部から外れた(0 への巻き戻し等)場合も戻す
+    const handleScroll = () => {
+      const viewport =
+        host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
+        host;
+      if (
+        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop >
+        1
+      ) {
+        stick();
+      }
+    };
+    host.addEventListener("scroll", handleScroll, true);
+    document.fonts?.ready.then(stick);
+
+    let frame = 0;
+    const enforce = () => {
+      const viewport =
+        host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
+        host;
+      if (
+        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop >
+        1
+      ) {
+        stick();
+      }
+      frame = requestAnimationFrame(enforce);
+    };
+    frame = requestAnimationFrame(enforce);
+
+    const userEvents = ["wheel", "touchstart", "pointerdown", "keydown"];
+    const stop = () => {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      host.removeEventListener("scroll", handleScroll, true);
+      clearTimeout(timeoutId);
+      for (const type of userEvents) {
+        host.removeEventListener(type, stop, true);
+      }
+    };
+    for (const type of userEvents) {
+      host.addEventListener(type, stop, { capture: true, passive: true });
+    }
+    const timeoutId = setTimeout(stop, 3000);
+
+    return stop;
+  }, [isInitialChatPositioned, scrollChatToBottom]);
+
   //  ================================================================
   //    送信
   //  ================================================================
 
-  const formatMessageTime = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const weekday = ["日", "月", "火", "水", "木", "金", "土"][date.getDay()];
-    const time = date.toLocaleTimeString("ja-JP", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-
-    return `${year}/${month}/${day}(${weekday}) ${time}`;
-  };
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const requestAssistantReply = useCallback(
-    async (promptContent: string, historyForApi: Message[]) => {
+    async (promptContent: string) => {
       setIsLoading(true);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      abortControllerRef.current = controller;
+      const timeoutId = setTimeout(
+        () =>
+          controller.abort(
+            new DOMException(
+              "The AI response timed out.",
+              "TimeoutError",
+            ),
+          ),
+        120000,
+      );
       const assistantMessageId = generateId();
       const startedAt = Date.now();
       let reply = "";
       let renderTimeout: ReturnType<typeof setTimeout> | null = null;
+      let assistantMessagePersisted = false;
 
       const flushReply = () => {
         if (renderTimeout !== null) {
@@ -302,24 +773,19 @@ export default function Ask() {
           renderTimeout = null;
         }
 
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantMessageId
-              ? { ...message, content: reply }
-              : message,
-          ),
+        setStreamingMessage((current) =>
+          current?.id === assistantMessageId
+            ? { ...current, content: reply }
+            : current,
         );
       };
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          content: "",
-          timestamp: startedAt,
-        },
-      ]);
+      setStreamingMessage({
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        timestamp: startedAt,
+      });
 
       try {
         const apiUrl =
@@ -329,6 +795,96 @@ export default function Ask() {
           throw new Error("CONFIG_ERROR: APIのURL設定が不正です。");
         }
 
+        const latestPage = await loadLatestChatPage(CHAT_PAGE_MESSAGE_LIMIT);
+        const latestMessage = latestPage.messages.at(-1);
+        if (
+          !latestMessage ||
+          latestMessage.role !== "user" ||
+          latestMessage.content !== promptContent
+        ) {
+          throw new Error(
+            "会話履歴と送信内容が一致しません。再度お試しください。",
+          );
+        }
+
+        let summary = await getChatArchiveSummary();
+        if (latestPage.firstSequence !== null) {
+          try {
+            while (true) {
+              const batch = await loadMessagesToSummarize(
+                summary.throughSequence,
+                latestPage.firstSequence,
+                SUMMARY_BATCH_LIMIT,
+              );
+              if (batch.length === 0) break;
+
+              const summaryResponse = await fetch(
+                `${apiUrl}/api/ask/summarize`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    summary: summary.content,
+                    messages: batch.map(({ role, content }) => ({
+                      role,
+                      content:
+                        content.length > CHAT_MESSAGE_MAX_LENGTH
+                          ? `${content.slice(0, CHAT_MESSAGE_MAX_LENGTH)}\n[以降省略]`
+                          : content,
+                    })),
+                  }),
+                  signal: controller.signal,
+                },
+              );
+              if (!summaryResponse.ok) {
+                throw new Error(
+                  `履歴の要約に失敗しました（${summaryResponse.status}）。`,
+                );
+              }
+
+              const result: unknown = await summaryResponse.json();
+              if (
+                typeof result !== "object" ||
+                result === null ||
+                !("summary" in result) ||
+                typeof result.summary !== "string" ||
+                !result.summary.trim()
+              ) {
+                throw new Error("会話履歴の要約応答が不正です。");
+              }
+
+              summary = {
+                content: result.summary.slice(0, 12000),
+                throughSequence:
+                  batch.at(-1)?.sequence ?? summary.throughSequence,
+              };
+              await saveChatArchiveSummary(summary);
+            }
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+
+            console.warn(
+              "Chat history summarization failed; continuing with recent history:",
+              error,
+            );
+            const reason = error instanceof Error ? ` (${error.message})` : "";
+            setArchiveError(
+              `過去の履歴を要約できなかったため、直近の会話を使って回答します${reason}`,
+            );
+          }
+        }
+
+        const recentHistory = latestPage.messages
+          .slice(0, -1)
+          .filter(({ content }) => content.trim())
+          .map(({ role, content }) => ({
+            role,
+            content:
+              content.length > CHAT_MESSAGE_MAX_LENGTH
+                ? `${content.slice(0, CHAT_MESSAGE_MAX_LENGTH)}\n[以降省略]`
+                : content,
+          }));
+
         const response = await fetch(`${apiUrl}/api/ask`, {
           method: "POST",
           headers: {
@@ -336,30 +892,14 @@ export default function Ask() {
           },
           body: JSON.stringify({
             prompt: promptContent,
-            history: historyForApi,
+            summary: summary.content,
+            history: recentHistory,
           }),
           signal: controller.signal,
         });
 
         if (!response.ok) {
-          const status = response.status;
-          const errorMessages: Record<number, string> = {
-            400: "400: 入力内容またはリクエストのフォーマットが不正です。",
-            401: "401: 認証エラーが発生しました。ログインし直してください。",
-            403: "403: アクセスが拒否されました。",
-            404: "404: 該当するAPIエンドポイントが見つかりませんでした。",
-            413: "413: 送信データまたはファイルのサイズが大きすぎます。",
-            422: "422: 入力内容のバリデーションエラーです。",
-            429: "429: リクエスト回数の制限を超えました。少し時間を置いてお試しください。",
-            500: "500: サーバー内部でエラーが発生しました。",
-            502: "502: サーバーが一時的に利用できないか、メンテナンス中です。",
-            503: "503: サーバーが一時的に利用できないか、メンテナンス中です。",
-            504: "504: サーバーの処理がタイムアウトしました。",
-          };
-          const message =
-            errorMessages[status] ||
-            `${status}: 未定義のエラーが発生しました。`;
-          throw new Error(message);
+          throw new Error(await readAssistantError(response));
         }
 
         const reader = response.body?.getReader();
@@ -395,26 +935,43 @@ export default function Ask() {
         }
 
         flushReply();
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantMessageId
-              ? {
-                  ...message,
-                  timestamp: Date.now(),
-                  duration: Date.now() - startedAt,
-                }
-              : message,
-          ),
-        );
+        if (!reply.trim()) {
+          throw new Error(
+            "AIから空の応答が返されました。時間をおいて再度お試しください。",
+          );
+        }
+        await appendChatMessage({
+          id: assistantMessageId,
+          role: "assistant",
+          content: reply,
+          timestamp: Date.now(),
+          duration: Date.now() - startedAt,
+        });
+        assistantMessagePersisted = true;
+        await refreshVisibleArchivePage();
+        setStreamingMessage(null);
       } catch (error: unknown) {
-        console.error("Submit Error:", error);
+        const isUserCancelled =
+          controller.signal.aborted &&
+          controller.signal.reason === USER_CANCEL_REASON;
+
+        if (isUserCancelled) {
+          console.info("AI request was cancelled by the user.");
+        } else if (controller.signal.aborted) {
+          console.warn("AI request was aborted:", controller.signal.reason);
+        } else {
+          console.error("Submit Error:", error);
+        }
 
         let errorMessage = "予期せぬエラーが発生しました。";
 
-        if (error instanceof Error) {
+        if (controller.signal.aborted) {
+          errorMessage = "応答を完了できませんでした。時間をおいて再度お試しください。";
+        } else if (error instanceof Error) {
           if (error.name === "AbortError") {
-            errorMessage =
-              "応答時間が長すぎたため処理を中断しました（タイムアウト）。";
+            errorMessage = "通信が中断されました。もう一度お試しください。";
+          } else if (error.name === "TimeoutError") {
+            errorMessage = "応答に時間がかかっています。時間をおいて再度お試しください。";
           } else if (
             error.name === "TypeError" &&
             error.message.includes("fetch")
@@ -431,54 +988,49 @@ export default function Ask() {
           renderTimeout = null;
         }
 
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantMessageId
-              ? {
-                  ...message,
-                  content: reply ? `${reply}\n\n${errorMessage}` : errorMessage,
-                  timestamp: Date.now(),
-                  duration: Date.now() - startedAt,
-                }
-              : message,
-          ),
-        );
+        const failedMessage: Message = {
+          id: assistantMessageId,
+          role: "assistant",
+          content: reply,
+          timestamp: Date.now(),
+          duration: Date.now() - startedAt,
+          notice: isUserCancelled
+            ? { kind: "cancelled", text: CANCELLED_NOTICE_TEXT }
+            : { kind: "error", text: errorMessage },
+        };
+        if (!assistantMessagePersisted) {
+          try {
+            await appendChatMessage(failedMessage);
+            await refreshVisibleArchivePage();
+          } catch (archiveFailure) {
+            console.error("Failed to persist assistant error:", archiveFailure);
+            setArchiveError("返答を端末内の履歴に保存できませんでした。");
+          }
+        } else {
+          setArchiveError("返答は保存されましたが、画面の更新に失敗しました。");
+        }
+        setStreamingMessage(null);
       } finally {
         clearTimeout(timeoutId);
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
         setIsLoading(false);
       }
     },
-    [],
+    [refreshVisibleArchivePage],
   );
+
+  const handleStop = useCallback(() => {
+    abortControllerRef.current?.abort(USER_CANCEL_REASON);
+  }, []);
 
   const handleSubmit = async (e?: SyntheticEvent<HTMLFormElement>) => {
     if (e) e.preventDefault();
-    if (!hasInput || isLoading) return;
+    if (!hasInput || isLoading || !archiveReady) return;
 
     const userPrompt = value.trim();
     const userMessageId = generateId();
-
-    if (typeof window !== "undefined" && !navigator.onLine) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: userMessageId,
-          role: "user",
-          content: userPrompt,
-          timestamp: Date.now(),
-        },
-        {
-          id: `${userMessageId}-error`,
-          role: "assistant",
-          content:
-            "ネットワークに接続されていないため、接続環境を確認してください。",
-          timestamp: Date.now(),
-        },
-      ]);
-
-      return;
-    }
-
     const newUserMessage: Message = {
       id: userMessageId,
       role: "user",
@@ -486,15 +1038,59 @@ export default function Ask() {
       timestamp: Date.now(),
     };
 
-    setMessages((prev) => [...prev, newUserMessage]);
+    try {
+      await appendChatMessage(newUserMessage);
+      await refreshVisibleArchivePage("smooth");
+    } catch (error) {
+      console.error("User message persistence failed:", error);
+      setArchiveError("メッセージを端末内の履歴に保存できませんでした。");
+      return;
+    }
+
     setValue("");
     setIsAdjusted(false);
     setIsScrollable(false);
     setIsExpanded(false);
     setFiles([]);
 
-    await requestAssistantReply(userPrompt, [...messages, newUserMessage]);
+    if (typeof window !== "undefined" && !navigator.onLine) {
+      try {
+        await appendChatMessage({
+          id: `${userMessageId}-error`,
+          role: "assistant",
+          content: "",
+          notice: {
+            kind: "error",
+            text: "ネットワークに接続されていないため、接続環境を確認してください。",
+          },
+          timestamp: Date.now(),
+        });
+        await refreshVisibleArchivePage("smooth");
+      } catch (error) {
+        console.error("Offline message persistence failed:", error);
+        setArchiveError("オフラインの通知を履歴に保存できませんでした。");
+      }
+      return;
+    }
+
+    await requestAssistantReply(userPrompt);
   };
+
+  const appendPromptAtLatest = useCallback(
+    async (message: Message) => {
+      if (!archiveReady || isLoading) return;
+
+      try {
+        await appendChatMessage(message);
+        await refreshVisibleArchivePage("smooth");
+        await requestAssistantReply(message.content);
+      } catch (error) {
+        console.error("Appending a prompt to chat history failed:", error);
+        setArchiveError("メッセージを端末内の履歴に保存できませんでした。");
+      }
+    },
+    [archiveReady, isLoading, refreshVisibleArchivePage, requestAssistantReply],
+  );
 
   //  ================================================================
   //    メッセージ
@@ -534,20 +1130,18 @@ export default function Ask() {
       if (index === -1) return;
 
       const updatedMessage: Message = {
-        ...messages[index],
+        id: generateId(),
+        role: "user",
         content: trimmed,
         timestamp: Date.now(),
         edited: true,
       };
-      const truncatedHistory = [...messages.slice(0, index), updatedMessage];
 
-      setMessages(truncatedHistory);
       setEditingMessageId(null);
       setEditingValue("");
-
-      await requestAssistantReply(trimmed, truncatedHistory);
+      await appendPromptAtLatest(updatedMessage);
     },
-    [editingValue, isLoading, messages, requestAssistantReply],
+    [appendPromptAtLatest, editingValue, isLoading, messages],
   );
 
   const handleRetryMessage = useCallback(
@@ -558,17 +1152,15 @@ export default function Ask() {
       if (index === -1) return;
 
       const updatedMessage: Message = {
-        ...messages[index],
+        id: generateId(),
+        role: "user",
+        content: messages[index].content,
         timestamp: Date.now(),
-        edited: true,
       };
-      const truncatedHistory = [...messages.slice(0, index), updatedMessage];
 
-      setMessages(truncatedHistory);
-
-      await requestAssistantReply(updatedMessage.content, truncatedHistory);
+      await appendPromptAtLatest(updatedMessage);
     },
-    [isLoading, messages, requestAssistantReply],
+    [appendPromptAtLatest, isLoading, messages],
   );
 
   //  ================================================================
@@ -1269,21 +1861,25 @@ export default function Ask() {
     }
   }, [handleFilesAdded]);
 
-  const messageTurns = messages.reduce<Message[][]>((turns, message) => {
-    const currentTurn = turns.at(-1);
-    const previousMessage = currentTurn?.at(-1);
+  const messageTurns = useMemo(
+    () =>
+      messages.reduce<Message[][]>((turns, message) => {
+        const currentTurn = turns.at(-1);
+        const previousMessage = currentTurn?.at(-1);
 
-    if (
-      !currentTurn ||
-      (previousMessage?.role === "assistant" && message.role === "user")
-    ) {
-      turns.push([message]);
-    } else {
-      currentTurn.push(message);
-    }
+        if (
+          !currentTurn ||
+          (previousMessage?.role === "assistant" && message.role === "user")
+        ) {
+          turns.push([message]);
+        } else {
+          currentTurn.push(message);
+        }
 
-    return turns;
-  }, []);
+        return turns;
+      }, []),
+    [messages],
+  );
   const loadingMessage = (
     <motion.div
       key="assistant-loading"
@@ -1367,212 +1963,327 @@ export default function Ask() {
             )}
           </AnimatePresence>
 
+          {(archiveError || persistentStorageGranted === false) && (
+            <div className="w-full space-y-1" aria-live="polite">
+              {archiveError && (
+                <p role="alert" className="text-sm text-red-500">
+                  {archiveError}
+                </p>
+              )}
+              {persistentStorageGranted === false && (
+                <p className="text-xs text-fore-5">
+                  このブラウザーは永続保存を許可していません。サイトデータの消去や容量整理で履歴が失われる可能性があります。
+                </p>
+              )}
+            </div>
+          )}
+
           <ScrollArea
-            overlayScroll={{ axis: "y" }}
-            autoScroll={{
-              enabled: true,
-              behavior: "smooth",
-              deps: [messages.length, messages.at(-1)?.content, isLoading],
+            scrollRef={chatScrollRef}
+            overlayScroll={{
+              axis: "y",
+              onInit: (viewport) => {
+                const previousOverflowAnchor = viewport.style.overflowAnchor;
+                viewport.style.overflowAnchor = "none";
+                if (archiveReady) {
+                  scrollChatToBottom("instant", viewport);
+                }
+                return () => {
+                  viewport.style.overflowAnchor = previousOverflowAnchor;
+                };
+              },
             }}
+            overlayScrollDeps={[archiveReady]}
             className="w-full"
+            style={{
+              visibility: isInitialChatPositioned ? "visible" : "hidden",
+            }}
+            virtual={false}
           >
             <AnimatePresence mode="popLayout" initial={false}>
-              {!isExpanded && (
+              {archiveReady && hasOlderMessages && (
                 <motion.div
-                  layout="size"
+                  key="older-messages-button"
+                  layout="position"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   transition={TRANSITION}
-                  className="flex flex-col gap-8"
+                  className="flex w-full justify-center items-center p-2"
                 >
-                  {messageTurns.map((turn, turnIndex) => {
-                    const isLastTurn = turnIndex === messageTurns.length - 1;
-
-                    return (
-                      <motion.div
-                        key={turn[0].id}
-                        layout="position"
-                        className="flex flex-col gap-4"
+                  <Button
+                    onPress={showOlderMessages}
+                    isDisabled={isLoading || isLoadingOlderMessages}
+                    aria-label="Load Older Messages"
+                    className="w-full text-xs text-fore-5 p-2 border border-dotted border-back-5"
+                  >
+                    {isLoadingOlderMessages ? (
+                      <output
+                        aria-label="Loading Older Messages"
+                        className="flex justify-center"
                       >
-                        <AnimatePresence mode="popLayout" initial={false}>
-                          {turn.map((msg) => {
-                            const isEditing = editingMessageId === msg.id;
-                            const isUser = msg.role === "user";
-                            const isAssistant = msg.role === "assistant";
-
-                            return (
-                              <motion.div
-                                key={msg.id}
-                                layout="position"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                transition={TRANSITION}
-                                className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"
-                                  }`}
-                              >
-                                <div className={`**:select-text ${isUser && "bg-back-2 px-6 py-4"}`}>
-                                  {isEditing ? (
-                                    <motion.div
-                                      ref={editingRef}
-                                      onInput={(e) => {
-                                        setEditingValue(
-                                          e.currentTarget.innerText ?? "",
-                                        );
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter" && !e.shiftKey) {
-                                          e.preventDefault();
-                                          handleSubmitEdit(msg.id);
-                                        } else if (e.key === "Escape") {
-                                          e.preventDefault();
-                                          handleCancelEdit();
-                                        }
-                                      }}
-                                      onPaste={pastePlainText}
-                                      autoFocus
-                                      contentEditable
-                                      suppressContentEditableWarning
-                                      spellCheck={false}
-                                      aria-multiline="true"
-                                      id="reprompt"
-                                      className="animate-caret outline-none"
-                                    />
-                                  ) : isUser ? (
-                                    <p>{msg.content}</p>
-                                  ) : (
-                                    <AssistantMarkdown
-                                      content={msg.content}
-                                      isAnimating={
-                                        isLoading &&
-                                        msg.id === messages.at(-1)?.id
-                                      }
-                                    />
-                                  )}
-                                </div>
-
-                                {isUser && isEditing && (
-                                  <div className="flex justify-center items-center gap-2 p-2">
-                                    <Tooltip content="取消" placement="bottom">
-                                      <Button
-                                        onPress={handleCancelEdit}
-                                        aria-label="Cancel Edit"
-                                        shape="circle"
-                                        className="bg-back-2"
-                                      >
-                                        <X />
-                                      </Button>
-                                    </Tooltip>
-
-                                    <Tooltip content="送信" placement="bottom">
-                                      <Button
-                                        onPress={() => handleSubmitEdit(msg.id)}
-                                        isDisabled={!editingValue.trim() || isLoading}
-                                        aria-label="Save Edit"
-                                        shape="circle"
-                                        color="primary"
-                                      >
-                                        <Check className="text-back-1_" />
-                                      </Button>
-                                    </Tooltip>
-                                  </div>
-                                )}
-
-                                {isUser && !isEditing && (
-                                  <div className="flex items-center gap-2 py-2">
-                                    {msg.edited && (
-                                      <span className="text-sm text-fore-5">
-                                        編集済
-                                      </span>
-                                    )}
-
-                                    <span className="text-sm text-fore-5">
-                                      {formatMessageTime(msg.timestamp)}
-                                    </span>
-
-                                    <Tooltip content="再試行" placement="bottom">
-                                      <Button
-                                        onPress={() => handleRetryMessage(msg.id)}
-                                        isDisabled={isLoading}
-                                        aria-label="Retry"
-                                        shape="circle"
-                                        className="size-5"
-                                      >
-                                        <RotateCcw
-                                          size={16}
-                                          className="text-fore-5"
-                                        />
-                                      </Button>
-                                    </Tooltip>
-
-                                    <Tooltip content="編集" placement="bottom">
-                                      <Button
-                                        onPress={() => handleStartEdit(msg)}
-                                        isDisabled={isLoading}
-                                        aria-label="Edit"
-                                        shape="circle"
-                                        className="size-5"
-                                      >
-                                        <Pencil size={16} className="text-fore-5" />
-                                      </Button>
-                                    </Tooltip>
-
-                                    <Tooltip content="コピー" placement="bottom">
-                                      <Button
-                                        onPress={() => handleCopyMessage(msg.content)}
-                                        aria-label="Copy"
-                                        shape="circle"
-                                        className="size-5"
-                                      >
-                                        <Copy size={16} className="text-fore-5" />
-                                      </Button>
-                                    </Tooltip>
-                                  </div>
-                                )}
-
-                                {isAssistant && (
-                                  <div className="flex items-center gap-2 py-2">
-                                    <Tooltip content="コピー" placement="bottom">
-                                      <Button
-                                        onPress={() => handleCopyMessage(msg.content)}
-                                        aria-label="Copy"
-                                        shape="circle"
-                                        className="size-5"
-                                      >
-                                        <Copy size={16} className="text-fore-5" />
-                                      </Button>
-                                    </Tooltip>
-
-                                    {msg.duration !== undefined && (
-                                      <span className="flex items-center gap-1 text-sm text-fore-5">
-                                        <Timer size={16} />
-
-                                        {formatDuration(msg.duration)}
-                                      </span>
-                                    )}
-
-                                    <span className="text-sm text-fore-5">
-                                      {formatMessageTime(msg.timestamp)}
-                                    </span>
-                                  </div>
-                                )}
-                              </motion.div>
-                            );
-                          })}
-                        </AnimatePresence>
-                        {isLoading &&
-                          isLastTurn &&
-                          messages.at(-1)?.content === "" &&
-                          loadingMessage}
-                      </motion.div>
-                    );
-                  })}
+                        <Loader
+                          size={16}
+                          aria-hidden="true"
+                          className="animate-spin"
+                        />
+                      </output>
+                    ) : (
+                      "◢◤ 続きを読み込む ◢◤"
+                    )}
+                  </Button>
                 </motion.div>
               )}
             </AnimatePresence>
 
+            {!isExpanded &&
+              messageTurns.map((turn, turnIndex) => {
+                const isLastTurn = turnIndex === messageTurns.length - 1;
+
+                return (
+                  <motion.div
+                    key={turn[0].id}
+                    data-chat-last-turn={isLastTurn ? "" : undefined}
+                    className={`flex flex-col gap-4 ${isLastTurn ? "" : "pb-8"}`}
+                  >
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      {turn.map((msg) => {
+                        const isEditing = editingMessageId === msg.id;
+                        const isUser = msg.role === "user";
+                        const isAssistant = msg.role === "assistant";
+
+                        return (
+                          <motion.div
+                            key={msg.id}
+                            data-chat-message-id={msg.id}
+                            data-os-fade-top-anchor=""
+                            layout={isLoadingOlderMessages ? false : "position"}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={TRANSITION}
+                            className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}
+                          >
+                            <div
+                              className={`**:select-text ${isUser && "bg-back-2 px-6 py-4"}`}
+                            >
+                              {isEditing ? (
+                                <motion.div
+                                  ref={editingRef}
+                                  onInput={(e) => {
+                                    setEditingValue(
+                                      e.currentTarget.innerText ?? "",
+                                    );
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && !e.shiftKey) {
+                                      e.preventDefault();
+                                      handleSubmitEdit(msg.id);
+                                    } else if (e.key === "Escape") {
+                                      e.preventDefault();
+                                      handleCancelEdit();
+                                    }
+                                  }}
+                                  onPaste={pastePlainText}
+                                  autoFocus
+                                  contentEditable
+                                  suppressContentEditableWarning
+                                  spellCheck={false}
+                                  aria-multiline="true"
+                                  id="reprompt"
+                                  className="animate-caret outline-none"
+                                />
+                              ) : isUser ? (
+                                <p>{msg.content}</p>
+                              ) : (
+                                msg.content && (
+                                  <AssistantMarkdown
+                                    content={msg.content}
+                                    isAnimating={
+                                      isLoading &&
+                                      msg.id === messages.at(-1)?.id
+                                    }
+                                  />
+                                )
+                              )}
+                            </div>
+
+                            {isAssistant && (msg.notice || !msg.content) && (
+                              <MessageNoticeBox
+                                notice={
+                                  msg.notice ?? {
+                                    kind: "error",
+                                    text: EMPTY_ASSISTANT_MESSAGE,
+                                  }
+                                }
+                              />
+                            )}
+
+                            {isUser && isEditing && (
+                              <div className="flex justify-center items-center gap-2 p-2">
+                                <Tooltip content="取消" placement="bottom">
+                                  <Button
+                                    onPress={handleCancelEdit}
+                                    aria-label="Cancel Edit"
+                                    shape="circle"
+                                    className="bg-back-2"
+                                  >
+                                    <X />
+                                  </Button>
+                                </Tooltip>
+
+                                <Tooltip content="送信" placement="bottom">
+                                  <Button
+                                    onPress={() => handleSubmitEdit(msg.id)}
+                                    isDisabled={
+                                      !editingValue.trim() || isLoading
+                                    }
+                                    aria-label="Save Edit"
+                                    shape="circle"
+                                    color="primary"
+                                  >
+                                    <Check className="text-back-1_" />
+                                  </Button>
+                                </Tooltip>
+                              </div>
+                            )}
+
+                            {isUser && !isEditing && (
+                              <div className="flex items-center gap-2 p-2">
+                                {msg.edited && (
+                                  <span className="text-sm text-fore-5">
+                                    編集済
+                                  </span>
+                                )}
+
+                                <span className="text-sm text-fore-5">
+                                  {formatMessageTime(msg.timestamp)}
+                                </span>
+
+                                <Tooltip content="再試行" placement="bottom">
+                                  <Button
+                                    onPress={() => handleRetryMessage(msg.id)}
+                                    isDisabled={isLoading}
+                                    aria-label="Retry"
+                                    shape="circle"
+                                    className="size-5"
+                                  >
+                                    <RotateCcw
+                                      size={16}
+                                      className="text-fore-5"
+                                    />
+                                  </Button>
+                                </Tooltip>
+
+                                <Tooltip content="編集" placement="bottom">
+                                  <Button
+                                    onPress={() => handleStartEdit(msg)}
+                                    isDisabled={isLoading}
+                                    aria-label="Edit"
+                                    shape="circle"
+                                    className="size-5"
+                                  >
+                                    <Pencil size={16} className="text-fore-5" />
+                                  </Button>
+                                </Tooltip>
+
+                                <Tooltip content="コピー" placement="bottom">
+                                  <Button
+                                    onPress={() =>
+                                      handleCopyMessage(msg.content)
+                                    }
+                                    aria-label="Copy"
+                                    shape="circle"
+                                    className="size-5"
+                                  >
+                                    <Copy size={16} className="text-fore-5" />
+                                  </Button>
+                                </Tooltip>
+                              </div>
+                            )}
+
+                            {isAssistant && (
+                              <div className="flex items-center gap-2 p-2">
+                                {msg.content && (
+                                  <Tooltip content="コピー" placement="bottom">
+                                    <Button
+                                      onPress={() =>
+                                        handleCopyMessage(msg.content)
+                                      }
+                                      aria-label="Copy"
+                                      shape="circle"
+                                      className="size-5"
+                                    >
+                                      <Copy
+                                        size={16}
+                                        className="text-fore-5"
+                                      />
+                                    </Button>
+                                  </Tooltip>
+                                )}
+
+                                {msg.duration !== undefined && (
+                                  <span className="flex items-center gap-1 text-sm text-fore-5">
+                                    <Timer size={16} />
+                                    {formatDuration(msg.duration)}
+                                  </span>
+                                )}
+
+                                <span className="text-sm text-fore-5">
+                                  {formatMessageTime(msg.timestamp)}
+                                </span>
+                              </div>
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              })}
             <AnimatePresence mode="popLayout" initial={false}>
+              {streamingMessage && !isExpanded && (
+                <motion.div
+                  key={streamingMessage.id}
+                  data-os-fade-top-anchor=""
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={TRANSITION}
+                  className="flex flex-col gap-2 items-start"
+                >
+                  {streamingMessage.content ? (
+                    <AssistantMarkdown
+                      content={streamingMessage.content}
+                      isAnimating={isLoading}
+                    />
+                  ) : (
+                    loadingMessage
+                  )}
+
+                  {streamingMessage.content && (
+                    <div className="flex items-center gap-2 py-2">
+                      <Tooltip content="コピー" placement="bottom">
+                        <Button
+                          onPress={() =>
+                            handleCopyMessage(streamingMessage.content)
+                          }
+                          aria-label="Copy"
+                          shape="circle"
+                          className="size-5"
+                        >
+                          <Copy size={16} className="text-fore-5" />
+                        </Button>
+                      </Tooltip>
+
+                      <span className="text-sm text-fore-5">
+                        {formatMessageTime(streamingMessage.timestamp)}
+                      </span>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+
               {!isExpanded &&
                 !isLoading &&
                 messages.at(-1)?.role === "assistant" && (
@@ -1586,11 +2297,13 @@ export default function Ask() {
                     className="py-2"
                   >
                     <p className="select-text text-xs text-fore-5 p-2 border border-dashed border-back-5">
-                      ⚠ 回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
+                      ⚠
+                      回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
                     </p>
                   </motion.div>
                 )}
             </AnimatePresence>
+            <div data-chat-tail-spacer aria-hidden="true" />
           </ScrollArea>
 
           <motion.form
@@ -1619,12 +2332,12 @@ export default function Ask() {
               layout="position"
               transition={TRANSITION}
               className={`${hasFiles
-                ? isAdjusted || isExpanded
-                  ? "col-start-1 row-start-4"
-                  : "col-start-1 row-start-2"
-                : isAdjusted || isExpanded
-                  ? "col-start-1 row-start-3"
-                  : "col-start-1 row-start-1"
+                  ? isAdjusted || isExpanded
+                    ? "col-start-1 row-start-4"
+                    : "col-start-1 row-start-2"
+                  : isAdjusted || isExpanded
+                    ? "col-start-1 row-start-3"
+                    : "col-start-1 row-start-1"
                 }`}
             >
               <Tooltip
@@ -1710,10 +2423,10 @@ export default function Ask() {
                   exit={{ opacity: 0, height: 0 }}
                   transition={TRANSITION}
                   className={`flex items-center justify-center p-2 w-full col-start-1 row-start-1 ${isAdjusted || isExpanded
-                    ? "col-span-2"
-                    : hasText
-                      ? "col-span-4"
-                      : "col-span-3"
+                      ? "col-span-2"
+                      : hasText
+                        ? "col-span-4"
+                        : "col-span-3"
                     }`}
                 >
                   <motion.div
@@ -1850,10 +2563,10 @@ export default function Ask() {
                   exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                   transition={TRANSITION}
                   className={`row-start-1 ${isAdjusted || isExpanded
-                    ? "col-start-3"
-                    : hasText
-                      ? "col-start-5"
-                      : "col-start-4"
+                      ? "col-start-3"
+                      : hasText
+                        ? "col-start-5"
+                        : "col-start-4"
                     }`}
                 >
                   <Tooltip
@@ -1982,12 +2695,12 @@ export default function Ask() {
                   exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                   transition={TRANSITION}
                   className={`${hasFiles
-                    ? isAdjusted || isExpanded
-                      ? "col-start-3 row-start-2 justify-self-end"
-                      : "col-start-3 row-start-2"
-                    : isAdjusted || isExpanded
-                      ? "col-start-3 row-start-1 justify-self-end"
-                      : "col-start-3 row-start-1"
+                      ? isAdjusted || isExpanded
+                        ? "col-start-3 row-start-2 justify-self-end"
+                        : "col-start-3 row-start-2"
+                      : isAdjusted || isExpanded
+                        ? "col-start-3 row-start-1 justify-self-end"
+                        : "col-start-3 row-start-1"
                     }`}
                 >
                   <Tooltip
@@ -2019,12 +2732,12 @@ export default function Ask() {
                   exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                   transition={TRANSITION}
                   className={`self-start ${hasFiles
-                    ? hasText
-                      ? "col-start-3 row-start-3 justify-self-end"
-                      : "col-start-3 row-start-2 justify-self-end"
-                    : hasText
-                      ? "col-start-3 row-start-2 justify-self-end"
-                      : "col-start-3 row-start-1 justify-self-end"
+                      ? hasText
+                        ? "col-start-3 row-start-3 justify-self-end"
+                        : "col-start-3 row-start-2 justify-self-end"
+                      : hasText
+                        ? "col-start-3 row-start-2 justify-self-end"
+                        : "col-start-3 row-start-1 justify-self-end"
                     }`}
                 >
                   <Tooltip
@@ -2076,16 +2789,16 @@ export default function Ask() {
               layout="position"
               transition={TRANSITION}
               className={`${hasFiles
-                ? isAdjusted || isExpanded
-                  ? "col-start-2 row-start-4 justify-self-end"
-                  : hasText
-                    ? "col-start-4 row-start-2"
-                    : "col-start-3 row-start-2"
-                : isAdjusted || isExpanded
-                  ? "col-start-2 row-start-3 justify-self-end"
-                  : hasText
-                    ? "col-start-4 row-start-1"
-                    : "col-start-3 row-start-1"
+                  ? isAdjusted || isExpanded
+                    ? "col-start-2 row-start-4 justify-self-end"
+                    : hasText
+                      ? "col-start-4 row-start-2"
+                      : "col-start-3 row-start-2"
+                  : isAdjusted || isExpanded
+                    ? "col-start-2 row-start-3 justify-self-end"
+                    : hasText
+                      ? "col-start-4 row-start-1"
+                      : "col-start-3 row-start-1"
                 }`}
             >
               <Tooltip
@@ -2105,34 +2818,49 @@ export default function Ask() {
               layout="position"
               transition={TRANSITION}
               className={`${hasFiles
-                ? isAdjusted || isExpanded
-                  ? "col-start-3 row-start-4 justify-self-end"
-                  : hasText
-                    ? "col-start-5 row-start-2"
-                    : "col-start-4 row-start-2"
-                : isAdjusted || isExpanded
-                  ? "col-start-3 row-start-3 justify-self-end"
-                  : hasText
-                    ? "col-start-5 row-start-1"
-                    : "col-start-4 row-start-1"
+                  ? isAdjusted || isExpanded
+                    ? "col-start-3 row-start-4 justify-self-end"
+                    : hasText
+                      ? "col-start-5 row-start-2"
+                      : "col-start-4 row-start-2"
+                  : isAdjusted || isExpanded
+                    ? "col-start-3 row-start-3 justify-self-end"
+                    : hasText
+                      ? "col-start-5 row-start-1"
+                      : "col-start-4 row-start-1"
                 }`}
             >
               <Tooltip
-                content={hasInput ? "送信" : "会話"}
-                shortcut={{
-                  mac: ["⌘", "Shift", "Option", "S"],
-                  windows: ["Ctrl", "Shift", "Alt", "S"],
-                }}
+                content={isLoading ? "停止" : hasInput ? "送信" : "会話"}
+                shortcut={
+                  isLoading
+                    ? undefined
+                    : {
+                        mac: ["⌘", "Shift", "Option", "S"],
+                        windows: ["Ctrl", "Shift", "Alt", "S"],
+                      }
+                }
               >
                 <Button
-                  isDisabled={isLoading}
-                  type="submit"
-                  aria-label={hasInput ? "Send" : "Converse"}
+                  isDisabled={!isLoading && !archiveReady}
+                  type={isLoading ? "button" : "submit"}
+                  onPress={isLoading ? handleStop : undefined}
+                  aria-label={isLoading ? "Stop" : hasInput ? "Send" : "Converse"}
                   shape="circle"
-                  color="primary"
+                  color={isLoading ? "caution" : "primary"}
                 >
                   <AnimatePresence mode="popLayout" initial={false}>
-                    {hasInput ? (
+                    {isLoading ? (
+                      <motion.div
+                        key="stop"
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.5 }}
+                        transition={TRANSITION}
+                      >
+                        <Square className="text-back-1_" fill="currentColor" />
+                      </motion.div>
+                    ) : hasInput ? (
                       <motion.div
                         key="send"
                         initial={{ opacity: 0, scale: 0.5, rotate: -45 }}

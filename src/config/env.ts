@@ -3,15 +3,19 @@ import { t } from "elysia";
 
 const envSchema = t.Object({
   NODE_ENV: t.Optional(
-    t.Union([t.Literal("development"), t.Literal("production")], {
-      default: "development",
-    }),
+    t.Union([
+      t.Literal("development"),
+      t.Literal("production"),
+      t.Literal("test"),
+    ], { default: "development" }),
   ),
-  GOOGLE_CLOUD_PROJECT: t.String({
+  OPENROUTER_API_KEY: t.String({
     minLength: 1,
-    error: "GOOGLE_CLOUD_PROJECT is not Set.",
+    error: "OPENROUTER_API_KEY is not Set.",
   }),
-  GOOGLE_CLOUD_LOCATION: t.Optional(t.String({ default: "global" })),
+  OPENROUTER_MODEL: t.Optional(
+    t.String({ default: "openrouter/free", minLength: 1 }),
+  ),
 });
 
 const checkEnv = () => {

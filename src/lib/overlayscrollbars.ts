@@ -92,11 +92,6 @@ export interface UseOverlayScrollResult<T extends HTMLElement> {
   osInstanceRef: RefObject<OverlayScrollbarsInstance | null>;
 }
 
-/**
- * OverlayScrollbars が実際に有効化されているかを判定する。
- * 初期化がキャンセルされた instance は destroy 済みなのに
- * `state().destroyed` が false のままなので、viewport 属性の有無も見る。
- */
 function isOverlayScrollbarsActive(
   hostEl: HTMLElement,
   instance: OverlayScrollbarsInstance | undefined,
@@ -214,7 +209,19 @@ function updateScrollFadeVariables(
   const isScrollableX = axis === "x" || axis === "both";
   const canScrollX = isScrollableX && maxScrollLeft > 1;
 
-  const fadeTop = canScrollY && scrollTop > 1 ? 1 : 0;
+  const viewportTop = viewport.getBoundingClientRect().top + viewport.clientTop;
+  const anchorTolerance = Number.parseFloat(
+    getComputedStyle(document.documentElement).fontSize,
+  );
+  const isAtTopAnchor = Array.from(
+    viewport.querySelectorAll<HTMLElement>("[data-os-fade-top-anchor]"),
+  ).some(
+    (anchor) =>
+      Math.abs(anchor.getBoundingClientRect().top - viewportTop) <=
+      anchorTolerance,
+  );
+
+  const fadeTop = canScrollY && scrollTop > 1 && !isAtTopAnchor ? 1 : 0;
   const fadeBottom = canScrollY && scrollTop < maxScrollTop - 1 ? 1 : 0;
   const fadeLeft = canScrollX && scrollLeft > 1 ? 1 : 0;
   const fadeRight = canScrollX && scrollLeft < maxScrollLeft - 1 ? 1 : 0;
@@ -294,10 +301,6 @@ function syncNativeOverlayRect(
   );
 }
 
-/**
- * 子要素を ResizeObserver に登録する。
- * `display: contents` の要素は箱を持たず通知が来ないため、その内側まで辿る。
- */
 function observeThroughContents(parent: HTMLElement, observer: ResizeObserver) {
   for (const child of parent.children) {
     if (!(child instanceof HTMLElement)) continue;
@@ -308,6 +311,163 @@ function observeThroughContents(parent: HTMLElement, observer: ResizeObserver) {
       observeThroughContents(child, observer);
     }
   }
+}
+
+type FadeEdge = "top" | "bottom" | "left" | "right";
+
+function resolveFadeSize(hostEl: HTMLElement): number {
+  const raw = getComputedStyle(hostEl).getPropertyValue("--os-fade-size").trim();
+  const value = Number.parseFloat(raw);
+  if (Number.isNaN(value)) return 0;
+  if (raw.endsWith("rem")) {
+    return value * Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+  }
+  if (raw.endsWith("em")) {
+    return value * Number.parseFloat(getComputedStyle(hostEl).fontSize);
+  }
+  return value;
+}
+
+function setupFadeInteraction(hostEl: HTMLElement, viewport: HTMLElement) {
+  const getEdge = (event: PointerEvent | MouseEvent): FadeEdge | null => {
+    const rect = viewport.getBoundingClientRect();
+    const left = rect.left + viewport.clientLeft;
+    const top = rect.top + viewport.clientTop;
+    const x = event.clientX - left;
+    const y = event.clientY - top;
+    if (x < 0 || y < 0 || x > viewport.clientWidth || y > viewport.clientHeight) {
+      return null;
+    }
+
+    const size = resolveFadeSize(hostEl) / 2;
+    const candidates: [FadeEdge, number][] = [];
+    const active = (name: string) =>
+      hostEl.style.getPropertyValue(`--os-fade-${name}`) === "1";
+    if (active("top") && y <= size) candidates.push(["top", y]);
+    if (active("bottom") && viewport.clientHeight - y <= size) {
+      candidates.push(["bottom", viewport.clientHeight - y]);
+    }
+    if (active("left") && x <= size) candidates.push(["left", x]);
+    if (active("right") && viewport.clientWidth - x <= size) {
+      candidates.push(["right", viewport.clientWidth - x]);
+    }
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => a[1] - b[1]);
+    return candidates[0][0];
+  };
+
+  const playRipple = (edge: FadeEdge, event: MouseEvent) => {
+    const rect = viewport.getBoundingClientRect();
+    const size = resolveFadeSize(hostEl) / 2;
+    const left = rect.left + viewport.clientLeft;
+    const top = rect.top + viewport.clientTop;
+    const w = viewport.clientWidth;
+    const h = viewport.clientHeight;
+    const region = {
+      left: edge === "right" ? left + w - size : left,
+      top: edge === "bottom" ? top + h - size : top,
+      width: edge === "left" || edge === "right" ? size : w,
+      height: edge === "top" || edge === "bottom" ? size : h,
+    };
+
+    const container = document.createElement("span");
+    container.setAttribute("aria-hidden", "true");
+    container.className = "pointer-events-none fixed overflow-clip z-50";
+    container.style.left = `${region.left}px`;
+    container.style.top = `${region.top}px`;
+    container.style.width = `${region.width}px`;
+    container.style.height = `${region.height}px`;
+
+    const x = event.clientX - region.left;
+    const y = event.clientY - region.top;
+    const rippleSize =
+      Math.max(
+        Math.hypot(x, y),
+        Math.hypot(region.width - x, y),
+        Math.hypot(x, region.height - y),
+        Math.hypot(region.width - x, region.height - y),
+      ) * 2;
+
+    const ripple = document.createElement("span");
+    ripple.className =
+      "all pointer-events-none absolute overflow-clip bg-fore-1 scale-0 opacity-50";
+    ripple.style.width = `${rippleSize}px`;
+    ripple.style.height = `${rippleSize}px`;
+    ripple.style.left = `${x - rippleSize / 2}px`;
+    ripple.style.top = `${y - rippleSize / 2}px`;
+    container.append(ripple);
+    document.body.append(container);
+
+    setTimeout(() => {
+      ripple.classList.remove("scale-0", "opacity-50");
+      ripple.classList.add("scale-100", "opacity-0");
+    }, 10);
+    setTimeout(() => container.remove(), 500);
+  };
+
+  const setCursor = (edge: FadeEdge | null) => {
+    if (edge === "top" || edge === "bottom") {
+      hostEl.setAttribute("data-os-fade-cursor", "row");
+    } else if (edge === "left" || edge === "right") {
+      hostEl.setAttribute("data-os-fade-cursor", "col");
+    } else {
+      hostEl.removeAttribute("data-os-fade-cursor");
+    }
+  };
+
+  let downX = 0;
+  let downY = 0;
+  let downEdge: FadeEdge | null = null;
+
+  const handlePointerMove = (event: PointerEvent) => {
+    if (event.pointerType === "touch") return;
+    setCursor(getEdge(event));
+  };
+  const handlePointerLeave = () => setCursor(null);
+  const handlePointerDown = (event: PointerEvent) => {
+    downX = event.clientX;
+    downY = event.clientY;
+    downEdge = getEdge(event);
+  };
+  const handleClick = (event: MouseEvent) => {
+    if (event.button !== 0) return;
+    const edge = getEdge(event);
+    const moved = Math.hypot(event.clientX - downX, event.clientY - downY) > 5;
+    if (!edge || edge !== downEdge || moved) return;
+    if (window.getSelection()?.toString()) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    playRipple(edge, event);
+    viewport.scrollTo({
+      top:
+        edge === "top"
+          ? 0
+          : edge === "bottom"
+            ? viewport.scrollHeight
+            : undefined,
+      left:
+        edge === "left"
+          ? 0
+          : edge === "right"
+            ? viewport.scrollWidth
+            : undefined,
+      behavior: "smooth",
+    });
+  };
+
+  viewport.addEventListener("pointermove", handlePointerMove);
+  viewport.addEventListener("pointerleave", handlePointerLeave);
+  viewport.addEventListener("pointerdown", handlePointerDown, true);
+  viewport.addEventListener("click", handleClick, true);
+
+  return () => {
+    viewport.removeEventListener("pointermove", handlePointerMove);
+    viewport.removeEventListener("pointerleave", handlePointerLeave);
+    viewport.removeEventListener("pointerdown", handlePointerDown, true);
+    viewport.removeEventListener("click", handleClick, true);
+    hostEl.removeAttribute("data-os-fade-cursor");
+  };
 }
 
 function setupEdgeFade(
@@ -357,6 +517,8 @@ function setupEdgeFade(
     });
   }
 
+  const cleanupInteraction = setupFadeInteraction(hostEl, viewport);
+
   update();
   const frame = requestAnimationFrame(update);
   const visualViewport = window.visualViewport;
@@ -369,6 +531,7 @@ function setupEdgeFade(
     update,
     cleanup: () => {
       cancelAnimationFrame(frame);
+      cleanupInteraction();
       document.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
       visualViewport?.removeEventListener("scroll", update);
@@ -467,9 +630,6 @@ export function useOverlayScroll<T extends HTMLElement = HTMLDivElement>(
       };
     };
 
-    // iOS など、ネイティブスクロールバーがオーバーレイ型の環境では
-    // OverlayScrollbars の初期化がキャンセルされる (cancel.nativeScrollbarsOverlaid)。
-    // その場合はネイティブスクロール経路 (フェード付き) を使う。
     const { scrollbarsOverlaid } = OverlayScrollbars.env();
     const isNativeOverlaid = scrollbarsOverlaid.x || scrollbarsOverlaid.y;
 

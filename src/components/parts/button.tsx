@@ -21,6 +21,7 @@ const buttonVariants = tv({
     color: {
       default: "",
       primary: "bg-blue",
+      caution: "bg-yellow",
     },
   },
   defaultVariants: {

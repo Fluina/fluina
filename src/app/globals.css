@@ -469,6 +469,16 @@
     --os-fade-right var(--transition-duration) var(--transition-timing-function);
 }
 
+[data-os-fade-cursor="row"],
+[data-os-fade-cursor="row"] * {
+  cursor: row-resize !important;
+}
+
+[data-os-fade-cursor="col"],
+[data-os-fade-cursor="col"] * {
+  cursor: col-resize !important;
+}
+
 [data-os-edge-fade]:not([data-os-native-scroll]) .os-scrollbar {
   z-index: 11;
 }

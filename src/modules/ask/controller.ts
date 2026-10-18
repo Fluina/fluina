@@ -1,46 +1,93 @@
 import { Elysia } from "elysia";
-import { generateAskResponse } from "../../services/gemini";
+import {
+  generateAskResponse,
+  generateHistorySummary,
+  OpenRouterRequestError,
+} from "../../services/openrouter";
 import { AskSchema } from "./schema";
 
-export const askController = new Elysia({ prefix: "/ask" }).post(
-  "/",
-  async ({ body, set }) => {
-    try {
-      const response = generateAskResponse(body.prompt);
-      const iterator = response[Symbol.asyncIterator]();
-      const encoder = new TextEncoder();
+export const askController = new Elysia({ prefix: "/ask" })
+  .post(
+    "/",
+    async ({ body, request, set }) => {
+      try {
+        const response = generateAskResponse(
+          body.prompt,
+          body.summary,
+          body.history,
+          request.signal,
+        );
+        const iterator = response[Symbol.asyncIterator]();
+        const encoder = new TextEncoder();
+        const firstChunk = await iterator.next();
 
-      set.headers["Content-Type"] = "text/plain; charset=utf-8";
-      set.headers["Cache-Control"] = "no-cache, no-transform";
+        if (firstChunk.done) {
+          throw new Error("OpenRouter returned an empty chat completion.");
+        }
 
-      return new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          try {
-            const { done, value } = await iterator.next();
+        set.headers["Content-Type"] = "text/plain; charset=utf-8";
+        set.headers["Cache-Control"] = "no-cache, no-transform";
 
-            if (done) {
-              controller.close();
-            } else {
-              controller.enqueue(encoder.encode(value));
+        return new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode(firstChunk.value));
+          },
+          async pull(controller) {
+            try {
+              const { done, value } = await iterator.next();
+
+              if (done) {
+                controller.close();
+              } else {
+                controller.enqueue(encoder.encode(value));
+              }
+            } catch (err) {
+              console.error("OpenRouter Streaming Error:", err);
+              controller.error(err);
             }
-          } catch (err) {
-            console.error("Gemini Streaming Error:", err);
-            controller.error(err);
-          }
-        },
-        async cancel() {
-          await iterator.return?.(undefined);
-        },
-      });
-    } catch (err) {
-      console.error("Gemini Execution Error:", err);
+          },
+          async cancel() {
+            await iterator.return?.(undefined);
+          },
+        });
+      } catch (err) {
+        console.error("OpenRouter Execution Error:", err);
 
-      set.status = 500;
+        set.status =
+          err instanceof OpenRouterRequestError ? err.statusCode : 502;
+        set.headers["Content-Type"] = "application/json; charset=utf-8";
 
-      return "Internal Server Error. Failed to generate response.";
-    }
-  },
-  {
-    body: AskSchema.body,
-  },
-);
+        return {
+          error:
+            err instanceof Error
+              ? err.message
+              : "Failed to generate response.",
+        };
+      }
+    },
+    {
+      body: AskSchema.body,
+    },
+  )
+  .post(
+    "/summarize",
+    async ({ body, request, set }) => {
+      try {
+        return {
+          summary: await generateHistorySummary(
+            body.summary ?? "",
+            body.messages,
+            request.signal,
+          ),
+        };
+      } catch (err) {
+        console.error("OpenRouter History Summary Error:", err);
+        set.status =
+          err instanceof OpenRouterRequestError ? err.statusCode : 500;
+        return { error: "Failed to summarize chat history." };
+      }
+    },
+    {
+      body: AskSchema.summarizeBody,
+    },
+  );

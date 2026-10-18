@@ -5,12 +5,11 @@ import {
   type ReactElement,
   type ReactNode,
   type RefObject,
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { Virtualizer, type VirtualizerHandle } from "virtua";
+import { Virtualizer } from "virtua";
 import {
   type ScrollAxis,
   type UseOverlayScrollOptions,
@@ -38,14 +37,7 @@ export interface ScrollAreaProps<T> {
     horizontal?: boolean;
     onScroll?: (offset: number) => void;
   };
-  autoScroll?: {
-    enabled?: boolean;
-    behavior?: "smooth" | "instant";
-    align?: "start" | "center" | "end";
-    shouldScroll?: (items: T[]) => boolean;
-    deps?: unknown[];
-  };
-  renderItem?: (item: T, index: number) => ReactElement | null;
+  renderItem?: (item: T, index: number) => ReactElement;
 }
 
 export function ScrollArea<T>({
@@ -60,18 +52,20 @@ export function ScrollArea<T>({
   overlayScroll = {},
   overlayScrollDeps = [],
   virtualConfig,
-  autoScroll,
   renderItem,
 }: ScrollAreaProps<T>) {
   const internalScrollRef = useRef<HTMLDivElement>(null);
   const hostRef = scrollRef ?? internalScrollRef;
-  const virtualizerRef = useRef<VirtualizerHandle>(null);
   const [overlayViewport, setOverlayViewport] = useState<HTMLElement | null>(
     null,
   );
   const overlayOptions = overlayScroll === false ? {} : overlayScroll;
   const isOverlayScrollEnabled = overlayScroll !== false;
-  const { onInit: overlayOnInit, ...restOverlayOptions } = overlayOptions;
+  const {
+    onInit: overlayOnInit,
+    onScroll: overlayOnScroll,
+    ...restOverlayOptions
+  } = overlayOptions;
 
   useOverlayScroll<HTMLDivElement>(
     {
@@ -83,55 +77,19 @@ export function ScrollArea<T>({
         setOverlayViewport(viewport);
         return overlayOnInit?.(viewport, instance);
       },
+      onScroll: (viewport, instance) => {
+        overlayOnScroll?.(viewport, instance);
+      },
     },
     overlayScrollDeps,
   );
 
-  const {
-    enabled: isAutoScrollEnabled = false,
-    behavior = "smooth",
-    align = "end",
-    shouldScroll,
-    deps: autoScrollDeps = [],
-  } = autoScroll || {};
   const viewportScrollRef = useRef<HTMLElement | null>(null);
 
   useLayoutEffect(() => {
     viewportScrollRef.current =
       viewportEl ?? overlayViewport ?? hostRef.current;
   }, [viewportEl, overlayViewport, hostRef]);
-
-  useEffect(() => {
-    if (!isAutoScrollEnabled) return;
-    if (shouldScroll && !shouldScroll(items)) return;
-    if (virtual && virtualizerRef.current) {
-      virtualizerRef.current.scrollToIndex(items.length - 1, {
-        align,
-        smooth: behavior === "smooth",
-      });
-    } else {
-      const viewport = viewportEl ?? overlayViewport ?? hostRef.current;
-      if (!viewport) return;
-
-      requestAnimationFrame(() => {
-        viewport.scrollTo({
-          top: viewport.scrollHeight,
-          behavior,
-        });
-      });
-    }
-  }, [
-    items,
-    virtual,
-    viewportEl,
-    overlayViewport,
-    hostRef,
-    isAutoScrollEnabled,
-    behavior,
-    align,
-    shouldScroll,
-    ...autoScrollDeps,
-  ]);
 
   return (
     <motion.div
@@ -143,18 +101,19 @@ export function ScrollArea<T>({
       <div className="contents">
         {virtual && renderItem ? (
           <Virtualizer
-            ref={virtualizerRef}
+            data={items}
             scrollRef={viewportScrollRef}
             bufferSize={virtualConfig?.bufferSize}
             shift={virtualConfig?.shift}
             horizontal={virtualConfig?.horizontal}
             onScroll={virtualConfig?.onScroll}
           >
-            {items.map((item, index) => renderItem(item, index))}
+            {renderItem}
           </Virtualizer>
         ) : (
           children
         )}
+        {virtual && renderItem && children}
       </div>
     </motion.div>
   );
