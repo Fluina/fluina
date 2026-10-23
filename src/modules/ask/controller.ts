@@ -3,19 +3,27 @@ import {
   generateAskResponse,
   generateHistorySummary,
   OpenRouterRequestError,
+  UnsupportedAttachmentError,
 } from "../../services/openrouter";
-import { AskSchema } from "./schema";
+import { AskSchema, MAX_ATTACHMENT_BYTES } from "./schema";
 
 export const askController = new Elysia({ prefix: "/ask" })
   .post(
     "/",
     async ({ body, request, set }) => {
       try {
+        const files = body.files ?? [];
+        if (files.some((file) => file.size > MAX_ATTACHMENT_BYTES)) {
+          set.status = 413;
+          return { error: "添付ファイルは1つあたり10MBまでです。" };
+        }
+
         const response = generateAskResponse(
           body.prompt,
           body.summary,
           body.history,
           request.signal,
+          files,
         );
         const iterator = response[Symbol.asyncIterator]();
         const encoder = new TextEncoder();
@@ -54,7 +62,11 @@ export const askController = new Elysia({ prefix: "/ask" })
         console.error("OpenRouter Execution Error:", err);
 
         set.status =
-          err instanceof OpenRouterRequestError ? err.statusCode : 502;
+          err instanceof UnsupportedAttachmentError
+            ? 415
+            : err instanceof OpenRouterRequestError
+              ? err.statusCode
+              : 502;
         set.headers["Content-Type"] = "application/json; charset=utf-8";
 
         return {

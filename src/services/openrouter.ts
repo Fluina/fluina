@@ -2,10 +2,62 @@ import { env } from "../config/env";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } }
+  | { type: "file"; file: { filename: string; file_data: string } };
+
 type ChatMessage = {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | ContentPart[];
 };
+
+export class UnsupportedAttachmentError extends Error {
+  constructor(name: string) {
+    super(`「${name}」は未対応のファイル形式です。画像、PDF、テキストファイルを添付してください。`);
+    this.name = "UnsupportedAttachmentError";
+  }
+}
+
+const isTextFile = (file: File) =>
+  file.type.startsWith("text/") ||
+  ["application/json", "application/xml", "application/x-yaml"].includes(
+    file.type,
+  ) ||
+  /\.(txt|md|csv|json|ya?ml|xml|html?|css|[jt]sx?|py|rb|go|rs|java|c|h|cpp|sh|sql|log)$/i.test(
+    file.name,
+  );
+
+const toDataUrl = async (file: File, type: string) =>
+  `data:${type};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`;
+
+const createAttachmentParts = async (files: File[]): Promise<ContentPart[]> =>
+  Promise.all(
+    files.map(async (file): Promise<ContentPart> => {
+      if (file.type.startsWith("image/")) {
+        return {
+          type: "image_url",
+          image_url: { url: await toDataUrl(file, file.type) },
+        };
+      }
+      if (file.type === "application/pdf") {
+        return {
+          type: "file",
+          file: {
+            filename: file.name,
+            file_data: await toDataUrl(file, file.type),
+          },
+        };
+      }
+      if (isTextFile(file)) {
+        return {
+          type: "text",
+          text: `添付ファイル「${file.name}」:\n\`\`\`\n${await file.text()}\n\`\`\``,
+        };
+      }
+      throw new UnsupportedAttachmentError(file.name);
+    }),
+  );
 
 const askSystemInstruction = `あなたはFluinaのAIアシスタントです。ユーザーの依頼に最も役立つ内容を、原則としてユーザーの使用言語で、正確かつ読みやすく回答してください。
 
@@ -168,7 +220,9 @@ export const generateAskResponse = async function* (
   summary = "",
   history: { role: "user" | "assistant"; content: string }[] = [],
   signal?: AbortSignal,
+  files: File[] = [],
 ): AsyncGenerator<string> {
+  const attachmentParts = await createAttachmentParts(files);
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: requestHeaders,
@@ -178,7 +232,12 @@ export const generateAskResponse = async function* (
       stream: true,
       messages: [
         ...createHistoryMessages(summary, history),
-        { role: "user", content: message },
+        {
+          role: "user",
+          content: attachmentParts.length
+            ? [{ type: "text", text: message }, ...attachmentParts]
+            : message,
+        },
       ],
     }),
   });

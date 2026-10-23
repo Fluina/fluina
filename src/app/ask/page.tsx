@@ -43,6 +43,7 @@ import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_sm
 import { Button, Menu, ScrollArea, Tooltip } from "@/components/parts";
 import {
   appendChatMessage,
+  type ArchivedAttachment,
   type ChatArchivePage,
   type ChatArchiveRecord,
   getChatArchiveSummary,
@@ -91,6 +92,7 @@ type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: ArchivedAttachment[];
   timestamp: number;
   duration?: number;
   edited?: boolean;
@@ -122,6 +124,56 @@ const MessageNoticeBox = ({ notice }: { notice: MessageNotice }) => (
   </p>
 );
 const markdownPlugins = { math: mathPlugin };
+
+const MessageAttachments = ({
+  attachments,
+}: {
+  attachments: NonNullable<Message["attachments"]>;
+}) => {
+  const urls = useMemo(
+    () =>
+      attachments.map(({ blob, type }) =>
+        type.startsWith("image/") ? URL.createObjectURL(blob) : null,
+      ),
+    [attachments],
+  );
+
+  useEffect(
+    () => () => {
+      for (const url of urls) {
+        if (url) URL.revokeObjectURL(url);
+      }
+    },
+    [urls],
+  );
+
+  return (
+    <div className="flex flex-wrap justify-end gap-2">
+      {attachments.map(({ id, name }, index) => {
+        const url = urls[index];
+
+        return url ? (
+          <Image
+            key={id}
+            src={url}
+            alt={name}
+            width={160}
+            height={160}
+            unoptimized
+            className="size-40 object-cover border border-back-5"
+          />
+        ) : (
+          <span
+            key={id}
+            className="max-w-60 truncate text-sm px-2 py-1 border border-back-5 bg-back-3"
+          >
+            {name}
+          </span>
+        );
+      })}
+    </div>
+  );
+};
 
 const readAssistantError = async (response: Response) => {
   let detail = "";
@@ -304,6 +356,8 @@ export default function Ask() {
   const hasExpandedHistoryRef = useRef(false);
   const [archiveReady, setArchiveReady] = useState(false);
   const [isInitialChatPositioned, setIsInitialChatPositioned] = useState(false);
+  // 先頭に過去ログを足す描画の間だけ true にし、仮想リストにスクロール位置を維持させる
+  const [isPrependingHistory, setIsPrependingHistory] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [persistentStorageGranted, setPersistentStorageGranted] = useState<
     boolean | null
@@ -323,12 +377,6 @@ export default function Ask() {
   const scrollTopRef = useRef(0);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const pendingChatScrollToBottomRef = useRef<ChatScrollBehavior | null>(null);
-  const pendingHistoryScrollRef = useRef<{
-    scrollTop: number;
-    scrollHeight: number;
-    anchor: HTMLElement | null;
-    anchorTop: number | null;
-  } | null>(null);
   const pendingCaretRef = useRef<{
     caretTop: number;
     caretRatio: number | null;
@@ -524,35 +572,6 @@ export default function Ask() {
       return;
     }
 
-    const chatScrollHost = chatScrollRef.current;
-    const chatViewport =
-      chatScrollHost?.querySelector<HTMLElement>(
-        "[data-overlayscrollbars-viewport]",
-      ) ?? chatScrollHost;
-    const viewportRect = chatViewport?.getBoundingClientRect();
-    const anchor =
-      chatViewport && viewportRect
-        ? (Array.from(
-            chatViewport.querySelectorAll<HTMLElement>(
-              "[data-chat-message-id]",
-            ),
-          ).find((message) => {
-            const rect = message.getBoundingClientRect();
-            return (
-              rect.bottom > viewportRect.top && rect.top < viewportRect.bottom
-            );
-          }) ?? null)
-        : null;
-    const previousScroll =
-      chatViewport && viewportRect
-        ? {
-            scrollTop: chatViewport.scrollTop,
-            scrollHeight: chatViewport.scrollHeight,
-            anchor,
-            anchorTop: anchor?.getBoundingClientRect().top ?? null,
-          }
-        : null;
-
     setIsLoadingOlderMessages(true);
     try {
       const olderPage = await loadOlderChatTurns(
@@ -560,7 +579,7 @@ export default function Ask() {
         CHAT_PAGE_TURN_LIMIT,
       );
       hasExpandedHistoryRef.current = true;
-      pendingHistoryScrollRef.current = previousScroll;
+      setIsPrependingHistory(true);
       setMessages((currentMessages) => [
         ...olderPage.messages,
         ...currentMessages,
@@ -577,40 +596,13 @@ export default function Ask() {
   }, [firstMessageSequence, hasOlderMessages, isLoadingOlderMessages]);
 
   useLayoutEffect(() => {
+    if (isPrependingHistory) setIsPrependingHistory(false);
+
     const scrollBehavior = pendingChatScrollToBottomRef.current;
     if (scrollBehavior) {
       scrollChatToBottom(scrollBehavior);
       pendingChatScrollToBottomRef.current = null;
-      pendingHistoryScrollRef.current = null;
-      return;
     }
-
-    const previousScroll = pendingHistoryScrollRef.current;
-    if (!previousScroll) return;
-
-    const chatScrollHost = chatScrollRef.current;
-    const chatViewport =
-      chatScrollHost?.querySelector<HTMLElement>(
-        "[data-overlayscrollbars-viewport]",
-      ) ?? chatScrollHost;
-    if (!chatViewport) return;
-
-    const addedHeight =
-      previousScroll.anchor?.isConnected && previousScroll.anchorTop !== null
-        ? previousScroll.anchor.getBoundingClientRect().top -
-            previousScroll.anchorTop
-        : chatViewport.scrollHeight - previousScroll.scrollHeight;
-    const maxScrollTop = Math.max(
-      chatViewport.scrollHeight - chatViewport.clientHeight,
-      0,
-    );
-    const nextScrollTop = Math.min(
-      Math.max(chatViewport.scrollTop + addedHeight, 0),
-      maxScrollTop,
-    );
-
-    chatViewport.scrollTop = nextScrollTop;
-    pendingHistoryScrollRef.current = null;
   });
 
   useLayoutEffect(() => {
@@ -885,16 +877,17 @@ export default function Ask() {
                 : content,
           }));
 
+        const formData = new FormData();
+        formData.append("prompt", promptContent);
+        formData.append("summary", summary.content);
+        formData.append("history", JSON.stringify(recentHistory));
+        for (const { blob, name, type } of latestMessage.attachments ?? []) {
+          formData.append("files", new File([blob], name, { type }));
+        }
+
         const response = await fetch(`${apiUrl}/api/ask`, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            prompt: promptContent,
-            summary: summary.content,
-            history: recentHistory,
-          }),
+          body: formData,
           signal: controller.signal,
         });
 
@@ -1035,6 +1028,13 @@ export default function Ask() {
       id: userMessageId,
       role: "user",
       content: userPrompt,
+      attachments: files.map(({ id, file }) => ({
+        id,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        blob: file,
+      })),
       timestamp: Date.now(),
     };
 
@@ -1133,6 +1133,7 @@ export default function Ask() {
         id: generateId(),
         role: "user",
         content: trimmed,
+        attachments: messages[index].attachments,
         timestamp: Date.now(),
         edited: true,
       };
@@ -1155,6 +1156,7 @@ export default function Ask() {
         id: generateId(),
         role: "user",
         content: messages[index].content,
+        attachments: messages[index].attachments,
         timestamp: Date.now(),
       };
 
@@ -1880,6 +1882,17 @@ export default function Ask() {
       }, []),
     [messages],
   );
+  const chatKeepMounted = useMemo(() => {
+    if (isExpanded || messageTurns.length === 0) return undefined;
+    const indexes = [messageTurns.length - 1];
+    if (editingMessageId) {
+      const editingIndex = messageTurns.findIndex((turn) =>
+        turn.some((msg) => msg.id === editingMessageId),
+      );
+      if (editingIndex >= 0) indexes.push(editingIndex);
+    }
+    return indexes;
+  }, [isExpanded, messageTurns, editingMessageId]);
   const loadingMessage = (
     <motion.div
       key="assistant-loading"
@@ -1998,46 +2011,49 @@ export default function Ask() {
             style={{
               visibility: isInitialChatPositioned ? "visible" : "hidden",
             }}
-            virtual={false}
-          >
-            <AnimatePresence mode="popLayout" initial={false}>
-              {archiveReady && hasOlderMessages && (
-                <motion.div
-                  key="older-messages-button"
-                  layout="position"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={TRANSITION}
-                  className="flex w-full justify-center items-center p-2"
-                >
-                  <Button
-                    onPress={showOlderMessages}
-                    isDisabled={isLoading || isLoadingOlderMessages}
-                    aria-label="Load Older Messages"
-                    className="w-full text-xs text-fore-5 p-2 border border-dotted border-back-5"
+            virtual
+            items={isExpanded ? [] : messageTurns}
+            virtualConfig={{
+              shift: isPrependingHistory,
+              keepMounted: chatKeepMounted,
+            }}
+            header={
+              <AnimatePresence mode="popLayout" initial={false}>
+                {archiveReady && hasOlderMessages && (
+                  <motion.div
+                    key="older-messages-button"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={TRANSITION}
+                    className="flex w-full justify-center items-center p-2"
                   >
-                    {isLoadingOlderMessages ? (
-                      <output
-                        aria-label="Loading Older Messages"
-                        className="flex justify-center"
-                      >
-                        <Loader
-                          size={16}
-                          aria-hidden="true"
-                          className="animate-spin"
-                        />
-                      </output>
-                    ) : (
-                      "◢◤ 続きを読み込む ◢◤"
-                    )}
-                  </Button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {!isExpanded &&
-              messageTurns.map((turn, turnIndex) => {
+                    <Button
+                      onPress={showOlderMessages}
+                      isDisabled={isLoading || isLoadingOlderMessages}
+                      aria-label="Load Older Messages"
+                      className="w-full text-xs text-fore-5 p-2 border border-dotted border-back-5"
+                    >
+                      {isLoadingOlderMessages ? (
+                        <output
+                          aria-label="Loading Older Messages"
+                          className="flex justify-center"
+                        >
+                          <Loader
+                            size={16}
+                            aria-hidden="true"
+                            className="animate-spin"
+                          />
+                        </output>
+                      ) : (
+                        "◢◤ 続きを読み込む ◢◤"
+                      )}
+                    </Button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            }
+            renderItem={(turn, turnIndex) => {
                 const isLastTurn = turnIndex === messageTurns.length - 1;
 
                 return (
@@ -2057,7 +2073,6 @@ export default function Ask() {
                             key={msg.id}
                             data-chat-message-id={msg.id}
                             data-os-fade-top-anchor=""
-                            layout={isLoadingOlderMessages ? false : "position"}
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
@@ -2094,7 +2109,14 @@ export default function Ask() {
                                   className="animate-caret outline-none"
                                 />
                               ) : isUser ? (
-                                <p>{msg.content}</p>
+                                <div className="flex flex-col gap-2 items-end">
+                                  {msg.attachments && (
+                                    <MessageAttachments
+                                      attachments={msg.attachments}
+                                    />
+                                  )}
+                                  <p>{msg.content}</p>
+                                </div>
                               ) : (
                                 msg.content && (
                                   <AssistantMarkdown
@@ -2240,7 +2262,8 @@ export default function Ask() {
                     </AnimatePresence>
                   </motion.div>
                 );
-              })}
+              }}
+          >
             <AnimatePresence mode="popLayout" initial={false}>
               {streamingMessage && !isExpanded && (
                 <motion.div

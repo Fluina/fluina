@@ -1,7 +1,16 @@
+export type ArchivedAttachment = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  blob: Blob;
+};
+
 export type ArchivedMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: ArchivedAttachment[];
   timestamp: number;
   duration?: number;
   edited?: boolean;

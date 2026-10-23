@@ -36,7 +36,6 @@ export function configureOverlayScrollbars(): void {
 
   const env = OverlayScrollbars.env();
 
-  env.setDefaultInitialization({ cancel: { nativeScrollbarsOverlaid: true } });
   env.setDefaultOptions({ scrollbars: { theme: OS_THEME, autoHide: "leave" } });
 
   const isScrollbarTarget = (target: EventTarget | null) =>
@@ -630,10 +629,7 @@ export function useOverlayScroll<T extends HTMLElement = HTMLDivElement>(
       };
     };
 
-    const { scrollbarsOverlaid } = OverlayScrollbars.env();
-    const isNativeOverlaid = scrollbarsOverlaid.x || scrollbarsOverlaid.y;
-
-    if (!enabled || forceNativeScroll || isNativeOverlaid) {
+    if (!enabled || forceNativeScroll) {
       const cleanupNativeScroll = setupNativeScroll();
       return () => {
         cleanupNativeScroll();
