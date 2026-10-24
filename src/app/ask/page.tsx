@@ -27,8 +27,13 @@ import {
 } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
-import type { SyntheticEvent } from "react";
+import type {
+  ComponentPropsWithoutRef,
+  ReactNode,
+  SyntheticEvent,
+} from "react";
 import {
+  isValidElement,
   memo,
   useCallback,
   useEffect,
@@ -110,6 +115,29 @@ const EMPTY_ASSISTANT_MESSAGE =
   "この返答は空で保存されています。元の質問から再試行してください。";
 type ChatScrollBehavior = "instant" | "smooth";
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
+
+// 最新ターンが画面より低ければ先頭を上端へ、高ければ最下部を目標にする
+const getChatScrollTarget = (viewport: HTMLElement) => {
+  const maxScrollTop = Math.max(
+    viewport.scrollHeight - viewport.clientHeight,
+    0,
+  );
+  const lastTurn = viewport.querySelector<HTMLElement>(
+    "[data-chat-last-turn]",
+  );
+  const spacer = viewport.querySelector<HTMLElement>(
+    "[data-chat-tail-spacer]",
+  );
+  if (!lastTurn || !spacer) return maxScrollTop;
+
+  const turnRect = lastTurn.getBoundingClientRect();
+  const usedHeight = spacer.getBoundingClientRect().top - turnRect.top;
+  if (usedHeight >= viewport.clientHeight) return maxScrollTop;
+
+  const turnTop =
+    turnRect.top - viewport.getBoundingClientRect().top + viewport.scrollTop;
+  return Math.min(maxScrollTop, Math.max(Math.round(turnTop), 0));
+};
 
 const MessageNoticeBox = ({ notice }: { notice: MessageNotice }) => (
   <p
@@ -207,6 +235,37 @@ const readAssistantError = async (response: Response) => {
 
   return detail || `AIサーバーでエラーが発生しました（${response.status}）。`;
 };
+
+const hasMathNode = (node: ReactNode, depth = 0): boolean => {
+  if (Array.isArray(node)) return node.some((n) => hasMathNode(n, depth));
+  if (!isValidElement<{ className?: unknown; children?: ReactNode }>(node)) {
+    return false;
+  }
+  const { className, children } = node.props;
+  const classes = Array.isArray(className) ? className.join(" ") : className;
+  if (typeof classes === "string" && classes.includes("katex")) return true;
+  return depth < 2 && hasMathNode(children, depth + 1);
+};
+
+// 数式を含む段落は overlayscrollbars で横スクロールさせる
+const MarkdownParagraph = ({
+  children,
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<"p"> & { node?: unknown }) =>
+  hasMathNode(children) ? (
+    <ScrollArea
+      virtual={false}
+      className="max-w-full"
+      overlayScroll={{ axis: "x" }}
+    >
+      <p {...props}>{children}</p>
+    </ScrollArea>
+  ) : (
+    <p {...props}>{children}</p>
+  );
+
+const markdownComponents = { p: MarkdownParagraph };
 
 const AssistantMarkdown = memo(function AssistantMarkdown({
   content,
@@ -313,7 +372,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   }
 
   return (
-    <div className="flex flex-col gap-3 max-w-none prose prose-fluina dark:prose-invert">
+    <div className="flex flex-col gap-3 min-w-0 max-w-full prose prose-fluina dark:prose-invert">
       {parts.map((part) =>
         part.type === "media" ? (
           part.kind === "video" ? (
@@ -351,6 +410,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
             mode={isAnimating ? "streaming" : "static"}
             isAnimating={isAnimating}
             plugins={markdownPlugins}
+            components={markdownComponents}
           >
             {part.content}
           </Streamdown>
@@ -560,19 +620,62 @@ export default function Ask() {
 
       updateTailSpacer(viewport);
 
-      const maxScrollTop = Math.max(
-        viewport.scrollHeight - viewport.clientHeight,
-        0,
-      );
+      const target = getChatScrollTarget(viewport);
       if (behavior === "smooth") {
-        viewport.scrollTo({ top: maxScrollTop, behavior });
+        viewport.scrollTo({ top: target, behavior });
       } else {
-        viewport.scrollTop = maxScrollTop;
+        viewport.scrollTop = target;
       }
-      scrollTopRef.current = maxScrollTop;
+      scrollTopRef.current = target;
     },
     [updateTailSpacer],
   );
+
+  // 新しい質問後、仮想リストの高さ確定で位置がずれても最新ターンの先頭へ戻す
+  const settleChatScroll = useCallback(() => {
+    const host = chatScrollRef.current;
+    if (!host) return;
+
+    const startedAt = performance.now();
+    let frame = 0;
+    const userEvents = ["wheel", "touchstart", "pointerdown", "keydown"];
+    const stop = () => {
+      cancelAnimationFrame(frame);
+      for (const type of userEvents) {
+        host.removeEventListener(type, stop, true);
+      }
+    };
+    for (const type of userEvents) {
+      host.addEventListener(type, stop, { capture: true, passive: true });
+    }
+
+    // 目標位置は仮想リストの測定で変わるため、開始位置から最新の目標へ
+    // 500ms のイージングで補間し、その後は目標に追従する
+    const DURATION = 500;
+    let startTop: number | null = null;
+    const tick = (now: number) => {
+      const elapsed = now - startedAt;
+      if (elapsed > 2500) {
+        stop();
+        return;
+      }
+      const viewport =
+        host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
+        host;
+      updateTailSpacer(viewport);
+      const target = getChatScrollTarget(viewport);
+      startTop ??= viewport.scrollTop;
+      const t = Math.min(elapsed / DURATION, 1);
+      const eased = 1 - (1 - t) ** 3;
+      const next = startTop + (target - startTop) * eased;
+      if (Math.abs(next - viewport.scrollTop) > 0.5) {
+        viewport.scrollTo({ top: next, behavior: "instant" });
+        scrollTopRef.current = viewport.scrollTop;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+  }, [updateTailSpacer]);
 
   const tailObserverRef = useRef<ResizeObserver | null>(null);
 
@@ -734,8 +837,12 @@ export default function Ask() {
 
     const scrollBehavior = pendingChatScrollToBottomRef.current;
     if (scrollBehavior) {
-      scrollChatToBottom(scrollBehavior);
       pendingChatScrollToBottomRef.current = null;
+      if (scrollBehavior === "smooth") {
+        settleChatScroll();
+      } else {
+        scrollChatToBottom(scrollBehavior);
+      }
     }
   });
 
@@ -762,7 +869,7 @@ export default function Ask() {
       scrollChatToBottom("instant", viewport);
 
       const isAtBottom =
-        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 1;
+        Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) <= 1;
       if (
         isAtBottom &&
         viewport === previousViewport &&
@@ -821,10 +928,7 @@ export default function Ask() {
       const viewport =
         host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
         host;
-      if (
-        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop >
-        1
-      ) {
+      if (Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1) {
         stick();
       }
     };
@@ -836,10 +940,7 @@ export default function Ask() {
       const viewport =
         host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
         host;
-      if (
-        viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop >
-        1
-      ) {
+      if (Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1) {
         stick();
       }
       frame = requestAnimationFrame(enforce);
@@ -2147,6 +2248,9 @@ export default function Ask() {
             virtual
             items={isExpanded ? [] : messageTurns}
             virtualConfig={{
+              // 未計測の項目は推定高さで扱われるため、画面外も広めに描画して実寸を早く確定させる
+              bufferSize: 4000,
+              itemSize: 400,
               shift: isPrependingHistory,
               keepMounted: chatKeepMounted,
             }}
@@ -2213,7 +2317,7 @@ export default function Ask() {
                           className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}
                         >
                           <div
-                            className={`**:select-text ${isUser && "bg-back-2 px-6 py-4"}`}
+                            className={`**:select-text min-w-0 max-w-full ${isUser && "bg-back-2 px-6 py-4"}`}
                           >
                             {isEditing ? (
                               <motion.div

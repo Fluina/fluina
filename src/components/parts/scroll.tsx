@@ -34,6 +34,7 @@ export interface ScrollAreaProps<T> {
   header?: ReactNode;
   virtualConfig?: {
     bufferSize?: number;
+    itemSize?: number;
     shift?: boolean;
     horizontal?: boolean;
     keepMounted?: readonly number[];
@@ -144,6 +145,7 @@ export function ScrollArea<T>({
             scrollRef={viewportScrollRef}
             startMargin={hasHeader ? headerSize : 0}
             bufferSize={virtualConfig?.bufferSize}
+            itemSize={virtualConfig?.itemSize}
             shift={virtualConfig?.shift}
             horizontal={virtualConfig?.horizontal}
             keepMounted={virtualConfig?.keepMounted}
