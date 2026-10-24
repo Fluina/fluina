@@ -1,8 +1,8 @@
 services:
-  - type: web
-    name: fluina-manim-renderer
+  - name: fluina-manim-renderer
+    type: web
     runtime: docker
-    plan: starter
+    plan: free
     rootDir: renderer
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
