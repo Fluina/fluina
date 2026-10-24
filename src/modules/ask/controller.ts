@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import { ManimRendererError } from "../../services/manim-renderer";
 import {
   generateAskResponse,
   generateHistorySummary,
@@ -64,16 +65,16 @@ export const askController = new Elysia({ prefix: "/ask" })
         set.status =
           err instanceof UnsupportedAttachmentError
             ? 415
-            : err instanceof OpenRouterRequestError
+            : err instanceof ManimRendererError
               ? err.statusCode
-              : 502;
+              : err instanceof OpenRouterRequestError
+                ? err.statusCode
+                : 502;
         set.headers["Content-Type"] = "application/json; charset=utf-8";
 
         return {
           error:
-            err instanceof Error
-              ? err.message
-              : "Failed to generate response.",
+            err instanceof Error ? err.message : "Failed to generate response.",
         };
       }
     },

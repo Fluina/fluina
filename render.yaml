@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: fluina-manim-renderer
+    runtime: docker
+    plan: starter
+    rootDir: renderer
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    disk:
+      name: fluina-manim-media
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: MEDIA_DIR
+        value: /var/data
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: RENDER_TOKEN
+        generateValue: true

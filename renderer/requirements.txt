@@ -1,0 +1,4 @@
+manim==0.22.0
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+cython>=3,<4

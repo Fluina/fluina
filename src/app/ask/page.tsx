@@ -42,8 +42,8 @@ import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_sma
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
 import { Button, Menu, ScrollArea, Tooltip } from "@/components/parts";
 import {
-  appendChatMessage,
   type ArchivedAttachment,
+  appendChatMessage,
   type ChatArchivePage,
   type ChatArchiveRecord,
   getChatArchiveSummary,
@@ -70,7 +70,7 @@ const PLACEHOLDERS = [
 ];
 
 interface ImageCaptureConstructor {
-  new(
+  new (
     track: MediaStreamTrack,
   ): {
     grabFrame(): Promise<ImageBitmap>;
@@ -195,7 +195,9 @@ const readAssistantError = async (response: Response) => {
     return "OpenRouterのプライバシー設定（Zero Data Retention）により、利用可能な無料モデルがありません。アカウント設定に合うモデルを選ぶか、[OpenRouterのPrivacy Settings](https://openrouter.ai/settings/privacy)で制限を確認してください。";
   }
 
-  if (/Provider returned error|no endpoints out of \d+ requested/i.test(detail)) {
+  if (
+    /Provider returned error|no endpoints out of \d+ requested/i.test(detail)
+  ) {
     return "OpenRouterの無料モデル提供元でエラーが発生しました。少し待って再試行してください。改善しない場合は、[OpenRouterのPrivacy Settings](https://openrouter.ai/settings/privacy)でZero Data Retentionが無料モデルを制限していないか確認してください。";
   }
 
@@ -213,15 +215,146 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   content: string;
   isAnimating: boolean;
 }) {
+  const mediaPattern = /\[\[FLUINA_MEDIA:([^\]]+)\]\]/g;
+  const parts: Array<
+    | { type: "text"; key: string; content: string }
+    | {
+        type: "media";
+        key: string;
+        kind: "image";
+        url: string;
+        alt: string;
+      }
+    | {
+        type: "media";
+        key: string;
+        kind: "video";
+        url: string;
+        alt: string;
+        captionsUrl: string;
+      }
+  > = [];
+  let cursor = 0;
+
+  for (const match of content.matchAll(mediaPattern)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      parts.push({
+        type: "text",
+        key: `text-${cursor}`,
+        content: content.slice(cursor, index),
+      });
+    }
+
+    try {
+      const payload: unknown = JSON.parse(decodeURIComponent(match[1]));
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        "kind" in payload &&
+        (payload.kind === "image" || payload.kind === "video") &&
+        "url" in payload &&
+        typeof payload.url === "string" &&
+        /^https?:\/\//.test(payload.url) &&
+        "alt" in payload &&
+        typeof payload.alt === "string"
+      ) {
+        if (payload.kind === "image") {
+          parts.push({
+            type: "media",
+            key: `media-${index}`,
+            kind: "image",
+            url: payload.url,
+            alt: payload.alt,
+          });
+        } else if (
+          "captionsUrl" in payload &&
+          typeof payload.captionsUrl === "string" &&
+          /^https?:\/\//.test(payload.captionsUrl)
+        ) {
+          parts.push({
+            type: "media",
+            key: `media-${index}`,
+            kind: "video",
+            url: payload.url,
+            alt: payload.alt,
+            captionsUrl: payload.captionsUrl,
+          });
+        } else {
+          parts.push({
+            type: "text",
+            key: `text-${index}`,
+            content: match[0],
+          });
+        }
+      } else {
+        parts.push({
+          type: "text",
+          key: `text-${index}`,
+          content: match[0],
+        });
+      }
+    } catch {
+      parts.push({
+        type: "text",
+        key: `text-${index}`,
+        content: match[0],
+      });
+    }
+    cursor = index + match[0].length;
+  }
+
+  if (cursor < content.length || parts.length === 0) {
+    parts.push({
+      type: "text",
+      key: `text-${cursor}`,
+      content: content.slice(cursor),
+    });
+  }
+
   return (
-    <div className="max-w-none prose prose-fluina dark:prose-invert">
-      <Streamdown
-        mode={isAnimating ? "streaming" : "static"}
-        isAnimating={isAnimating}
-        plugins={markdownPlugins}
-      >
-        {content}
-      </Streamdown>
+    <div className="flex flex-col gap-3 max-w-none prose prose-fluina dark:prose-invert">
+      {parts.map((part) =>
+        part.type === "media" ? (
+          part.kind === "video" ? (
+            <video
+              key={part.key}
+              controls
+              preload="metadata"
+              aria-label={part.alt}
+              className="max-h-[70vh] max-w-full border border-back-5"
+            >
+              <source src={part.url} type="video/mp4" />
+              <track
+                kind="captions"
+                src={part.captionsUrl}
+                srcLang="und"
+                label="Visual description"
+              />
+            </video>
+          ) : (
+            <Image
+              key={part.key}
+              src={part.url}
+              loader={({ src }) => src}
+              alt={part.alt}
+              width={1280}
+              height={720}
+              unoptimized
+              className="max-h-[70vh] max-w-full object-contain border border-back-5"
+            />
+          )
+        ) : (
+          <Streamdown
+            key={part.key}
+            mode={isAnimating ? "streaming" : "static"}
+            isAnimating={isAnimating}
+            plugins={markdownPlugins}
+          >
+            {part.content}
+          </Streamdown>
+        ),
+      )}
     </div>
   );
 });
@@ -746,10 +879,7 @@ export default function Ask() {
       const timeoutId = setTimeout(
         () =>
           controller.abort(
-            new DOMException(
-              "The AI response timed out.",
-              "TimeoutError",
-            ),
+            new DOMException("The AI response timed out.", "TimeoutError"),
           ),
         120000,
       );
@@ -959,12 +1089,14 @@ export default function Ask() {
         let errorMessage = "予期せぬエラーが発生しました。";
 
         if (controller.signal.aborted) {
-          errorMessage = "応答を完了できませんでした。時間をおいて再度お試しください。";
+          errorMessage =
+            "応答を完了できませんでした。時間をおいて再度お試しください。";
         } else if (error instanceof Error) {
           if (error.name === "AbortError") {
             errorMessage = "通信が中断されました。もう一度お試しください。";
           } else if (error.name === "TimeoutError") {
-            errorMessage = "応答に時間がかかっています。時間をおいて再度お試しください。";
+            errorMessage =
+              "応答に時間がかかっています。時間をおいて再度お試しください。";
           } else if (
             error.name === "TypeError" &&
             error.message.includes("fetch")
@@ -1179,9 +1311,9 @@ export default function Ask() {
     const currentScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
     const isAtBottom = scrollContainer
       ? scrollContainer.scrollHeight -
-      scrollContainer.scrollTop -
-      scrollContainer.clientHeight <
-      18
+          scrollContainer.scrollTop -
+          scrollContainer.clientHeight <
+        18
       : false;
 
     if (singleLineRef.current === 0) {
@@ -1687,13 +1819,13 @@ export default function Ask() {
       const isFilePasteShortcut =
         os === "mac"
           ? e.metaKey &&
-          e.shiftKey &&
-          e.altKey &&
-          (e.key.toLowerCase() === "v" || e.code === "KeyV")
+            e.shiftKey &&
+            e.altKey &&
+            (e.key.toLowerCase() === "v" || e.code === "KeyV")
           : e.ctrlKey &&
-          e.shiftKey &&
-          e.altKey &&
-          (e.key.toLowerCase() === "v" || e.code === "KeyV");
+            e.shiftKey &&
+            e.altKey &&
+            (e.key.toLowerCase() === "v" || e.code === "KeyV");
 
       if (isFilePasteShortcut) {
         e.preventDefault();
@@ -2054,161 +2186,174 @@ export default function Ask() {
               </AnimatePresence>
             }
             renderItem={(turn, turnIndex) => {
-                const isLastTurn = turnIndex === messageTurns.length - 1;
+              const isLastTurn = turnIndex === messageTurns.length - 1;
 
-                return (
-                  <motion.div
-                    key={turn[0].id}
-                    data-chat-last-turn={isLastTurn ? "" : undefined}
-                    className={`flex flex-col gap-4 ${isLastTurn ? "" : "pb-8"}`}
-                  >
-                    <AnimatePresence mode="popLayout" initial={false}>
-                      {turn.map((msg) => {
-                        const isEditing = editingMessageId === msg.id;
-                        const isUser = msg.role === "user";
-                        const isAssistant = msg.role === "assistant";
+              return (
+                <motion.div
+                  key={turn[0].id}
+                  data-chat-last-turn={isLastTurn ? "" : undefined}
+                  className={`flex flex-col gap-4 ${isLastTurn ? "" : "pb-8"}`}
+                >
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {turn.map((msg) => {
+                      const isEditing = editingMessageId === msg.id;
+                      const isUser = msg.role === "user";
+                      const isAssistant = msg.role === "assistant";
 
-                        return (
-                          <motion.div
-                            key={msg.id}
-                            data-chat-message-id={msg.id}
-                            data-os-fade-top-anchor=""
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={TRANSITION}
-                            className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}
+                      return (
+                        <motion.div
+                          key={msg.id}
+                          data-chat-message-id={msg.id}
+                          data-os-fade-top-anchor=""
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={TRANSITION}
+                          className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}
+                        >
+                          <div
+                            className={`**:select-text ${isUser && "bg-back-2 px-6 py-4"}`}
                           >
-                            <div
-                              className={`**:select-text ${isUser && "bg-back-2 px-6 py-4"}`}
-                            >
-                              {isEditing ? (
-                                <motion.div
-                                  ref={editingRef}
-                                  onInput={(e) => {
-                                    setEditingValue(
-                                      e.currentTarget.innerText ?? "",
-                                    );
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter" && !e.shiftKey) {
-                                      e.preventDefault();
-                                      handleSubmitEdit(msg.id);
-                                    } else if (e.key === "Escape") {
-                                      e.preventDefault();
-                                      handleCancelEdit();
-                                    }
-                                  }}
-                                  onPaste={pastePlainText}
-                                  autoFocus
-                                  contentEditable
-                                  suppressContentEditableWarning
-                                  spellCheck={false}
-                                  aria-multiline="true"
-                                  id="reprompt"
-                                  className="animate-caret outline-none"
-                                />
-                              ) : isUser ? (
-                                <div className="flex flex-col gap-2 items-end">
-                                  {msg.attachments && (
-                                    <MessageAttachments
-                                      attachments={msg.attachments}
-                                    />
-                                  )}
-                                  <p>{msg.content}</p>
-                                </div>
-                              ) : (
-                                msg.content && (
-                                  <AssistantMarkdown
-                                    content={msg.content}
-                                    isAnimating={
-                                      isLoading &&
-                                      msg.id === messages.at(-1)?.id
-                                    }
-                                  />
-                                )
-                              )}
-                            </div>
-
-                            {isAssistant && (msg.notice || !msg.content) && (
-                              <MessageNoticeBox
-                                notice={
-                                  msg.notice ?? {
-                                    kind: "error",
-                                    text: EMPTY_ASSISTANT_MESSAGE,
+                            {isEditing ? (
+                              <motion.div
+                                ref={editingRef}
+                                onInput={(e) => {
+                                  setEditingValue(
+                                    e.currentTarget.innerText ?? "",
+                                  );
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleSubmitEdit(msg.id);
+                                  } else if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    handleCancelEdit();
                                   }
-                                }
+                                }}
+                                onPaste={pastePlainText}
+                                autoFocus
+                                contentEditable
+                                suppressContentEditableWarning
+                                spellCheck={false}
+                                aria-multiline="true"
+                                id="reprompt"
+                                className="animate-caret outline-none"
                               />
-                            )}
-
-                            {isUser && isEditing && (
-                              <div className="flex justify-center items-center gap-2 p-2">
-                                <Tooltip content="取消" placement="bottom">
-                                  <Button
-                                    onPress={handleCancelEdit}
-                                    aria-label="Cancel Edit"
-                                    shape="circle"
-                                    className="bg-back-2"
-                                  >
-                                    <X />
-                                  </Button>
-                                </Tooltip>
-
-                                <Tooltip content="送信" placement="bottom">
-                                  <Button
-                                    onPress={() => handleSubmitEdit(msg.id)}
-                                    isDisabled={
-                                      !editingValue.trim() || isLoading
-                                    }
-                                    aria-label="Save Edit"
-                                    shape="circle"
-                                    color="primary"
-                                  >
-                                    <Check className="text-back-1_" />
-                                  </Button>
-                                </Tooltip>
-                              </div>
-                            )}
-
-                            {isUser && !isEditing && (
-                              <div className="flex items-center gap-2 p-2">
-                                {msg.edited && (
-                                  <span className="text-sm text-fore-5">
-                                    編集済
-                                  </span>
+                            ) : isUser ? (
+                              <div className="flex flex-col gap-2 items-end">
+                                {msg.attachments && (
+                                  <MessageAttachments
+                                    attachments={msg.attachments}
+                                  />
                                 )}
+                                <p>{msg.content}</p>
+                              </div>
+                            ) : (
+                              msg.content && (
+                                <AssistantMarkdown
+                                  content={msg.content}
+                                  isAnimating={
+                                    isLoading && msg.id === messages.at(-1)?.id
+                                  }
+                                />
+                              )
+                            )}
+                          </div>
 
+                          {isAssistant && (msg.notice || !msg.content) && (
+                            <MessageNoticeBox
+                              notice={
+                                msg.notice ?? {
+                                  kind: "error",
+                                  text: EMPTY_ASSISTANT_MESSAGE,
+                                }
+                              }
+                            />
+                          )}
+
+                          {isUser && isEditing && (
+                            <div className="flex justify-center items-center gap-2 p-2">
+                              <Tooltip content="取消" placement="bottom">
+                                <Button
+                                  onPress={handleCancelEdit}
+                                  aria-label="Cancel Edit"
+                                  shape="circle"
+                                  className="bg-back-2"
+                                >
+                                  <X />
+                                </Button>
+                              </Tooltip>
+
+                              <Tooltip content="送信" placement="bottom">
+                                <Button
+                                  onPress={() => handleSubmitEdit(msg.id)}
+                                  isDisabled={!editingValue.trim() || isLoading}
+                                  aria-label="Save Edit"
+                                  shape="circle"
+                                  color="primary"
+                                >
+                                  <Check className="text-back-1_" />
+                                </Button>
+                              </Tooltip>
+                            </div>
+                          )}
+
+                          {isUser && !isEditing && (
+                            <div className="flex items-center gap-2 p-2">
+                              {msg.edited && (
                                 <span className="text-sm text-fore-5">
-                                  {formatMessageTime(msg.timestamp)}
+                                  編集済
                                 </span>
+                              )}
 
-                                <Tooltip content="再試行" placement="bottom">
-                                  <Button
-                                    onPress={() => handleRetryMessage(msg.id)}
-                                    isDisabled={isLoading}
-                                    aria-label="Retry"
-                                    shape="circle"
-                                    className="size-5"
-                                  >
-                                    <RotateCcw
-                                      size={16}
-                                      className="text-fore-5"
-                                    />
-                                  </Button>
-                                </Tooltip>
+                              <span className="text-sm text-fore-5">
+                                {formatMessageTime(msg.timestamp)}
+                              </span>
 
-                                <Tooltip content="編集" placement="bottom">
-                                  <Button
-                                    onPress={() => handleStartEdit(msg)}
-                                    isDisabled={isLoading}
-                                    aria-label="Edit"
-                                    shape="circle"
-                                    className="size-5"
-                                  >
-                                    <Pencil size={16} className="text-fore-5" />
-                                  </Button>
-                                </Tooltip>
+                              <Tooltip content="再試行" placement="bottom">
+                                <Button
+                                  onPress={() => handleRetryMessage(msg.id)}
+                                  isDisabled={isLoading}
+                                  aria-label="Retry"
+                                  shape="circle"
+                                  className="size-5"
+                                >
+                                  <RotateCcw
+                                    size={16}
+                                    className="text-fore-5"
+                                  />
+                                </Button>
+                              </Tooltip>
 
+                              <Tooltip content="編集" placement="bottom">
+                                <Button
+                                  onPress={() => handleStartEdit(msg)}
+                                  isDisabled={isLoading}
+                                  aria-label="Edit"
+                                  shape="circle"
+                                  className="size-5"
+                                >
+                                  <Pencil size={16} className="text-fore-5" />
+                                </Button>
+                              </Tooltip>
+
+                              <Tooltip content="コピー" placement="bottom">
+                                <Button
+                                  onPress={() => handleCopyMessage(msg.content)}
+                                  aria-label="Copy"
+                                  shape="circle"
+                                  className="size-5"
+                                >
+                                  <Copy size={16} className="text-fore-5" />
+                                </Button>
+                              </Tooltip>
+                            </div>
+                          )}
+
+                          {isAssistant && (
+                            <div className="flex items-center gap-2 p-2">
+                              {msg.content && (
                                 <Tooltip content="コピー" placement="bottom">
                                   <Button
                                     onPress={() =>
@@ -2221,48 +2366,27 @@ export default function Ask() {
                                     <Copy size={16} className="text-fore-5" />
                                   </Button>
                                 </Tooltip>
-                              </div>
-                            )}
+                              )}
 
-                            {isAssistant && (
-                              <div className="flex items-center gap-2 p-2">
-                                {msg.content && (
-                                  <Tooltip content="コピー" placement="bottom">
-                                    <Button
-                                      onPress={() =>
-                                        handleCopyMessage(msg.content)
-                                      }
-                                      aria-label="Copy"
-                                      shape="circle"
-                                      className="size-5"
-                                    >
-                                      <Copy
-                                        size={16}
-                                        className="text-fore-5"
-                                      />
-                                    </Button>
-                                  </Tooltip>
-                                )}
-
-                                {msg.duration !== undefined && (
-                                  <span className="flex items-center gap-1 text-sm text-fore-5">
-                                    <Timer size={16} />
-                                    {formatDuration(msg.duration)}
-                                  </span>
-                                )}
-
-                                <span className="text-sm text-fore-5">
-                                  {formatMessageTime(msg.timestamp)}
+                              {msg.duration !== undefined && (
+                                <span className="flex items-center gap-1 text-sm text-fore-5">
+                                  <Timer size={16} />
+                                  {formatDuration(msg.duration)}
                                 </span>
-                              </div>
-                            )}
-                          </motion.div>
-                        );
-                      })}
-                    </AnimatePresence>
-                  </motion.div>
-                );
-              }}
+                              )}
+
+                              <span className="text-sm text-fore-5">
+                                {formatMessageTime(msg.timestamp)}
+                              </span>
+                            </div>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </motion.div>
+              );
+            }}
           >
             <AnimatePresence mode="popLayout" initial={false}>
               {streamingMessage && !isExpanded && (
@@ -2336,17 +2460,18 @@ export default function Ask() {
             transition={TRANSITION}
             className={`flex-none grid gap-1 w-full items-center border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
               ${isExpanded ? "h-full" : "max-h-full"}
-              ${hasFiles
-                ? isAdjusted || isExpanded
-                  ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_1fr_auto]"
-                  : hasText
-                    ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] grid-rows-[auto_auto]"
-                    : "grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto]"
-                : isAdjusted || isExpanded
-                  ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_1fr_auto]"
-                  : hasText
-                    ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]"
-                    : "grid-cols-[auto_minmax(0,1fr)_auto_auto]"
+              ${
+                hasFiles
+                  ? isAdjusted || isExpanded
+                    ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_1fr_auto]"
+                    : hasText
+                      ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] grid-rows-[auto_auto]"
+                      : "grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto]"
+                  : isAdjusted || isExpanded
+                    ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_1fr_auto]"
+                    : hasText
+                      ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]"
+                      : "grid-cols-[auto_minmax(0,1fr)_auto_auto]"
               }
               ${messages.length === 0 ? "max-md:mt-auto" : "mt-auto"}
               `}
@@ -2354,14 +2479,15 @@ export default function Ask() {
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`${hasFiles
+              className={`${
+                hasFiles
                   ? isAdjusted || isExpanded
                     ? "col-start-1 row-start-4"
                     : "col-start-1 row-start-2"
                   : isAdjusted || isExpanded
                     ? "col-start-1 row-start-3"
                     : "col-start-1 row-start-1"
-                }`}
+              }`}
             >
               <Tooltip
                 content="添付"
@@ -2445,12 +2571,13 @@ export default function Ask() {
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={TRANSITION}
-                  className={`flex items-center justify-center p-2 w-full col-start-1 row-start-1 ${isAdjusted || isExpanded
+                  className={`flex items-center justify-center p-2 w-full col-start-1 row-start-1 ${
+                    isAdjusted || isExpanded
                       ? "col-span-2"
                       : hasText
                         ? "col-span-4"
                         : "col-span-3"
-                    }`}
+                  }`}
                 >
                   <motion.div
                     layout="position"
@@ -2585,12 +2712,13 @@ export default function Ask() {
                   animate={{ opacity: 1, scale: 1, rotate: 0 }}
                   exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                   transition={TRANSITION}
-                  className={`row-start-1 ${isAdjusted || isExpanded
+                  className={`row-start-1 ${
+                    isAdjusted || isExpanded
                       ? "col-start-3"
                       : hasText
                         ? "col-start-5"
                         : "col-start-4"
-                    }`}
+                  }`}
                 >
                   <Tooltip
                     content="消去"
@@ -2616,14 +2744,15 @@ export default function Ask() {
               layout="position"
               transition={TRANSITION}
               className={`relative w-full min-w-0 flex flex-col justify-start items-start ${isExpanded ? "h-full" : "[--os-fade-size:2.5rem]"}
-              ${hasFiles
+              ${
+                hasFiles
                   ? isAdjusted || isExpanded
                     ? "col-start-1 col-span-2 row-start-2 row-span-2"
                     : "col-start-2 row-start-2"
                   : isAdjusted || isExpanded
                     ? "col-start-1 col-span-2 row-start-1 row-span-2"
                     : "col-start-2 row-start-1"
-                }`}
+              }`}
             >
               {!hasText && (
                 <AnimatePresence mode="wait" initial={false}>
@@ -2717,14 +2846,15 @@ export default function Ask() {
                   animate={{ opacity: 1, scale: 1, rotate: 0 }}
                   exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                   transition={TRANSITION}
-                  className={`${hasFiles
+                  className={`${
+                    hasFiles
                       ? isAdjusted || isExpanded
                         ? "col-start-3 row-start-2 justify-self-end"
                         : "col-start-3 row-start-2"
                       : isAdjusted || isExpanded
                         ? "col-start-3 row-start-1 justify-self-end"
                         : "col-start-3 row-start-1"
-                    }`}
+                  }`}
                 >
                   <Tooltip
                     content="削除"
@@ -2754,14 +2884,15 @@ export default function Ask() {
                   animate={{ opacity: 1, scale: 1, rotate: 0 }}
                   exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                   transition={TRANSITION}
-                  className={`self-start ${hasFiles
+                  className={`self-start ${
+                    hasFiles
                       ? hasText
                         ? "col-start-3 row-start-3 justify-self-end"
                         : "col-start-3 row-start-2 justify-self-end"
                       : hasText
                         ? "col-start-3 row-start-2 justify-self-end"
                         : "col-start-3 row-start-1 justify-self-end"
-                    }`}
+                  }`}
                 >
                   <Tooltip
                     content={isExpanded ? "縮小" : "拡大"}
@@ -2811,7 +2942,8 @@ export default function Ask() {
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`${hasFiles
+              className={`${
+                hasFiles
                   ? isAdjusted || isExpanded
                     ? "col-start-2 row-start-4 justify-self-end"
                     : hasText
@@ -2822,7 +2954,7 @@ export default function Ask() {
                     : hasText
                       ? "col-start-4 row-start-1"
                       : "col-start-3 row-start-1"
-                }`}
+              }`}
             >
               <Tooltip
                 content="マイク"
@@ -2840,7 +2972,8 @@ export default function Ask() {
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`${hasFiles
+              className={`${
+                hasFiles
                   ? isAdjusted || isExpanded
                     ? "col-start-3 row-start-4 justify-self-end"
                     : hasText
@@ -2851,7 +2984,7 @@ export default function Ask() {
                     : hasText
                       ? "col-start-5 row-start-1"
                       : "col-start-4 row-start-1"
-                }`}
+              }`}
             >
               <Tooltip
                 content={isLoading ? "停止" : hasInput ? "送信" : "会話"}
@@ -2868,7 +3001,9 @@ export default function Ask() {
                   isDisabled={!isLoading && !archiveReady}
                   type={isLoading ? "button" : "submit"}
                   onPress={isLoading ? handleStop : undefined}
-                  aria-label={isLoading ? "Stop" : hasInput ? "Send" : "Converse"}
+                  aria-label={
+                    isLoading ? "Stop" : hasInput ? "Send" : "Converse"
+                  }
                   shape="circle"
                   color={isLoading ? "caution" : "primary"}
                 >

@@ -23,6 +23,29 @@ OpenRouter account privacy settings (including Zero Data Retention) can exclude
 all free providers. If that happens, choose a compatible model/provider or
 review the account's [Privacy Settings](https://openrouter.ai/settings/privacy).
 
+## Manim visual answers
+
+When the assistant decides a diagram or animation will help, it can request a
+still image or short video. The API sends a validated scene description to the
+separate Manim renderer in `renderer/`; generated Python is never executed.
+
+Deploy the root `render.yaml` as a Render Blueprint, then set these variables
+on the Fluina API service:
+
+- `MANIM_RENDERER_URL`: the public URL of the Render service, without a trailing
+  slash.
+- `MANIM_RENDERER_TOKEN`: the same secret value as the renderer's `RENDER_TOKEN`.
+
+On the renderer, set `PUBLIC_BASE_URL` to its public URL. Render's Blueprint
+provides a persistent disk for generated media and a generated `RENDER_TOKEN`.
+The renderer also compiles the bounded vector-point preprocessing helper with
+Cython. Cython does not accelerate Manim's Cairo/FFmpeg rendering itself, so
+any broader speed claim should be based on measured render timings.
+
+The visual scene format supports text, safe-subset math formulas, circles,
+rectangles, lines, and plotted point sequences. Rendered media is retained for
+up to 14 days (and at most 300 files) on the configured persistent disk.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
