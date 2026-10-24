@@ -49,10 +49,14 @@ class TextElement(StrictModel):
         return self
 
 
-class FormulaElement(TextElement):
+class FormulaElement(StrictModel):
     type: str = "formula"
-    text: str = Field(default="", exclude=True)
     latex: str = Field(min_length=1, max_length=200)
+    x: float = Field(ge=-7, le=7)
+    y: float = Field(ge=-7, le=7)
+    scale: float = Field(default=1, ge=0.25, le=2)
+    color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
+    animation: str | None = None
 
     @model_validator(mode="after")
     def check_formula(self):
