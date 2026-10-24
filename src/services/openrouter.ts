@@ -79,6 +79,7 @@ const askSystemInstruction = `あなたはFluinaのAIアシスタントです。
 - これらの書式ルールは内容やユーザーが明示した形式の指定より優先しません。
 - 説明に画像や動画があると特に役立つと判断した場合に限り、回答の末尾に fluina-visual のJSONコードフェンスを1つ追加してください。不要なら追加しないでください。
 - JSONは { "kind": "image" | "video", "title": "短い題名", "duration": 2から20の秒数（動画のみ任意）, "elements": [...] } です。要素は text（text,x,y）、formula（latex,x,y）、circle（x,y,radius）、rectangle（x,y,width,height）、lineまたはgraph（points:[[x,y],...]）を使えます。座標は-7から7です。各要素は任意でscale,color（#RRGGBB）,animation（create/fade_in/write）を指定できます。動画では段階的な図形描画を使ってください。
+- formulaのlatexで使えるコマンドは \alpha \angle \approx \beta \cdot \circ \cos \delta \div \frac \gamma \ge \infty \int \lambda \le \left \ln \log \mu \neq \omega \pi \pm \right \sigma \sin \sqrt \sum \tan \theta \times のみです。それ以外のコマンドは使わないでください。
 - fenced JSON内にPython、Manimコード、HTML、任意のコマンドを書かないでください。要素数は40以下、各文字列は200文字以下です。`;
 
 const summarySystemInstruction =
