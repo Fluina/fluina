@@ -36,15 +36,23 @@ on the Fluina API service:
   slash.
 - `MANIM_RENDERER_TOKEN`: the same secret value as the renderer's `RENDER_TOKEN`.
 
-On the renderer, set `PUBLIC_BASE_URL` to its public URL. Render's Blueprint
-provides a persistent disk for generated media and a generated `RENDER_TOKEN`.
-The renderer also compiles the bounded vector-point preprocessing helper with
+On the renderer, Render's Blueprint generates `RENDER_TOKEN` and asks for the
+Cloudflare R2 settings. Finished media is uploaded to R2 under `media/`:
+
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`: an R2 API token
+  with Object Read & Write on the bucket.
+- `R2_BUCKET`: the bucket name.
+- `R2_PUBLIC_URL`: the bucket's public URL (r2.dev or custom domain), without a
+  trailing slash. Add a CORS rule allowing `GET` from the Fluina site origin so
+  video captions load.
+
+No Render disk is needed. The renderer also compiles the bounded vector-point preprocessing helper with
 Cython. Cython does not accelerate Manim's Cairo/FFmpeg rendering itself, so
 any broader speed claim should be based on measured render timings.
 
 The visual scene format supports text, safe-subset math formulas, circles,
-rectangles, lines, and plotted point sequences. Rendered media is retained for
-up to 14 days (and at most 300 files) on the configured persistent disk.
+rectangles, lines, and plotted point sequences. Add an R2 lifecycle rule on the
+`media/` prefix if you want old media deleted automatically.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

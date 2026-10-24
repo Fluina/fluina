@@ -320,6 +320,7 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
             <video
               key={part.key}
               controls
+              crossOrigin="anonymous"
               preload="metadata"
               aria-label={part.alt}
               className="max-h-[70vh] max-w-full border border-back-5"

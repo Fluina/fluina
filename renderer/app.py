@@ -2,26 +2,26 @@ import asyncio
 import hmac
 import os
 import re
-import shutil
 import tempfile
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
+import boto3
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from scene import SAFE_LATEX_COMMANDS
 
 
-MEDIA_DIR = Path(os.environ.get("MEDIA_DIR", "/var/data"))
-PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET = os.environ.get("R2_BUCKET", "")
+R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "").rstrip("/")
+R2_KEY_PREFIX = "media/"
 RENDER_TOKEN = os.environ.get("RENDER_TOKEN", "")
 MAX_REQUEST_BYTES = 64 * 1024
-MAX_MEDIA_FILES = 300
-MEDIA_MAX_AGE_SECONDS = 14 * 24 * 60 * 60
-FILENAME_PATTERN = re.compile(r"^[0-9a-f]{32}\.(?:png|mp4|vtt)$")
+r2_client = None
 LATEX_COMMAND_PATTERN = re.compile(r"\\([A-Za-z]+)")
 SAFE_LATEX_CHARACTERS = re.compile(r"^[A-Za-z0-9\s{}_^=+\-*/().,\\|<>]+$")
 RENDER_SEMAPHORE = asyncio.Semaphore(1)
@@ -124,24 +124,39 @@ class VisualScene(StrictModel):
         return self
 
 
-def cleanup_media():
-    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(timezone.utc).timestamp()
-    files = sorted(
+def r2_configured() -> bool:
+    return all(
         (
-            path
-            for path in MEDIA_DIR.iterdir()
-            if path.is_file() and FILENAME_PATTERN.fullmatch(path.name)
-        ),
-        key=lambda path: path.stat().st_mtime,
+            R2_ACCOUNT_ID,
+            R2_ACCESS_KEY_ID,
+            R2_SECRET_ACCESS_KEY,
+            R2_BUCKET,
+            R2_PUBLIC_URL,
+        )
     )
-    for path in files:
-        if now - path.stat().st_mtime > MEDIA_MAX_AGE_SECONDS:
-            path.unlink(missing_ok=True)
 
-    remaining = [path for path in files if path.exists()]
-    for path in remaining[:-MAX_MEDIA_FILES]:
-        path.unlink(missing_ok=True)
+
+def get_r2_client():
+    global r2_client
+    if r2_client is None:
+        r2_client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+            aws_access_key_id=R2_ACCESS_KEY_ID,
+            aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+            region_name="auto",
+        )
+    return r2_client
+
+
+def upload_to_r2(body: bytes, filename: str, content_type: str):
+    get_r2_client().put_object(
+        Bucket=R2_BUCKET,
+        Key=f"{R2_KEY_PREFIX}{filename}",
+        Body=body,
+        ContentType=content_type,
+        CacheControl="public, max-age=31536000, immutable",
+    )
 
 
 def authorize(authorization: str | None):
@@ -222,11 +237,10 @@ async def render(
             raise HTTPException(status_code=413, detail="Scene is too large")
     validate_scene(scene)
 
-    if not PUBLIC_BASE_URL:
-        raise HTTPException(status_code=503, detail="Public media URL is not configured")
+    if not r2_configured():
+        raise HTTPException(status_code=503, detail="Media storage is not configured")
 
     async with RENDER_SEMAPHORE:
-        cleanup_media()
         extension = "png" if scene.kind == "image" else "mp4"
         filename = f"{uuid.uuid4().hex}.{extension}"
         with tempfile.TemporaryDirectory(prefix="fluina-manim-") as working_dir:
@@ -279,40 +293,38 @@ async def render(
                 raise HTTPException(
                     status_code=500, detail="Rendered media was not found"
                 )
-            destination = MEDIA_DIR / filename
-            shutil.copyfile(candidates[0], destination)
-            if scene.kind == "video":
-                (MEDIA_DIR / f"{output_stem}.vtt").write_text(
-                    make_captions(scene), encoding="utf-8"
+            content_types = {
+                "png": "image/png",
+                "mp4": "video/mp4",
+                "vtt": "text/vtt",
+            }
+            try:
+                await asyncio.to_thread(
+                    upload_to_r2,
+                    candidates[0].read_bytes(),
+                    filename,
+                    content_types[extension],
                 )
-            cleanup_media()
+                if scene.kind == "video":
+                    await asyncio.to_thread(
+                        upload_to_r2,
+                        make_captions(scene).encode("utf-8"),
+                        f"{output_stem}.vtt",
+                        content_types["vtt"],
+                    )
+            except Exception as error:
+                print("R2 upload failed:", error)
+                raise HTTPException(
+                    status_code=502, detail="Media upload failed"
+                ) from error
 
     return {
         "kind": scene.kind,
-        "url": f"{PUBLIC_BASE_URL}/media/{filename}",
+        "url": f"{R2_PUBLIC_URL}/{R2_KEY_PREFIX}{filename}",
         "alt": scene.title,
         **(
-            {
-                "captions_url": (
-                    f"{PUBLIC_BASE_URL}/media/{output_stem}.vtt"
-                )
-            }
+            {"captions_url": f"{R2_PUBLIC_URL}/{R2_KEY_PREFIX}{output_stem}.vtt"}
             if scene.kind == "video"
             else {}
         ),
     }
-
-
-@app.get("/media/{filename}")
-async def get_media(filename: str):
-    if not FILENAME_PATTERN.fullmatch(filename):
-        raise HTTPException(status_code=404, detail="Not found")
-    path = MEDIA_DIR / filename
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Not found")
-    media_type = {
-        ".png": "image/png",
-        ".mp4": "video/mp4",
-        ".vtt": "text/vtt",
-    }[path.suffix]
-    return FileResponse(path, media_type=media_type, filename=filename)
