@@ -1,5 +1,9 @@
 import { env } from "../config/env";
-import { isVisualScene, renderVisualScene } from "./manim-renderer";
+import {
+  isVisualScene,
+  normalizeVisualScene,
+  renderVisualScene,
+} from "./manim-renderer";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -77,9 +81,13 @@ const askSystemInstruction = `あなたはFluinaのAIアシスタントです。
 - 数式が必要ない回答に数式を加えず、数式だけで段落を作る場合は独立した $$...$$ ブロックにしてください。
 - 長い回答は内容に応じて見出しやリストで整理し、短い回答は簡潔にしてください。装飾のためだけの見出し、太字、表を増やさないでください。
 - これらの書式ルールは内容やユーザーが明示した形式の指定より優先しません。
-- 説明に画像や動画があると特に役立つと判断した場合に限り、回答の末尾に fluina-visual のJSONコードフェンスを1つ追加してください。不要なら追加しないでください。
-- JSONは { "kind": "image" | "video", "title": "短い題名", "duration": 2から20の秒数（動画のみ任意）, "elements": [...] } です。要素は text（text,x,y）、formula（latex,x,y）、circle（x,y,radius）、rectangle（x,y,width,height）、lineまたはgraph（points:[[x,y],...]）を使えます。座標は-7から7です。各要素は任意でscale,color（#RRGGBB）,animation（create/fade_in/write）を指定できます。動画では段階的な図形描画を使ってください。
-- formulaのlatexで使えるコマンドは \alpha \angle \approx \beta \cdot \circ \cos \delta \div \frac \gamma \ge \infty \int \lambda \le \left \ln \log \mu \neq \omega \pi \pm \right \sigma \sin \sqrt \sum \tan \theta \times のみです。それ以外のコマンドは使わないでください。
+- 画像や動画を求められた場合、または説明に画像や動画が特に役立つ場合に限り、回答の末尾に、言語名が必ず fluina-visual のコードフェンスを1つ追加してください。動画を求められたら kind は video にしてください。json など他の言語名は使わず、フェンスなしでJSONを書かないでください。JSONは括弧の対応が正しい有効なJSONにしてください。不要なら追加しないでください。形式の例:
+\`\`\`fluina-visual
+{"kind":"image","title":"題名","elements":[{"type":"circle","x":0,"y":0,"radius":1}]}
+\`\`\`
+- JSONは { "kind": "image" | "video", "title": "短い題名", "duration": 2から20の秒数（動画のみ任意）, "elements": [...] } です。要素は text（text,x,y）、formula（latex,x,y）、circle（x,y,radius）、rectangle（x,y,width,height）、lineまたはgraph（points:[[x,y],...]）を使えます。座標は-7から7です。各要素は任意でscale,color（必ず #RRGGBB 形式。rgbaや色名は不可）,animation（create/fade_in/write）を指定できます。動画では段階的な図形描画を使ってください。
+- 数式（分数、根号、指数、記号を含む式）は、必ず type が formula の要素に latex として書いてください。text 要素に数式や LaTeX を入れないでください。latex には \\( \\) や $ の区切りを付けず、数式本体だけを書きます。text 要素は日本語などの通常の文章の短いラベル専用です。
+- formulaのlatexで使えるコマンドは \\alpha \\angle \\approx \\beta \\cdot \\circ \\cos \\delta \\div \\frac \\gamma \\ge \\infty \\int \\lambda \\le \\left \\ln \\log \\mu \\neq \\omega \\pi \\pm \\right \\sigma \\sin \\sqrt \\sum \\tan \\theta \\times のみです。それ以外のコマンドは使わないでください。
 - fenced JSON内にPython、Manimコード、HTML、任意のコマンドを書かないでください。要素数は40以下、各文字列は200文字以下です。`;
 
 const summarySystemInstruction =
@@ -265,7 +273,8 @@ export const generateAskResponse = async function* (
   let buffer = "";
   let streamFinished = false;
   let receivedContent = "";
-  const visualMarker = "```fluina-visual";
+  const visualMarker = /```fluina-visual|```json|\{\s*"kind"/;
+  const holdBackLength = 32;
   let withheldContent = "";
   const visualState: { block: string | null } = { block: null };
 
@@ -276,15 +285,15 @@ export const generateAskResponse = async function* (
     }
 
     withheldContent += content;
-    const markerIndex = withheldContent.indexOf(visualMarker);
-    if (markerIndex !== -1) {
-      const visibleContent = withheldContent.slice(0, markerIndex);
-      visualState.block = withheldContent.slice(markerIndex);
+    const match = visualMarker.exec(withheldContent);
+    if (match) {
+      const visibleContent = withheldContent.slice(0, match.index);
+      visualState.block = withheldContent.slice(match.index);
       withheldContent = "";
       return visibleContent;
     }
 
-    const visibleLength = withheldContent.length - visualMarker.length + 1;
+    const visibleLength = withheldContent.length - holdBackLength;
     if (visibleLength <= 0) return "";
 
     const visibleContent = withheldContent.slice(0, visibleLength);
@@ -351,24 +360,50 @@ export const generateAskResponse = async function* (
     return;
   }
 
-  const visualMatch = visualState.block.match(
-    /^```fluina-visual[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/,
+  const block = visualState.block.trim();
+  const isJsonFence = block.startsWith("```json");
+  const fenceMatch = block.match(
+    /^```(?:fluina-visual|json)[ \t]*\r?\n?([\s\S]*?)\r?\n?```[ \t]*([\s\S]*)$/,
   );
-  if (!visualMatch) {
-    throw new Error("AIから不正なビジュアル仕様が返されました。");
-  }
+  const jsonText = fenceMatch
+    ? fenceMatch[1]
+    : block.slice(0, block.lastIndexOf("}") + 1);
+  const trailingText = fenceMatch
+    ? fenceMatch[2].trim()
+    : block.slice(block.lastIndexOf("}") + 1).trim();
 
   let visualPayload: unknown;
   try {
-    visualPayload = JSON.parse(visualMatch[1]);
+    visualPayload = normalizeVisualScene(JSON.parse(jsonText));
   } catch {
-    throw new Error("AIから不正なビジュアルJSONが返されました。");
-  }
-  if (!isVisualScene(visualPayload)) {
-    throw new Error("AIから未対応のビジュアル仕様が返されました。");
+    visualPayload = null;
   }
 
-  const media = await renderVisualScene(visualPayload, signal);
+  if (!isVisualScene(visualPayload)) {
+    const looksLikeScene =
+      typeof visualPayload === "object" &&
+      visualPayload !== null &&
+      "kind" in visualPayload &&
+      "elements" in visualPayload;
+    if (isJsonFence && !looksLikeScene) {
+      yield visualState.block;
+    } else {
+      console.warn("Discarded an invalid visual specification from the AI.");
+      yield "\n\n（図・動画の仕様をAIが正しく出力できなかったため、表示できませんでした。もう一度お試しください。）";
+    }
+    return;
+  }
+
+  let media: Awaited<ReturnType<typeof renderVisualScene>>;
+  try {
+    media = await renderVisualScene(visualPayload, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.warn("Visual rendering failed:", error);
+    yield "\n\n（図・動画の生成に失敗しました。もう一度お試しください。）";
+    return;
+  }
+  if (trailingText) yield `\n\n${trailingText}`;
   yield `\n\n[[FLUINA_MEDIA:${encodeURIComponent(JSON.stringify(media))}]]`;
 };
 

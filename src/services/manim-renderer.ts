@@ -22,6 +22,86 @@ type RenderedMedia = {
 export const isVisualScene = (value: unknown): value is VisualScene =>
   Value.Check(VisualSceneSchema, value);
 
+const ALLOWED_LATEX_COMMANDS = new Set(
+  "alpha angle approx beta cdot circ cos delta div frac gamma ge infty int le left ln log lambda mu neq omega pi pm right sigma sin sqrt sum tan theta times".split(
+    " ",
+  ),
+);
+const ELEMENT_KEYS: Record<string, string[]> = {
+  text: ["type", "text", "x", "y", "scale", "color", "animation"],
+  formula: ["type", "latex", "x", "y", "scale", "color", "animation"],
+  circle: ["type", "x", "y", "radius", "color", "animation"],
+  rectangle: ["type", "x", "y", "width", "height", "color", "animation"],
+  line: ["type", "points", "color", "animation"],
+  graph: ["type", "points", "color", "animation"],
+};
+const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
+const ANIMATIONS = new Set(["create", "fade_in", "write"]);
+
+const clamp = (value: unknown, min: number, max: number) =>
+  typeof value === "number" && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : value;
+
+const isSupportedFormula = (latex: unknown) =>
+  typeof latex === "string" &&
+  (latex.match(/\\([A-Za-z]+)/g) ?? []).every((command) =>
+    ALLOWED_LATEX_COMMANDS.has(command.slice(1)),
+  );
+
+// AIの出力のうち、許可されていないプロパティや値を取り除いて仕様に合わせる
+export const normalizeVisualScene = (raw: unknown): unknown => {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const scene = raw as Record<string, unknown>;
+  if (!Array.isArray(scene.elements)) return raw;
+
+  const elements = scene.elements.flatMap((item): unknown[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const source = item as Record<string, unknown>;
+    const allowedKeys = ELEMENT_KEYS[String(source.type)];
+    if (!allowedKeys) return [];
+    if (source.type === "formula" && !isSupportedFormula(source.latex)) {
+      return [];
+    }
+
+    const element: Record<string, unknown> = {};
+    for (const key of allowedKeys) {
+      if (source[key] !== undefined) element[key] = source[key];
+    }
+    if (typeof element.color === "string" && !HEX_COLOR.test(element.color)) {
+      element.color = undefined;
+    }
+    if (
+      typeof element.animation === "string" &&
+      !ANIMATIONS.has(element.animation)
+    ) {
+      element.animation = undefined;
+    }
+    for (const key of ["x", "y"]) {
+      element[key] = clamp(element[key], -7, 7);
+    }
+    if ("scale" in element) element.scale = clamp(element.scale, 0.25, 2);
+    if (Array.isArray(element.points)) {
+      element.points = element.points.map((point) =>
+        Array.isArray(point)
+          ? point.map((coordinate) => clamp(coordinate, -7, 7))
+          : point,
+      );
+    }
+    return [JSON.parse(JSON.stringify(element))];
+  });
+
+  return {
+    kind: scene.kind,
+    title:
+      typeof scene.title === "string" ? scene.title.slice(0, 120) : scene.title,
+    ...(typeof scene.duration === "number"
+      ? { duration: clamp(scene.duration, 2, 20) }
+      : {}),
+    elements: elements.slice(0, 40),
+  };
+};
+
 export const renderVisualScene = async (
   scene: VisualScene,
   signal?: AbortSignal,

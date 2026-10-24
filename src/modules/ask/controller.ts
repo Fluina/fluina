@@ -8,6 +8,8 @@ import {
 } from "../../services/openrouter";
 import { AskSchema, MAX_ATTACHMENT_BYTES } from "./schema";
 
+const KEEPALIVE_INTERVAL_MS = 5_000;
+
 export const askController = new Elysia({ prefix: "/ask" })
   .post(
     "/",
@@ -37,13 +39,28 @@ export const askController = new Elysia({ prefix: "/ask" })
         set.headers["Content-Type"] = "text/plain; charset=utf-8";
         set.headers["Cache-Control"] = "no-cache, no-transform";
 
+        let pending: Promise<IteratorResult<string>> | null = null;
         return new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(encoder.encode(firstChunk.value));
           },
           async pull(controller) {
             try {
-              const { done, value } = await iterator.next();
+              pending ??= iterator.next();
+              const result = await Promise.race([
+                pending,
+                new Promise<null>((resolve) =>
+                  setTimeout(() => resolve(null), KEEPALIVE_INTERVAL_MS),
+                ),
+              ]);
+
+              // 長いレンダリング待ちで接続が切れないよう、ゼロ幅スペースを送る
+              if (result === null) {
+                controller.enqueue(encoder.encode("\u200B"));
+                return;
+              }
+              pending = null;
+              const { done, value } = result;
 
               if (done) {
                 controller.close();
