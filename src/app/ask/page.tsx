@@ -543,7 +543,6 @@ export default function Ask() {
     number | null
   >(null);
   const loadedFirstSequenceRef = useRef<number | null>(null);
-  const hasExpandedHistoryRef = useRef(false);
   const [archiveReady, setArchiveReady] = useState(false);
   const [isInitialChatPositioned, setIsInitialChatPositioned] = useState(false);
   // 先頭に過去ログを足す描画の間だけ true にし、仮想リストにスクロール位置を維持させる
@@ -564,6 +563,8 @@ export default function Ask() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const nativeSmoothScrollCleanupRef = useRef<(() => void) | null>(null);
   const pendingLatestTurnScrollRef = useRef<ChatScrollBehavior | null>(null);
+  // ストリーミングから保存済みメッセージへ置き換わるときにフェードを挟まない
+  const streamedMessageIdsRef = useRef(new Set<string>());
   const pendingCaretRef = useRef<{
     caretTop: number;
     caretRatio: number | null;
@@ -594,8 +595,18 @@ export default function Ask() {
       spacer.style.height = "0px";
       return;
     }
-    const used =
-      spacer.getBoundingClientRect().top - lastTurn.getBoundingClientRect().top;
+    // 仮想リストのコンテナ高さは測定反映が遅れるため、位置差ではなく実寸の合計で算出する
+    // 退出アニメーション中の要素は absolute になり、レイアウト上の高さを持たないので除外する
+    const isInFlow = (el: Element) =>
+      getComputedStyle(el).position !== "absolute";
+    let used = lastTurn.getBoundingClientRect().height;
+    for (
+      let el = spacer.previousElementSibling;
+      el && !el.contains(lastTurn);
+      el = el.previousElementSibling
+    ) {
+      if (isInFlow(el)) used += el.getBoundingClientRect().height;
+    }
     const next = `${Math.max(Math.ceil(viewport.clientHeight - used), 0)}px`;
     if (spacer.style.height !== next) spacer.style.height = next;
   }, []);
@@ -693,7 +704,27 @@ export default function Ask() {
     observer.observe(viewport);
     const lastTurn = host.querySelector<HTMLElement>("[data-chat-last-turn]");
     if (lastTurn) observer.observe(lastTurn);
+
+    // 末尾要素の増減・サイズ変化(退出アニメーション完了による削除を含む)で余白を再計算する
+    const spacer = host.querySelector<HTMLElement>("[data-chat-tail-spacer]");
+    const siblings = spacer?.parentElement;
+    if (siblings) {
+      for (const child of siblings.children) {
+        if (child !== spacer) observer.observe(child);
+      }
+    }
   });
+
+  useEffect(() => {
+    const spacer = chatScrollRef.current?.querySelector<HTMLElement>(
+      "[data-chat-tail-spacer]",
+    );
+    const siblings = spacer?.parentElement;
+    if (!siblings) return;
+    const mutationObserver = new MutationObserver(() => updateTailSpacer());
+    mutationObserver.observe(siblings, { childList: true });
+    return () => mutationObserver.disconnect();
+  }, [updateTailSpacer]);
 
   const applyArchivePage = useCallback(
     (
@@ -794,7 +825,8 @@ export default function Ask() {
     async (scrollBehavior: ChatScrollBehavior | null = null) => {
       const page = await loadLatestChatTurns(
         CHAT_PAGE_TURN_LIMIT,
-        hasExpandedHistoryRef.current ? loadedFirstSequenceRef.current : null,
+        // 読み込み済みの先頭を保ち、新規ターン追加で最古のターンが外れてスクロール位置がずれるのを防ぐ
+        loadedFirstSequenceRef.current,
       );
       applyArchivePage(page, scrollBehavior);
       return page;
@@ -817,7 +849,6 @@ export default function Ask() {
         firstMessageSequence,
         CHAT_PAGE_TURN_LIMIT,
       );
-      hasExpandedHistoryRef.current = true;
       setIsPrependingHistory(true);
       setMessages((currentMessages) => [
         ...olderPage.messages,
@@ -993,6 +1024,7 @@ export default function Ask() {
         120000,
       );
       const assistantMessageId = generateId();
+      streamedMessageIdsRef.current.add(assistantMessageId);
       const startedAt = Date.now();
       let reply = "";
       let renderTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1235,7 +1267,6 @@ export default function Ask() {
           } catch (archiveFailure) {
             console.error("Failed to persist assistant error:", archiveFailure);
           }
-        } else {
         }
         setStreamingMessage(null);
       } finally {
@@ -2120,6 +2151,12 @@ export default function Ask() {
     }
     return indexes;
   }, [isExpanded, messageTurns, editingMessageId]);
+  // 保存済みの返答が履歴に入った時点でストリーミング表示を同時に外し、高さの二重計上を防ぐ
+  const visibleStreamingMessage =
+    streamingMessage &&
+    !messages.some((message) => message.id === streamingMessage.id)
+      ? streamingMessage
+      : null;
   const loadingMessage = (
     <motion.div
       key="assistant-loading"
@@ -2288,7 +2325,11 @@ export default function Ask() {
                           key={msg.id}
                           data-chat-message-id={msg.id}
                           data-os-fade-top-anchor=""
-                          initial={{ opacity: 0 }}
+                          initial={
+                            streamedMessageIdsRef.current.has(msg.id)
+                              ? false
+                              : { opacity: 0 }
+                          }
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
                           transition={TRANSITION}
@@ -2471,49 +2512,48 @@ export default function Ask() {
               );
             }}
           >
+            {visibleStreamingMessage && !isExpanded && (
+              <motion.div
+                key={visibleStreamingMessage.id}
+                data-os-fade-top-anchor=""
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={TRANSITION}
+                className="flex flex-col gap-2 items-start"
+              >
+                {visibleStreamingMessage.content ? (
+                  <AssistantMarkdown
+                    content={visibleStreamingMessage.content}
+                    isAnimating={isLoading}
+                  />
+                ) : (
+                  loadingMessage
+                )}
+
+                {visibleStreamingMessage.content && (
+                  <div className="flex items-center gap-2 py-2">
+                    <Tooltip content="コピー" placement="bottom">
+                      <Button
+                        onPress={() =>
+                          handleCopyMessage(visibleStreamingMessage.content)
+                        }
+                        aria-label="Copy"
+                        shape="circle"
+                        className="size-5"
+                      >
+                        <Copy size={16} className="text-fore-5" />
+                      </Button>
+                    </Tooltip>
+
+                    <span className="text-sm text-fore-5">
+                      {formatMessageTime(visibleStreamingMessage.timestamp)}
+                    </span>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
             <AnimatePresence mode="popLayout" initial={false}>
-              {streamingMessage && !isExpanded && (
-                <motion.div
-                  key={streamingMessage.id}
-                  data-os-fade-top-anchor=""
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={TRANSITION}
-                  className="flex flex-col gap-2 items-start"
-                >
-                  {streamingMessage.content ? (
-                    <AssistantMarkdown
-                      content={streamingMessage.content}
-                      isAnimating={isLoading}
-                    />
-                  ) : (
-                    loadingMessage
-                  )}
-
-                  {streamingMessage.content && (
-                    <div className="flex items-center gap-2 py-2">
-                      <Tooltip content="コピー" placement="bottom">
-                        <Button
-                          onPress={() =>
-                            handleCopyMessage(streamingMessage.content)
-                          }
-                          aria-label="Copy"
-                          shape="circle"
-                          className="size-5"
-                        >
-                          <Copy size={16} className="text-fore-5" />
-                        </Button>
-                      </Tooltip>
-
-                      <span className="text-sm text-fore-5">
-                        {formatMessageTime(streamingMessage.timestamp)}
-                      </span>
-                    </div>
-                  )}
-                </motion.div>
-              )}
-
               {!isExpanded &&
                 !isLoading &&
                 messages.at(-1)?.role === "assistant" && (
