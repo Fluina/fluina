@@ -106,6 +106,8 @@ type Message = {
 
 const USER_CANCEL_REASON = "user-cancelled";
 const CANCELLED_NOTICE_TEXT = "送信が取り消されました。";
+const INTERRUPTED_NOTICE_TEXT =
+  "ページが再読み込みされたため、返答が中断されました。";
 
 const CHAT_PAGE_TURN_LIMIT = 10;
 const CHAT_PAGE_MESSAGE_LIMIT = CHAT_PAGE_TURN_LIMIT * 2;
@@ -116,7 +118,7 @@ const EMPTY_ASSISTANT_MESSAGE =
 type ChatScrollBehavior = "instant" | "smooth";
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
 
-// 最新ターンが画面より低ければ先頭を上端へ、高ければ最下部を目標にする
+// 最新ターンの上端をスクロール領域の上端に合わせる
 const getChatScrollTarget = (viewport: HTMLElement) => {
   const maxScrollTop = Math.max(
     viewport.scrollHeight - viewport.clientHeight,
@@ -125,15 +127,9 @@ const getChatScrollTarget = (viewport: HTMLElement) => {
   const lastTurn = viewport.querySelector<HTMLElement>(
     "[data-chat-last-turn]",
   );
-  const spacer = viewport.querySelector<HTMLElement>(
-    "[data-chat-tail-spacer]",
-  );
-  if (!lastTurn || !spacer) return maxScrollTop;
+  if (!lastTurn) return maxScrollTop;
 
   const turnRect = lastTurn.getBoundingClientRect();
-  const usedHeight = spacer.getBoundingClientRect().top - turnRect.top;
-  if (usedHeight >= viewport.clientHeight) return maxScrollTop;
-
   const turnTop =
     turnRect.top - viewport.getBoundingClientRect().top + viewport.scrollTop;
   return Math.min(maxScrollTop, Math.max(Math.round(turnTop), 0));
@@ -552,10 +548,6 @@ export default function Ask() {
   const [isInitialChatPositioned, setIsInitialChatPositioned] = useState(false);
   // 先頭に過去ログを足す描画の間だけ true にし、仮想リストにスクロール位置を維持させる
   const [isPrependingHistory, setIsPrependingHistory] = useState(false);
-  const [archiveError, setArchiveError] = useState<string | null>(null);
-  const [persistentStorageGranted, setPersistentStorageGranted] = useState<
-    boolean | null
-  >(null);
   const [streamingMessage, setStreamingMessage] = useState<Message | null>(
     null,
   );
@@ -570,7 +562,8 @@ export default function Ask() {
   const editorRef = useRef<HTMLDivElement>(null);
   const scrollTopRef = useRef(0);
   const chatScrollRef = useRef<HTMLDivElement>(null);
-  const pendingChatScrollToBottomRef = useRef<ChatScrollBehavior | null>(null);
+  const nativeSmoothScrollCleanupRef = useRef<(() => void) | null>(null);
+  const pendingLatestTurnScrollRef = useRef<ChatScrollBehavior | null>(null);
   const pendingCaretRef = useRef<{
     caretTop: number;
     caretRatio: number | null;
@@ -607,7 +600,7 @@ export default function Ask() {
     if (spacer.style.height !== next) spacer.style.height = next;
   }, []);
 
-  const scrollChatToBottom = useCallback(
+  const scrollToLatestTurn = useCallback(
     (behavior: ChatScrollBehavior, viewportOverride?: HTMLElement) => {
       const chatScrollHost = chatScrollRef.current;
       const viewport =
@@ -618,64 +611,63 @@ export default function Ask() {
         chatScrollHost;
       if (!viewport) return;
 
-      updateTailSpacer(viewport);
+      nativeSmoothScrollCleanupRef.current?.();
 
-      const target = getChatScrollTarget(viewport);
       if (behavior === "smooth") {
-        viewport.scrollTo({ top: target, behavior });
-      } else {
-        viewport.scrollTop = target;
+        // 仮想リストが新しいターンを測定し直す間(instant scroll で smooth が中断される)を待ってから開始する
+        let frame = 0;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const finish = () => {
+          cancelAnimationFrame(frame);
+          clearTimeout(timeout);
+          viewport.removeEventListener("scrollend", onScrollEnd);
+          nativeSmoothScrollCleanupRef.current = null;
+          updateTailSpacer(viewport);
+          const finalTarget = getChatScrollTarget(viewport);
+          if (Math.abs(finalTarget - viewport.scrollTop) > 1) {
+            viewport.scrollTop = finalTarget;
+          }
+          scrollTopRef.current = viewport.scrollTop;
+        };
+        const onScrollEnd = () => finish();
+        nativeSmoothScrollCleanupRef.current = finish;
+
+        const waitStartedAt = performance.now();
+        let stableFrames = 0;
+        let previousSignature = "";
+        const start = () => {
+          updateTailSpacer(viewport);
+          const lastTurn = viewport.querySelector<HTMLElement>(
+            "[data-chat-last-turn]",
+          );
+          const signature = `${lastTurn?.offsetHeight ?? 0}/${viewport.scrollHeight}/${Math.round(getChatScrollTarget(viewport))}`;
+          stableFrames = signature === previousSignature ? stableFrames + 1 : 0;
+          previousSignature = signature;
+          if (stableFrames < 2 && performance.now() - waitStartedAt < 500) {
+            frame = requestAnimationFrame(start);
+            return;
+          }
+          updateTailSpacer(viewport);
+          const target = getChatScrollTarget(viewport);
+          if (Math.abs(target - viewport.scrollTop) <= 1) {
+            finish();
+            return;
+          }
+          viewport.addEventListener("scrollend", onScrollEnd, { once: true });
+          timeout = setTimeout(finish, 1500);
+          viewport.scrollTo({ top: target, behavior: "smooth" });
+        };
+        frame = requestAnimationFrame(start);
+        return;
       }
+
+      updateTailSpacer(viewport);
+      const target = getChatScrollTarget(viewport);
+      viewport.scrollTop = target;
       scrollTopRef.current = target;
     },
     [updateTailSpacer],
   );
-
-  // 新しい質問後、仮想リストの高さ確定で位置がずれても最新ターンの先頭へ戻す
-  const settleChatScroll = useCallback(() => {
-    const host = chatScrollRef.current;
-    if (!host) return;
-
-    const startedAt = performance.now();
-    let frame = 0;
-    const userEvents = ["wheel", "touchstart", "pointerdown", "keydown"];
-    const stop = () => {
-      cancelAnimationFrame(frame);
-      for (const type of userEvents) {
-        host.removeEventListener(type, stop, true);
-      }
-    };
-    for (const type of userEvents) {
-      host.addEventListener(type, stop, { capture: true, passive: true });
-    }
-
-    // 目標位置は仮想リストの測定で変わるため、開始位置から最新の目標へ
-    // 500ms のイージングで補間し、その後は目標に追従する
-    const DURATION = 500;
-    let startTop: number | null = null;
-    const tick = (now: number) => {
-      const elapsed = now - startedAt;
-      if (elapsed > 2500) {
-        stop();
-        return;
-      }
-      const viewport =
-        host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
-        host;
-      updateTailSpacer(viewport);
-      const target = getChatScrollTarget(viewport);
-      startTop ??= viewport.scrollTop;
-      const t = Math.min(elapsed / DURATION, 1);
-      const eased = 1 - (1 - t) ** 3;
-      const next = startTop + (target - startTop) * eased;
-      if (Math.abs(next - viewport.scrollTop) > 0.5) {
-        viewport.scrollTo({ top: next, behavior: "instant" });
-        scrollTopRef.current = viewport.scrollTop;
-      }
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-  }, [updateTailSpacer]);
 
   const tailObserverRef = useRef<ResizeObserver | null>(null);
 
@@ -709,7 +701,7 @@ export default function Ask() {
       scrollBehavior: ChatScrollBehavior | null = null,
     ) => {
       if (scrollBehavior) {
-        pendingChatScrollToBottomRef.current = scrollBehavior;
+        pendingLatestTurnScrollRef.current = scrollBehavior;
       }
       setMessages(page.messages);
       setHasOlderMessages(page.hasOlder);
@@ -725,25 +717,35 @@ export default function Ask() {
     const initializeArchive = async () => {
       try {
         try {
-          const persistent = await requestPersistentChatStorage();
-          if (active) setPersistentStorageGranted(persistent);
+          await requestPersistentChatStorage();
         } catch (error) {
           console.warn("Persistent storage request failed:", error);
-          if (active) setPersistentStorageGranted(false);
         }
 
-        const page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);
+        let page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);
+        // 返答待ちのまま再読み込みされた場合、末尾が返答のない質問になるため中断として記録する
+        const lastMessage = page.messages.at(-1);
+        if (lastMessage?.role === "user") {
+          try {
+            await appendChatMessage({
+              id: `${lastMessage.id}-interrupted`,
+              role: "assistant",
+              content: "",
+              notice: { kind: "error", text: INTERRUPTED_NOTICE_TEXT },
+              timestamp: Date.now(),
+            });
+          } catch (error) {
+            // 開発時の二重実行などで同じ通知が既に保存されている場合は無視する
+            console.warn("Interrupted notice was not saved:", error);
+          }
+          page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);
+        }
         if (active) {
           applyArchivePage(page, "instant");
           setArchiveReady(true);
         }
       } catch (error) {
         console.error("Chat archive initialization failed:", error);
-        if (active) {
-          setArchiveError(
-            "端末内の会話履歴を読み込めませんでした。ブラウザーの保存設定を確認してください。",
-          );
-        }
       }
     };
 
@@ -826,7 +828,6 @@ export default function Ask() {
       loadedFirstSequenceRef.current = olderPage.firstSequence;
     } catch (error) {
       console.error("Older chat page load failed:", error);
-      setArchiveError("過去の会話を読み込めませんでした。");
     } finally {
       setIsLoadingOlderMessages(false);
     }
@@ -835,14 +836,10 @@ export default function Ask() {
   useLayoutEffect(() => {
     if (isPrependingHistory) setIsPrependingHistory(false);
 
-    const scrollBehavior = pendingChatScrollToBottomRef.current;
+    const scrollBehavior = pendingLatestTurnScrollRef.current;
     if (scrollBehavior) {
-      pendingChatScrollToBottomRef.current = null;
-      if (scrollBehavior === "smooth") {
-        settleChatScroll();
-      } else {
-        scrollChatToBottom(scrollBehavior);
-      }
+      pendingLatestTurnScrollRef.current = null;
+      scrollToLatestTurn(scrollBehavior);
     }
   });
 
@@ -866,7 +863,7 @@ export default function Ask() {
         return;
       }
 
-      scrollChatToBottom("instant", viewport);
+      scrollToLatestTurn("instant", viewport);
 
       const isAtBottom =
         Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) <= 1;
@@ -894,9 +891,9 @@ export default function Ask() {
 
     frame = requestAnimationFrame(positionInitialChat);
     return () => cancelAnimationFrame(frame);
-  }, [archiveReady, isInitialChatPositioned, scrollChatToBottom]);
+  }, [archiveReady, isInitialChatPositioned, scrollToLatestTurn]);
 
-  // 初期表示後に遅れて高さが変わっても、ユーザー操作があるまで最下部に固定する
+  // 初期表示後に遅れて高さが変わっても、ユーザー操作があるまで最新ターンを上端に保つ
   useEffect(() => {
     if (!isInitialChatPositioned) return;
 
@@ -904,7 +901,11 @@ export default function Ask() {
     if (!host) return;
 
     // overlayscrollbars が再生成されても追従できるよう、毎回 viewport を取り直す
-    const stick = () => scrollChatToBottom("instant");
+    const stick = () => {
+      if (!nativeSmoothScrollCleanupRef.current) {
+        scrollToLatestTurn("instant");
+      }
+    };
     const resizeObserver = new ResizeObserver(stick);
     const observeTargets = () => {
       resizeObserver.disconnect();
@@ -928,7 +929,10 @@ export default function Ask() {
       const viewport =
         host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
         host;
-      if (Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1) {
+      if (
+        !nativeSmoothScrollCleanupRef.current &&
+        Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1
+      ) {
         stick();
       }
     };
@@ -940,7 +944,10 @@ export default function Ask() {
       const viewport =
         host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
         host;
-      if (Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1) {
+      if (
+        !nativeSmoothScrollCleanupRef.current &&
+        Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1
+      ) {
         stick();
       }
       frame = requestAnimationFrame(enforce);
@@ -964,7 +971,7 @@ export default function Ask() {
     const timeoutId = setTimeout(stop, 3000);
 
     return stop;
-  }, [isInitialChatPositioned, scrollChatToBottom]);
+  }, [isInitialChatPositioned, scrollToLatestTurn]);
 
   //  ================================================================
   //    送信
@@ -1090,10 +1097,6 @@ export default function Ask() {
             console.warn(
               "Chat history summarization failed; continuing with recent history:",
               error,
-            );
-            const reason = error instanceof Error ? ` (${error.message})` : "";
-            setArchiveError(
-              `過去の履歴を要約できなかったため、直近の会話を使って回答します${reason}`,
             );
           }
         }
@@ -1231,10 +1234,8 @@ export default function Ask() {
             await refreshVisibleArchivePage();
           } catch (archiveFailure) {
             console.error("Failed to persist assistant error:", archiveFailure);
-            setArchiveError("返答を端末内の履歴に保存できませんでした。");
           }
         } else {
-          setArchiveError("返答は保存されましたが、画面の更新に失敗しました。");
         }
         setStreamingMessage(null);
       } finally {
@@ -1277,7 +1278,6 @@ export default function Ask() {
       await refreshVisibleArchivePage("smooth");
     } catch (error) {
       console.error("User message persistence failed:", error);
-      setArchiveError("メッセージを端末内の履歴に保存できませんでした。");
       return;
     }
 
@@ -1302,7 +1302,6 @@ export default function Ask() {
         await refreshVisibleArchivePage("smooth");
       } catch (error) {
         console.error("Offline message persistence failed:", error);
-        setArchiveError("オフラインの通知を履歴に保存できませんでした。");
       }
       return;
     }
@@ -1320,7 +1319,6 @@ export default function Ask() {
         await requestAssistantReply(message.content);
       } catch (error) {
         console.error("Appending a prompt to chat history failed:", error);
-        setArchiveError("メッセージを端末内の履歴に保存できませんでした。");
       }
     },
     [archiveReady, isLoading, refreshVisibleArchivePage, requestAssistantReply],
@@ -2101,12 +2099,7 @@ export default function Ask() {
     () =>
       messages.reduce<Message[][]>((turns, message) => {
         const currentTurn = turns.at(-1);
-        const previousMessage = currentTurn?.at(-1);
-
-        if (
-          !currentTurn ||
-          (previousMessage?.role === "assistant" && message.role === "user")
-        ) {
+        if (!currentTurn || message.role === "user") {
           turns.push([message]);
         } else {
           currentTurn.push(message);
@@ -2210,21 +2203,6 @@ export default function Ask() {
             )}
           </AnimatePresence>
 
-          {(archiveError || persistentStorageGranted === false) && (
-            <div className="w-full space-y-1" aria-live="polite">
-              {archiveError && (
-                <p role="alert" className="text-sm text-red-500">
-                  {archiveError}
-                </p>
-              )}
-              {persistentStorageGranted === false && (
-                <p className="text-xs text-fore-5">
-                  このブラウザーは永続保存を許可していません。サイトデータの消去や容量整理で履歴が失われる可能性があります。
-                </p>
-              )}
-            </div>
-          )}
-
           <ScrollArea
             scrollRef={chatScrollRef}
             overlayScroll={{
@@ -2233,7 +2211,7 @@ export default function Ask() {
                 const previousOverflowAnchor = viewport.style.overflowAnchor;
                 viewport.style.overflowAnchor = "none";
                 if (archiveReady) {
-                  scrollChatToBottom("instant", viewport);
+                  scrollToLatestTurn("instant", viewport);
                 }
                 return () => {
                   viewport.style.overflowAnchor = previousOverflowAnchor;
@@ -2267,7 +2245,7 @@ export default function Ask() {
                   >
                     <Button
                       onPress={showOlderMessages}
-                      isDisabled={isLoading || isLoadingOlderMessages}
+                      isDisabled={isLoadingOlderMessages}
                       aria-label="Load Older Messages"
                       className="w-full text-xs text-fore-5 p-2 border border-dotted border-back-5"
                     >
