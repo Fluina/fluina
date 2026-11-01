@@ -11,8 +11,44 @@ if (!validTypes.includes(versionType)) {
 }
 
 try {
+  const packageJson: unknown = JSON.parse(
+    await Bun.file("package.json").text(),
+  );
+  if (
+    typeof packageJson !== "object" ||
+    packageJson === null ||
+    !("version" in packageJson) ||
+    typeof packageJson.version !== "string"
+  ) {
+    throw new Error("package.json に有効なバージョンがありません。");
+  }
+
+  const versionMatch = /^(\d+)\.(\d+)\.(\d+)$/.exec(packageJson.version);
+  if (!versionMatch) {
+    throw new Error(
+      `バージョン ${packageJson.version} は patch/minor/major 更新に対応していません。`,
+    );
+  }
+
+  const [major, minor, patch] = versionMatch.slice(1).map(Number);
+  const nextVersion =
+    versionType === "major"
+      ? `${major + 1}.0.0`
+      : versionType === "minor"
+        ? `${major}.${minor + 1}.0`
+        : `${major}.${minor}.${patch + 1}`;
+  const tagPrefix = (await $`npm config get tag-version-prefix`).text().trim();
+  const nextTag = `${tagPrefix}${nextVersion}`;
+  const existingTag = (await $`git tag --list ${nextTag}`).text().trim();
+
+  if (existingTag) {
+    throw new Error(
+      `タグ ${nextTag} はすでに存在します。package.json のバージョンを確認してください。`,
+    );
+  }
+
   console.log("🎨 1. Biomeでコードを整形・チェックしています...");
-  await $`bunx @biomejs/biome check --write --unsafe --formatter-format-with-errors=true .`.nothrow();
+  await $`bunx @biomejs/biome check --write --unsafe .`;
 
   console.log("📦 2. 変更をGitにステージングしています...");
   await $`git add .`;

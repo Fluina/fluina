@@ -63,8 +63,11 @@
   --color-violet: hsl(300, 100%, 50%);
 
   --font-unifont:
-    var(--font-unifont), var(--font-unifont-jp), var(--font-unifont-t), var(--font-unifont-upper), var(--font-unifont-csur), system-ui;
-  --font-unifont-jp: var(--font-unifont-jp), var(--font-unifont), var(--font-unifont-t), var(--font-unifont-upper), var(--font-unifont-csur), system-ui;
+    var(--font-unifont), var(--font-unifont-jp), var(--font-unifont-t),
+    var(--font-unifont-upper), var(--font-unifont-csur), system-ui;
+  --font-unifont-jp:
+    var(--font-unifont-jp), var(--font-unifont), var(--font-unifont-t),
+    var(--font-unifont-upper), var(--font-unifont-csur), system-ui;
   --font-serif: serif, ui-serif, system-ui;
   --font-sans-serif: sans-serif, ui-sans-serif, system-ui;
   --font-monospace: monospace, ui-monospace, system-ui;
@@ -106,7 +109,11 @@
   --tw-prose-invert-quote-borders: var(--fore-1);
   --tw-prose-invert-captions: var(--fore-5);
   --tw-prose-invert-kbd: var(--fore-1);
-  --tw-prose-invert-kbd-shadows: color-mix(in oklab, var(--fore-1) 10%, transparent);
+  --tw-prose-invert-kbd-shadows: color-mix(
+    in oklab,
+    var(--fore-1) 10%,
+    transparent
+  );
   --tw-prose-invert-code: var(--fore-1);
   --tw-prose-invert-pre-code: var(--fore-1);
   --tw-prose-invert-pre-bg: var(--back-2);
@@ -164,8 +171,8 @@
 
 [data-transparency="off"] .transparency-effect,
 [data-transparency="off"] .scroll-edge-blur {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 @utility all {
@@ -307,59 +314,47 @@
     }
 
     :where(*)::-webkit-scrollbar {
-      width: 0.6rem !important;
-      height: 0.6rem !important;
+      width: 0.6rem;
+      height: 0.6rem;
     }
 
     :where(*)::-webkit-scrollbar-track {
-      background: transparent !important;
+      background: transparent;
     }
 
     :where(*)::-webkit-scrollbar-track:vertical {
-      margin-block: 0.1rem !important;
+      margin-block: 0.1rem;
     }
 
     :where(*)::-webkit-scrollbar-track:horizontal {
-      margin-inline: 0.1rem !important;
+      margin-inline: 0.1rem;
     }
 
     :where(*)::-webkit-scrollbar-thumb {
-      background-color: color-mix(
-        in srgb,
-        var(--color-fore-2) 50%,
-        transparent
-      ) !important;
-      background-clip: content-box !important;
+      background-color: color-mix(in srgb, var(--color-fore-2) 50%, transparent);
+      background-clip: content-box;
     }
 
     :where(*)::-webkit-scrollbar-thumb:vertical {
-      border-inline: 0.1rem solid transparent !important;
+      border-inline: 0.1rem solid transparent;
     }
 
     :where(*)::-webkit-scrollbar-thumb:horizontal {
-      border-block: 0.1rem solid transparent !important;
+      border-block: 0.1rem solid transparent;
     }
 
     :where(*)::-webkit-scrollbar-thumb:hover {
-      background-color: color-mix(
-        in srgb,
-        var(--color-fore-4) 50%,
-        transparent
-      ) !important;
+      background-color: color-mix(in srgb, var(--color-fore-4) 50%, transparent);
     }
 
     :where(*)::-webkit-scrollbar-thumb:active {
-      background-color: color-mix(
-        in srgb,
-        var(--color-fore-3) 50%,
-        transparent
-      ) !important;
+      background-color: color-mix(in srgb, var(--color-fore-3) 50%, transparent);
     }
 
     :where(*)::-webkit-scrollbar-button {
-      display: none !important;
-      width: 0 !important;
-      height: 0 !important;
+      display: none;
+      width: 0;
+      height: 0;
     }
   }
 
@@ -396,17 +391,20 @@
     linear-gradient(
       to top,
       rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))
+      var(--color-back-0)
+        calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to right,
       rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--scroll-fade-left) * var(--scroll-fade-size))
+      var(--color-back-0)
+        calc(var(--scroll-fade-left) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to left,
       rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--scroll-fade-right) * var(--scroll-fade-size))
+      var(--color-back-0)
+        calc(var(--scroll-fade-right) * var(--scroll-fade-size))
     );
   mask-composite: intersect;
 
@@ -419,35 +417,42 @@
     linear-gradient(
       to top,
       rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))
+      var(--color-back-0)
+        calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to right,
       rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--scroll-fade-left) * var(--scroll-fade-size))
+      var(--color-back-0)
+        calc(var(--scroll-fade-left) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to left,
       rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--scroll-fade-right) * var(--scroll-fade-size))
+      var(--color-back-0)
+        calc(var(--scroll-fade-right) * var(--scroll-fade-size))
     );
   -webkit-mask-composite: source-in;
 
   transition:
-    --scroll-fade-top var(--transition-duration) var(--transition-timing-function),
-    --scroll-fade-bottom var(--transition-duration) var(--transition-timing-function),
-    --scroll-fade-left var(--transition-duration) var(--transition-timing-function),
-    --scroll-fade-right var(--transition-duration) var(--transition-timing-function);
+    --scroll-fade-top var(--transition-duration)
+    var(--transition-timing-function),
+    --scroll-fade-bottom var(--transition-duration)
+    var(--transition-timing-function),
+    --scroll-fade-left var(--transition-duration)
+    var(--transition-timing-function),
+    --scroll-fade-right var(--transition-duration)
+    var(--transition-timing-function);
 }
 
 [data-scroll-fade-cursor="row"],
 [data-scroll-fade-cursor="row"] * {
-  cursor: row-resize !important;
+  cursor: row-resize;
 }
 
 [data-scroll-fade-cursor="col"],
 [data-scroll-fade-cursor="col"] * {
-  cursor: col-resize !important;
+  cursor: col-resize;
 }
 
 .scroll-edge-blur {
@@ -456,17 +461,49 @@
   backdrop-filter: blur(var(--blur-xs));
 
   mask-image:
-    linear-gradient(to bottom, var(--color-back-0) 0, transparent calc(var(--scroll-fade-top) * var(--scroll-fade-size))),
-    linear-gradient(to top, var(--color-back-0) 0, transparent calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))),
-    linear-gradient(to right, var(--color-back-0) 0, transparent calc(var(--scroll-fade-left) * var(--scroll-fade-size))),
-    linear-gradient(to left, var(--color-back-0) 0, transparent calc(var(--scroll-fade-right) * var(--scroll-fade-size)));
+    linear-gradient(
+      to bottom,
+      var(--color-back-0) 0,
+      transparent calc(var(--scroll-fade-top) * var(--scroll-fade-size))
+    ),
+    linear-gradient(
+      to top,
+      var(--color-back-0) 0,
+      transparent calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))
+    ),
+    linear-gradient(
+      to right,
+      var(--color-back-0) 0,
+      transparent calc(var(--scroll-fade-left) * var(--scroll-fade-size))
+    ),
+    linear-gradient(
+      to left,
+      var(--color-back-0) 0,
+      transparent calc(var(--scroll-fade-right) * var(--scroll-fade-size))
+    );
   mask-composite: add;
 
   -webkit-mask-image:
-    linear-gradient(to bottom, var(--color-back-0) 0, transparent calc(var(--scroll-fade-top) * var(--scroll-fade-size))),
-    linear-gradient(to top, var(--color-back-0) 0, transparent calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))),
-    linear-gradient(to right, var(--color-back-0) 0, transparent calc(var(--scroll-fade-left) * var(--scroll-fade-size))),
-    linear-gradient(to left, var(--color-back-0) 0, transparent calc(var(--scroll-fade-right) * var(--scroll-fade-size)));
+    linear-gradient(
+      to bottom,
+      var(--color-back-0) 0,
+      transparent calc(var(--scroll-fade-top) * var(--scroll-fade-size))
+    ),
+    linear-gradient(
+      to top,
+      var(--color-back-0) 0,
+      transparent calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))
+    ),
+    linear-gradient(
+      to right,
+      var(--color-back-0) 0,
+      transparent calc(var(--scroll-fade-left) * var(--scroll-fade-size))
+    ),
+    linear-gradient(
+      to left,
+      var(--color-back-0) 0,
+      transparent calc(var(--scroll-fade-right) * var(--scroll-fade-size))
+    );
   -webkit-mask-composite: source-over;
 }
 

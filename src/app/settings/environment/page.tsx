@@ -3,6 +3,7 @@
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import type { Key } from "react-aria-components";
+import { usePreferences } from "@/app/preferences";
 import {
   Select,
   SelectItem,
@@ -11,13 +12,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/parts";
-import { usePreferences } from "@/app/preferences";
 
 export default function EnvironmentPage() {
   const { theme, setTheme } = useTheme();
   const [isMounted, setIsMounted] = useState(false);
-  const { transparency, setTransparency, parallax, setParallax, font, setFont } =
-    usePreferences();
+  const {
+    transparency,
+    setTransparency,
+    parallax,
+    setParallax,
+    font,
+    setFont,
+  } = usePreferences();
   const storedTheme =
     typeof window === "undefined" ? null : localStorage.getItem("theme");
   const selectedTheme = isMounted

@@ -60,11 +60,12 @@ test("chat loads older turns cumulatively without changing the current history",
   await page.route("http://localhost:3001/api/ask", (route) => {
     const request = route.request().postDataJSON();
     askRequests.push(request);
-    const fulfill = () => route.fulfill({
-      status: 200,
-      contentType: "text/plain; charset=utf-8",
-      body: "テスト返答",
-    });
+    const fulfill = () =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        body: "テスト返答",
+      });
     if (request.prompt === "過去ページからの質問") {
       signalHeldAskStarted();
       return heldAskResponse.then(fulfill);
@@ -255,6 +256,8 @@ test("shows an error when the chat stream completes without text", async ({
   await expect(
     page
       .getByRole("main")
-      .getByText("AIから空の応答が返されました。時間をおいて再度お試しください。"),
+      .getByText(
+        "AIから空の応答が返されました。時間をおいて再度お試しください。",
+      ),
   ).toBeVisible();
 });

@@ -216,7 +216,12 @@ export const loadLatestChatTurns = (
 ) => readTurnPage(null, turnLimit, false, minimumSequence);
 
 export const loadOlderChatTurns = (beforeSequence: number, turnLimit: number) =>
-  readTurnPage(IDBKeyRange.upperBound(beforeSequence, true), turnLimit, true, null);
+  readTurnPage(
+    IDBKeyRange.upperBound(beforeSequence, true),
+    turnLimit,
+    true,
+    null,
+  );
 
 export const getChatArchiveSummary = async (): Promise<ChatArchiveSummary> => {
   const database = await openDatabase();

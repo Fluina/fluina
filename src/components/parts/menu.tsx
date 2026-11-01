@@ -143,13 +143,9 @@ function Item({
           </span>
 
           {renderProps.selectionMode !== "none" ? (
-            renderProps.isSelected && (
-              <Check className="size-4 text-blue" />
-            )
+            renderProps.isSelected && <Check className="size-4 text-blue" />
           ) : shortcut ? (
-            <span className="text-xs text-fore-9">
-              {shortcut}
-            </span>
+            <span className="text-xs text-fore-9">{shortcut}</span>
           ) : hasSubmenu ? (
             <ChevronRight className="size-4 text-fore-9" />
           ) : null}
@@ -160,9 +156,7 @@ function Item({
 }
 
 function Separator({ className }: { className?: string }) {
-  return (
-    <AriaSeparator className={cn("my-1 h-px bg-back-5", className)} />
-  );
+  return <AriaSeparator className={cn("my-1 h-px bg-back-5", className)} />;
 }
 
 type MenuSectionProps<T extends object> = Omit<

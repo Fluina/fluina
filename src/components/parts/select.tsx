@@ -1,14 +1,23 @@
-import { createContext, forwardRef, useContext, useId, useLayoutEffect, useRef, useState } from "react";
 import { LayoutGroup, motion } from "motion/react";
 import {
+  createContext,
+  forwardRef,
+  useContext,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  composeRenderProps,
   Button as RACButton,
   type ButtonProps as RACButtonProps,
   Header as RACHeader,
   type HeaderProps as RACHeaderProps,
   ListBox as RACListBox,
-  type ListBoxProps as RACListBoxProps,
   ListBoxItem as RACListBoxItem,
   type ListBoxItemProps as RACListBoxItemProps,
+  type ListBoxProps as RACListBoxProps,
   ListBoxSection as RACListBoxSection,
   type ListBoxSectionProps as RACListBoxSectionProps,
   Popover as RACPopover,
@@ -20,14 +29,13 @@ import {
   type SelectValueProps as RACSelectValueProps,
   Separator as RACSeparator,
   type SeparatorProps as RACSeparatorProps,
-  composeRenderProps,
 } from "react-aria-components";
 import { cn } from "@/lib/cn";
 import { TRANSITION } from "@/lib/motion";
 
 const SelectMorphContext = createContext<{ groupId: string } | null>(null);
 
-export interface SelectProps<T extends object> extends RACSelectProps<T> { }
+export interface SelectProps<T extends object> extends RACSelectProps<T> {}
 
 export const Select = forwardRef(function Select<T extends object>(
   { className, children, ...props }: SelectProps<T>,
@@ -39,12 +47,14 @@ export const Select = forwardRef(function Select<T extends object>(
     <RACSelect
       {...props}
       ref={ref}
-      className={composeRenderProps(className, (resolvedClassName, renderProps) =>
-        cn(
-          "group inline-flex flex-col gap-1.5",
-          renderProps.isDisabled && "cursor-not-allowed opacity-50",
-          resolvedClassName,
-        ),
+      className={composeRenderProps(
+        className,
+        (resolvedClassName, renderProps) =>
+          cn(
+            "group inline-flex flex-col gap-1.5",
+            renderProps.isDisabled && "cursor-not-allowed opacity-50",
+            resolvedClassName,
+          ),
       )}
     >
       {(renderProps) => (
@@ -63,7 +73,7 @@ export const Select = forwardRef(function Select<T extends object>(
 Select.displayName = "Select";
 
 export interface SelectValueProps<T extends object>
-  extends RACSelectValueProps<T> { }
+  extends RACSelectValueProps<T> {}
 
 export const SelectValue = <T extends object>({
   className,
@@ -91,7 +101,10 @@ export const SelectValue = <T extends object>({
       <RACSelectValue
         {...props}
         className={composeRenderProps(className, (resolvedClassName) =>
-          cn("data-placeholder:text-fore-4 whitespace-nowrap", resolvedClassName),
+          cn(
+            "data-placeholder:text-fore-4 whitespace-nowrap",
+            resolvedClassName,
+          ),
         )}
       >
         {children}
@@ -102,7 +115,7 @@ export const SelectValue = <T extends object>({
 
 SelectValue.displayName = "SelectValue";
 
-export interface SelectTriggerProps extends RACButtonProps { }
+export interface SelectTriggerProps extends RACButtonProps {}
 
 export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
   ({ className, children, ...props }: SelectTriggerProps, ref) => {
@@ -123,7 +136,12 @@ export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
           const paddingRight = parseFloat(style.paddingRight) || 0;
           const borderLeft = parseFloat(style.borderLeftWidth) || 0;
           const borderRight = parseFloat(style.borderRightWidth) || 0;
-          const totalWidth = contentWidth + paddingLeft + paddingRight + borderLeft + borderRight;
+          const totalWidth =
+            contentWidth +
+            paddingLeft +
+            paddingRight +
+            borderLeft +
+            borderRight;
           setWidth(totalWidth);
         }
       });
@@ -141,19 +159,23 @@ export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
         <RACButton
           {...props}
           ref={ref}
-          className={composeRenderProps(className, (resolvedClassName, renderProps) =>
-            cn(
-              "group outline-none flex items-center justify-center border border-back-5 bg-back-1 px-4 py-2 cursor-pointer w-full whitespace-nowrap",
-              "data-hovered:bg-back-3 data-focus-visible:ring-2 data-focus-visible:ring-fore-1",
-              renderProps.isDisabled && "cursor-not-allowed opacity-50",
-              renderProps.isPressed && "bg-back-2",
-              resolvedClassName,
-            ),
+          className={composeRenderProps(
+            className,
+            (resolvedClassName, renderProps) =>
+              cn(
+                "group outline-none flex items-center justify-center border border-back-5 bg-back-1 px-4 py-2 cursor-pointer w-full whitespace-nowrap",
+                "data-hovered:bg-back-3 data-focus-visible:ring-2 data-focus-visible:ring-fore-1",
+                renderProps.isDisabled && "cursor-not-allowed opacity-50",
+                renderProps.isPressed && "bg-back-2",
+                resolvedClassName,
+              ),
           )}
         >
           {(renderProps) => (
             <span ref={contentRef} className="inline-flex items-center">
-              {typeof children === "function" ? children(renderProps) : children}
+              {typeof children === "function"
+                ? children(renderProps)
+                : children}
             </span>
           )}
         </RACButton>
@@ -164,7 +186,7 @@ export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
 
 SelectTrigger.displayName = "SelectTrigger";
 
-export interface SelectPopoverProps extends RACPopoverProps { }
+export interface SelectPopoverProps extends RACPopoverProps {}
 
 export const SelectPopover = forwardRef<HTMLElement, SelectPopoverProps>(
   ({ className, children, ...props }: SelectPopoverProps, ref) => {
@@ -172,13 +194,15 @@ export const SelectPopover = forwardRef<HTMLElement, SelectPopoverProps>(
       <RACPopover
         {...props}
         ref={ref}
-        className={composeRenderProps(className, (resolvedClassName, renderProps) =>
-          cn(
-            "z-50 min-w-(--trigger-width) border border-back-5 bg-back-1 p-2 shadow-lg",
-            renderProps.isEntering && "animate-in fade-in-0 zoom-in-95",
-            renderProps.isExiting && "animate-out fade-out-0 zoom-out-95",
-            resolvedClassName,
-          ),
+        className={composeRenderProps(
+          className,
+          (resolvedClassName, renderProps) =>
+            cn(
+              "z-50 min-w-(--trigger-width) border border-back-5 bg-back-1 p-2 shadow-lg",
+              renderProps.isEntering && "animate-in fade-in-0 zoom-in-95",
+              renderProps.isExiting && "animate-out fade-out-0 zoom-out-95",
+              resolvedClassName,
+            ),
         )}
       >
         {children}
@@ -192,7 +216,7 @@ SelectPopover.displayName = "SelectPopover";
 const SelectListBoxContext = createContext<{ layoutId: string } | null>(null);
 
 export interface SelectListBoxProps<T extends object>
-  extends RACListBoxProps<T> { }
+  extends RACListBoxProps<T> {}
 
 export const SelectListBox = forwardRef(function SelectListBox<
   T extends object,
@@ -221,7 +245,7 @@ export const SelectListBox = forwardRef(function SelectListBox<
 
 SelectListBox.displayName = "SelectListBox";
 
-export interface SelectItemProps extends RACListBoxItemProps { }
+export interface SelectItemProps extends RACListBoxItemProps {}
 
 export const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(
   ({ className, children, id, textValue, ...props }, ref) => {
@@ -234,7 +258,9 @@ export const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(
       <RACListBoxItem
         {...props}
         id={id}
-        textValue={textValue ?? (typeof children === "string" ? children : undefined)}
+        textValue={
+          textValue ?? (typeof children === "string" ? children : undefined)
+        }
         ref={ref}
         className={composeRenderProps(className, (resolvedClassName) =>
           cn(
@@ -285,7 +311,7 @@ export const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(
 
 SelectItem.displayName = "SelectItem";
 
-export interface SelectHeaderProps extends RACHeaderProps { }
+export interface SelectHeaderProps extends RACHeaderProps {}
 
 export const SelectHeader = forwardRef<HTMLElement, SelectHeaderProps>(
   ({ className, ...props }: SelectHeaderProps, ref) => {
@@ -293,10 +319,7 @@ export const SelectHeader = forwardRef<HTMLElement, SelectHeaderProps>(
       <RACHeader
         {...props}
         ref={ref}
-        className={cn(
-          "px-2 py-1 text-xs text-fore-3",
-          className,
-        )}
+        className={cn("px-2 py-1 text-xs text-fore-3", className)}
       />
     );
   },
@@ -305,23 +328,22 @@ export const SelectHeader = forwardRef<HTMLElement, SelectHeaderProps>(
 SelectHeader.displayName = "SelectHeader";
 
 export interface SelectSectionProps<T extends object>
-  extends RACListBoxSectionProps<T> { }
+  extends RACListBoxSectionProps<T> {}
 
 export const SelectSection = RACListBoxSection;
 
-export interface SelectSeparatorProps extends RACSeparatorProps { }
+export interface SelectSeparatorProps extends RACSeparatorProps {}
 
-export const SelectSeparator = forwardRef<
-  HTMLDivElement,
-  SelectSeparatorProps
->(({ className, ...props }: SelectSeparatorProps, ref) => {
-  return (
-    <RACSeparator
-      {...props}
-      ref={ref}
-      className={cn("-mx-1 my-1 h-px bg-back-4", className)}
-    />
-  );
-});
+export const SelectSeparator = forwardRef<HTMLDivElement, SelectSeparatorProps>(
+  ({ className, ...props }: SelectSeparatorProps, ref) => {
+    return (
+      <RACSeparator
+        {...props}
+        ref={ref}
+        className={cn("-mx-1 my-1 h-px bg-back-4", className)}
+      />
+    );
+  },
+);
 
 SelectSeparator.displayName = "SelectSeparator";

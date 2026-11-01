@@ -111,11 +111,7 @@ export function ScrollArea<T>({
   }, []);
 
   return (
-    <div
-      ref={hostRef}
-      className={className}
-      style={style}
-    >
+    <div ref={hostRef} className={className} style={style}>
       <div className="contents">
         {hasHeader && <div ref={headerRef}>{header}</div>}
         {virtual && renderItem ? (

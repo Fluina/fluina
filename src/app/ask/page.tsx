@@ -123,9 +123,7 @@ const getChatScrollTarget = (viewport: HTMLElement) => {
     viewport.scrollHeight - viewport.clientHeight,
     0,
   );
-  const lastTurn = viewport.querySelector<HTMLElement>(
-    "[data-chat-last-turn]",
-  );
+  const lastTurn = viewport.querySelector<HTMLElement>("[data-chat-last-turn]");
   if (!lastTurn) return maxScrollTop;
 
   const turnRect = lastTurn.getBoundingClientRect();
@@ -732,7 +730,8 @@ export default function Ask() {
           console.warn("Persistent storage request failed:", error);
         }
 
-        let page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);        const lastMessage = page.messages.at(-1);
+        let page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);
+        const lastMessage = page.messages.at(-1);
         if (lastMessage?.role === "user") {
           try {
             await appendChatMessage({
@@ -941,7 +940,12 @@ export default function Ask() {
     host.addEventListener("scroll", handleScroll, true);
     document.fonts?.ready.then(stick);
 
-    const userEvents = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    const userEvents = [
+      "wheel",
+      "touchstart",
+      "pointerdown",
+      "keydown",
+    ] as const;
     const stopFollowing = () => {
       shouldStickToLatestTurnRef.current = false;
     };

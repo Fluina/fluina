@@ -1,10 +1,10 @@
 import { forwardRef } from "react";
 import {
+  composeRenderProps,
   SwitchButton as RACSwitchButton,
   type SwitchButtonProps as RACSwitchButtonProps,
   SwitchField as RACSwitchField,
   type SwitchFieldProps as RACSwitchFieldProps,
-  composeRenderProps,
 } from "react-aria-components";
 import { cn } from "@/lib/cn";
 
