@@ -1,5 +1,5 @@
 "use client";
-import { type HTMLMotionProps, motion } from "motion/react";
+import type { HTMLMotionProps } from "motion/react";
 import {
   type CSSProperties,
   type ReactElement,
@@ -10,7 +10,6 @@ import {
   useState,
 } from "react";
 import { Virtualizer } from "virtua";
-import { TRANSITION } from "@/lib/motion";
 import {
   type ScrollAxis,
   type UseNativeScrollOptions,
@@ -50,7 +49,6 @@ export function ScrollArea<T>({
   viewportEl,
   className = "",
   style,
-  motionProps,
   virtual = true,
   items = [],
   scroll = {},
@@ -113,13 +111,10 @@ export function ScrollArea<T>({
   }, []);
 
   return (
-    <motion.div
+    <div
       ref={hostRef}
-      layout="position"
-      transition={TRANSITION}
       className={className}
       style={style}
-      {...motionProps}
     >
       <div className="contents">
         {hasHeader && <div ref={headerRef}>{header}</div>}
@@ -143,6 +138,6 @@ export function ScrollArea<T>({
         )}
         {virtual && renderItem && children}
       </div>
-    </motion.div>
+    </div>
   );
 }

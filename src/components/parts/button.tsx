@@ -16,7 +16,7 @@ const buttonVariants = tv({
   variants: {
     shape: {
       default: "",
-      circle: "size-10 flex justify-center items-center",
+      circle: "size-10 flex justify-center items-center rounded-full",
     },
     color: {
       default: "",

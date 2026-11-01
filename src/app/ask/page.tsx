@@ -556,6 +556,7 @@ export default function Ask() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const nativeSmoothScrollCleanupRef = useRef<(() => void) | null>(null);
   const pendingLatestTurnScrollRef = useRef<ChatScrollBehavior | null>(null);
+  const shouldStickToLatestTurnRef = useRef(true);
   const streamedMessageIdsRef = useRef(new Set<string>());
   const pendingCaretRef = useRef<{
     caretTop: number;
@@ -709,6 +710,7 @@ export default function Ask() {
       scrollBehavior: ChatScrollBehavior | null = null,
     ) => {
       if (scrollBehavior) {
+        shouldStickToLatestTurnRef.current = true;
         pendingLatestTurnScrollRef.current = scrollBehavior;
       }
       setMessages(page.messages);
@@ -901,7 +903,10 @@ export default function Ask() {
     if (!host) return;
 
     const stick = () => {
-      if (!nativeSmoothScrollCleanupRef.current) {
+      if (
+        shouldStickToLatestTurnRef.current &&
+        !nativeSmoothScrollCleanupRef.current
+      ) {
         scrollToLatestTurn("instant");
       }
     };
@@ -926,6 +931,7 @@ export default function Ask() {
     const handleScroll = () => {
       const viewport = host;
       if (
+        shouldStickToLatestTurnRef.current &&
         !nativeSmoothScrollCleanupRef.current &&
         Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1
       ) {
@@ -935,36 +941,25 @@ export default function Ask() {
     host.addEventListener("scroll", handleScroll, true);
     document.fonts?.ready.then(stick);
 
-    let frame = 0;
-    const enforce = () => {
-      const viewport = host;
-      if (
-        !nativeSmoothScrollCleanupRef.current &&
-        Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1
-      ) {
-        stick();
-      }
-      frame = requestAnimationFrame(enforce);
+    const userEvents = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    const stopFollowing = () => {
+      shouldStickToLatestTurnRef.current = false;
     };
-    frame = requestAnimationFrame(enforce);
+    for (const type of userEvents) {
+      host.addEventListener(type, stopFollowing, {
+        capture: true,
+        passive: true,
+      });
+    }
 
-    const userEvents = ["wheel", "touchstart", "pointerdown", "keydown"];
-    const stop = () => {
-      cancelAnimationFrame(frame);
+    return () => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
       host.removeEventListener("scroll", handleScroll, true);
-      clearTimeout(timeoutId);
       for (const type of userEvents) {
-        host.removeEventListener(type, stop, true);
+        host.removeEventListener(type, stopFollowing, true);
       }
     };
-    for (const type of userEvents) {
-      host.addEventListener(type, stop, { capture: true, passive: true });
-    }
-    const timeoutId = setTimeout(stop, 3000);
-
-    return stop;
   }, [isInitialChatPositioned, scrollToLatestTurn]);
 
   //  ================================================================
@@ -1762,6 +1757,11 @@ export default function Ask() {
     )
       return;
 
+    if (e.key === "Enter" && !hasInput) {
+      e.preventDefault();
+      return;
+    }
+
     if (isMobileDevice()) return;
 
     if (
@@ -1771,8 +1771,6 @@ export default function Ask() {
       !e.metaKey &&
       !e.altKey
     ) {
-      if (!hasInput) return;
-
       e.preventDefault();
 
       formRef.current?.requestSubmit();
@@ -2135,7 +2133,7 @@ export default function Ask() {
             transition={TRANSITION}
             className="transparency-effect fixed inset-0 p-2 bg-back-0/50 z-1000 pointer-events-none flex items-center justify-center"
           >
-            <div className="animate-pulse flex flex-col gap-2 items-center justify-center size-full border-2 border-dashed border-fore-1">
+            <div className="animate-pulse flex flex-col gap-2 items-center justify-center size-full border-2 border-dashed border-fore-1 rounded-4xl">
               <Paperclip
                 className="text-fore-1 text-shadow-lg animate-bounce"
                 size={64}
@@ -2149,7 +2147,31 @@ export default function Ask() {
         )}
       </AnimatePresence>
 
-      <div className="size-full flex flex-col p-4 items-center max-w-3xl justify-center gap-4">
+      <AnimatePresence initial={false}>
+        {!isInitialChatPositioned && (
+          <motion.output
+            key="initial-chat-loader"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={TRANSITION}
+            className="fixed inset-0 flex items-center justify-center cursor-wait"
+            aria-label="Loading Chat"
+          >
+            <Loader aria-hidden="true" className="animate-spin" />
+          </motion.output>
+        )}
+      </AnimatePresence>
+
+      <motion.div
+        initial={false}
+        animate={{ opacity: isInitialChatPositioned ? 1 : 0 }}
+        transition={{ duration: 0.25, ease: "easeOut" }}
+        style={{
+          visibility: isInitialChatPositioned ? "visible" : "hidden",
+        }}
+        className="size-full flex flex-col p-4 items-center max-w-3xl justify-center gap-4"
+      >
         <LayoutGroup>
           <AnimatePresence mode="popLayout" initial={false}>
             {messages.length === 0 && !isExpanded && (
@@ -2229,7 +2251,6 @@ export default function Ask() {
                 {archiveReady && hasOlderMessages && (
                   <motion.div
                     key="load-older-messages"
-                    layout="position"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -2267,7 +2288,6 @@ export default function Ask() {
               return (
                 <motion.div
                   key={turn[0].id}
-                  layout="position"
                   transition={TRANSITION}
                   data-chat-last-turn={isLastTurn ? "" : undefined}
                   className={`flex flex-col gap-4 ${isLastTurn ? "" : "pb-8"}`}
@@ -2517,7 +2537,6 @@ export default function Ask() {
                 messages.at(-1)?.role === "assistant" && (
                   <motion.div
                     key="assistant-disclaimer"
-                    layout="position"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -2539,7 +2558,7 @@ export default function Ask() {
             ref={formRef}
             layout
             transition={TRANSITION}
-            className={`flex-none grid gap-1 w-full items-center border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip
+            className={`flex-none grid gap-1 w-full items-center border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip rounded-4xl
               ${isExpanded ? "h-full" : "max-h-full"}
               ${
                 hasFiles
@@ -3121,7 +3140,7 @@ export default function Ask() {
             </motion.div>
           </motion.form>
         </LayoutGroup>
-      </div>
+      </motion.div>
     </>
   );
 }
