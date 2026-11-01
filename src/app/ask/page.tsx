@@ -874,6 +874,14 @@ export default function Ask() {
         return;
       }
 
+      const layoutReady = getComputedStyle(
+        document.documentElement,
+      ).getPropertyValue("--fluina-layout-ready");
+      if (layoutReady.trim() !== "1") {
+        frame = requestAnimationFrame(positionInitialChat);
+        return;
+      }
+
       const lastTurn = viewport.querySelector<HTMLElement>(
         "[data-chat-last-turn]",
       );

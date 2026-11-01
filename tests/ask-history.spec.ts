@@ -44,13 +44,11 @@ test("waits for mobile chat layout before revealing the disclaimer", async ({
       }),
   );
   await page.addInitScript(() => {
-    const style = document.createElement("style");
-    style.textContent =
-      "main [data-scroll-edge-fade] { height: 0 !important; }";
-    document.documentElement.append(style);
+    document.documentElement.style.setProperty("--fluina-layout-ready", "0");
     (
       window as Window & { __releaseInitialLayout?: () => void }
-    ).__releaseInitialLayout = () => style.remove();
+    ).__releaseInitialLayout = () =>
+      document.documentElement.style.removeProperty("--fluina-layout-ready");
   });
 
   await page.goto("/ask", { waitUntil: "domcontentloaded" });
