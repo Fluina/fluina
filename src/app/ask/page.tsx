@@ -60,8 +60,8 @@ import {
   saveChatArchiveSummary,
 } from "@/lib/chat-archive";
 import { THEME, TRANSITION } from "@/lib/motion";
+import { useNativeScroll } from "@/lib/native-scroll";
 import { useOS } from "@/lib/os";
-import { useOverlayScroll } from "@/lib/overlayscrollbars";
 
 const PLACEHOLDERS = [
   "Fluinaに訊いてみて！",
@@ -118,7 +118,6 @@ const EMPTY_ASSISTANT_MESSAGE =
 type ChatScrollBehavior = "instant" | "smooth";
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
 
-// 最新ターンの上端をスクロール領域の上端に合わせる
 const getChatScrollTarget = (viewport: HTMLElement) => {
   const maxScrollTop = Math.max(
     viewport.scrollHeight - viewport.clientHeight,
@@ -243,18 +242,13 @@ const hasMathNode = (node: ReactNode, depth = 0): boolean => {
   return depth < 2 && hasMathNode(children, depth + 1);
 };
 
-// 数式を含む段落は overlayscrollbars で横スクロールさせる
 const MarkdownParagraph = ({
   children,
   node: _node,
   ...props
 }: ComponentPropsWithoutRef<"p"> & { node?: unknown }) =>
   hasMathNode(children) ? (
-    <ScrollArea
-      virtual={false}
-      className="max-w-full"
-      overlayScroll={{ axis: "x" }}
-    >
+    <ScrollArea virtual={false} className="max-w-full" scroll={{ axis: "x" }}>
       <p {...props}>{children}</p>
     </ScrollArea>
   ) : (
@@ -545,7 +539,6 @@ export default function Ask() {
   const loadedFirstSequenceRef = useRef<number | null>(null);
   const [archiveReady, setArchiveReady] = useState(false);
   const [isInitialChatPositioned, setIsInitialChatPositioned] = useState(false);
-  // 先頭に過去ログを足す描画の間だけ true にし、仮想リストにスクロール位置を維持させる
   const [isPrependingHistory, setIsPrependingHistory] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<Message | null>(
     null,
@@ -563,7 +556,6 @@ export default function Ask() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const nativeSmoothScrollCleanupRef = useRef<(() => void) | null>(null);
   const pendingLatestTurnScrollRef = useRef<ChatScrollBehavior | null>(null);
-  // ストリーミングから保存済みメッセージへ置き換わるときにフェードを挟まない
   const streamedMessageIdsRef = useRef(new Set<string>());
   const pendingCaretRef = useRef<{
     caretTop: number;
@@ -580,13 +572,9 @@ export default function Ask() {
   const hasInput = value.trim().length > 0;
   const hasFiles = files.length > 0;
 
-  // 最新の会話ターンが表示領域の高さを最低限占有するよう、末尾の余白を動的に算出する
   const updateTailSpacer = useCallback((viewportOverride?: HTMLElement) => {
     const host = chatScrollRef.current;
-    const viewport =
-      viewportOverride ??
-      host?.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
-      host;
+    const viewport = viewportOverride ?? host;
     const spacer = host?.querySelector<HTMLElement>("[data-chat-tail-spacer]");
     if (!viewport || !spacer) return;
 
@@ -595,8 +583,6 @@ export default function Ask() {
       spacer.style.height = "0px";
       return;
     }
-    // 仮想リストのコンテナ高さは測定反映が遅れるため、位置差ではなく実寸の合計で算出する
-    // 退出アニメーション中の要素は absolute になり、レイアウト上の高さを持たないので除外する
     const isInFlow = (el: Element) =>
       getComputedStyle(el).position !== "absolute";
     let used = lastTurn.getBoundingClientRect().height;
@@ -614,18 +600,12 @@ export default function Ask() {
   const scrollToLatestTurn = useCallback(
     (behavior: ChatScrollBehavior, viewportOverride?: HTMLElement) => {
       const chatScrollHost = chatScrollRef.current;
-      const viewport =
-        viewportOverride ??
-        chatScrollHost?.querySelector<HTMLElement>(
-          "[data-overlayscrollbars-viewport]",
-        ) ??
-        chatScrollHost;
+      const viewport = viewportOverride ?? chatScrollHost;
       if (!viewport) return;
 
       nativeSmoothScrollCleanupRef.current?.();
 
       if (behavior === "smooth") {
-        // 仮想リストが新しいターンを測定し直す間(instant scroll で smooth が中断される)を待ってから開始する
         let frame = 0;
         let timeout: ReturnType<typeof setTimeout> | undefined;
         const finish = () => {
@@ -698,14 +678,11 @@ export default function Ask() {
     const host = chatScrollRef.current;
     if (!observer || !host) return;
     observer.disconnect();
-    const viewport =
-      host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
-      host;
+    const viewport = host;
     observer.observe(viewport);
     const lastTurn = host.querySelector<HTMLElement>("[data-chat-last-turn]");
     if (lastTurn) observer.observe(lastTurn);
 
-    // 末尾要素の増減・サイズ変化(退出アニメーション完了による削除を含む)で余白を再計算する
     const spacer = host.querySelector<HTMLElement>("[data-chat-tail-spacer]");
     const siblings = spacer?.parentElement;
     if (siblings) {
@@ -753,9 +730,7 @@ export default function Ask() {
           console.warn("Persistent storage request failed:", error);
         }
 
-        let page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);
-        // 返答待ちのまま再読み込みされた場合、末尾が返答のない質問になるため中断として記録する
-        const lastMessage = page.messages.at(-1);
+        let page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);        const lastMessage = page.messages.at(-1);
         if (lastMessage?.role === "user") {
           try {
             await appendChatMessage({
@@ -766,7 +741,6 @@ export default function Ask() {
               timestamp: Date.now(),
             });
           } catch (error) {
-            // 開発時の二重実行などで同じ通知が既に保存されている場合は無視する
             console.warn("Interrupted notice was not saved:", error);
           }
           page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);
@@ -787,7 +761,7 @@ export default function Ask() {
     };
   }, [applyArchivePage]);
 
-  const { elementRef: scrollRef } = useOverlayScroll<HTMLDivElement>(
+  const { elementRef: scrollRef } = useNativeScroll<HTMLDivElement>(
     {
       axis: "y",
       onScroll: (viewport) => {
@@ -825,7 +799,6 @@ export default function Ask() {
     async (scrollBehavior: ChatScrollBehavior | null = null) => {
       const page = await loadLatestChatTurns(
         CHAT_PAGE_TURN_LIMIT,
-        // 読み込み済みの先頭を保ち、新規ターン追加で最古のターンが外れてスクロール位置がずれるのを防ぐ
         loadedFirstSequenceRef.current,
       );
       applyArchivePage(page, scrollBehavior);
@@ -885,10 +858,7 @@ export default function Ask() {
 
     const positionInitialChat = () => {
       const chatScrollHost = chatScrollRef.current;
-      const viewport =
-        chatScrollHost?.querySelector<HTMLElement>(
-          "[data-overlayscrollbars-viewport]",
-        ) ?? chatScrollHost;
+      const viewport = chatScrollHost;
       if (!viewport) {
         frame = requestAnimationFrame(positionInitialChat);
         return;
@@ -924,14 +894,12 @@ export default function Ask() {
     return () => cancelAnimationFrame(frame);
   }, [archiveReady, isInitialChatPositioned, scrollToLatestTurn]);
 
-  // 初期表示後に遅れて高さが変わっても、ユーザー操作があるまで最新ターンを上端に保つ
   useEffect(() => {
     if (!isInitialChatPositioned) return;
 
     const host = chatScrollRef.current;
     if (!host) return;
 
-    // overlayscrollbars が再生成されても追従できるよう、毎回 viewport を取り直す
     const stick = () => {
       if (!nativeSmoothScrollCleanupRef.current) {
         scrollToLatestTurn("instant");
@@ -942,7 +910,7 @@ export default function Ask() {
       resizeObserver.disconnect();
       resizeObserver.observe(host);
       for (const child of host.querySelectorAll<HTMLElement>(
-        "[data-overlayscrollbars-viewport], [data-chat-last-turn], [data-chat-tail-spacer]",
+        "[data-chat-last-turn], [data-chat-tail-spacer]",
       )) {
         resizeObserver.observe(child);
       }
@@ -955,11 +923,8 @@ export default function Ask() {
     });
     mutationObserver.observe(host, { childList: true, subtree: true });
 
-    // 自動スクロール以外で最下部から外れた(0 への巻き戻し等)場合も戻す
     const handleScroll = () => {
-      const viewport =
-        host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
-        host;
+      const viewport = host;
       if (
         !nativeSmoothScrollCleanupRef.current &&
         Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1
@@ -972,9 +937,7 @@ export default function Ask() {
 
     let frame = 0;
     const enforce = () => {
-      const viewport =
-        host.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
-        host;
+      const viewport = host;
       if (
         !nativeSmoothScrollCleanupRef.current &&
         Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1
@@ -1434,9 +1397,7 @@ export default function Ask() {
 
   const calcTextarea = useCallback(() => {
     const editor = editorRef.current;
-    const scrollContainer =
-      scrollRef.current?.querySelector("[data-overlayscrollbars-viewport]") ||
-      scrollRef.current;
+    const scrollContainer = scrollRef.current;
 
     if (!editor) return;
     const currentScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
@@ -1565,10 +1526,7 @@ export default function Ask() {
 
     const caretTop = caretLine * lineHeight;
 
-    const viewportEl =
-      scrollRef.current?.querySelector<HTMLElement>(
-        "[data-overlayscrollbars-viewport]",
-      ) ?? scrollRef.current;
+    const viewportEl = scrollRef.current;
 
     const clientHeight = viewportEl?.clientHeight ?? 0;
     const scrollTop = viewportEl?.scrollTop ?? scrollTopRef.current;
@@ -1587,10 +1545,9 @@ export default function Ask() {
 
   const filesScrollLeftRef = useRef(0);
 
-  const { elementRef: filesScrollRef } = useOverlayScroll<HTMLDivElement>(
+  const { elementRef: filesScrollRef } = useNativeScroll<HTMLDivElement>(
     {
       axis: "x",
-      enabled: hasFiles,
       onScroll: (viewport) => {
         filesScrollLeftRef.current = viewport.scrollLeft;
       },
@@ -2151,7 +2108,6 @@ export default function Ask() {
     }
     return indexes;
   }, [isExpanded, messageTurns, editingMessageId]);
-  // 保存済みの返答が履歴に入った時点でストリーミング表示を同時に外し、高さの二重計上を防ぐ
   const visibleStreamingMessage =
     streamingMessage &&
     !messages.some((message) => message.id === streamingMessage.id)
@@ -2242,7 +2198,7 @@ export default function Ask() {
 
           <ScrollArea
             scrollRef={chatScrollRef}
-            overlayScroll={{
+            scroll={{
               axis: "y",
               onInit: (viewport) => {
                 const previousOverflowAnchor = viewport.style.overflowAnchor;
@@ -2255,7 +2211,7 @@ export default function Ask() {
                 };
               },
             }}
-            overlayScrollDeps={[archiveReady]}
+            scrollDeps={[archiveReady]}
             className="w-full"
             style={{
               visibility: isInitialChatPositioned ? "visible" : "hidden",
@@ -2263,7 +2219,6 @@ export default function Ask() {
             virtual
             items={isExpanded ? [] : messageTurns}
             virtualConfig={{
-              // 未計測の項目は推定高さで扱われるため、画面外も広めに描画して実寸を早く確定させる
               bufferSize: 4000,
               itemSize: 400,
               shift: isPrependingHistory,
@@ -2324,7 +2279,7 @@ export default function Ask() {
                         <motion.div
                           key={msg.id}
                           data-chat-message-id={msg.id}
-                          data-os-fade-top-anchor=""
+                          data-scroll-fade-top-anchor=""
                           initial={
                             streamedMessageIdsRef.current.has(msg.id)
                               ? false
@@ -2515,7 +2470,7 @@ export default function Ask() {
             {visibleStreamingMessage && !isExpanded && (
               <motion.div
                 key={visibleStreamingMessage.id}
-                data-os-fade-top-anchor=""
+                data-scroll-fade-top-anchor=""
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={TRANSITION}
@@ -2866,7 +2821,7 @@ export default function Ask() {
             <motion.div
               layout="position"
               transition={TRANSITION}
-              className={`relative w-full min-w-0 flex flex-col justify-start items-start ${isExpanded ? "h-full" : "[--os-fade-size:2.5rem]"}
+              className={`relative w-full min-w-0 flex flex-col justify-start items-start ${isExpanded ? "h-full" : "[--scroll-fade-size:2.5rem]"}
               ${
                 hasFiles
                   ? isAdjusted || isExpanded

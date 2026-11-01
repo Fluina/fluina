@@ -1,9 +1,7 @@
 "use client";
-import { ThemeProvider, useTheme } from "next-themes";
-import { useOverlayScrollbars } from "overlayscrollbars-react";
-import { useEffect } from "react";
-import "@/lib/overlayscrollbars";
 import { MotionConfig } from "motion/react";
+import { ThemeProvider, useTheme } from "next-themes";
+import { useEffect } from "react";
 import { PreferencesProvider, usePreferences } from "@/app/preferences";
 
 function ThemeFaviconSync() {
@@ -19,16 +17,6 @@ function ThemeFaviconSync() {
       link.href = faviconHref;
     }
   }, [theme, resolvedTheme]);
-
-  return null;
-}
-
-function BodyOverlayScrollbars() {
-  const [initBodyOverlayScrollbars] = useOverlayScrollbars({ defer: true });
-
-  useEffect(() => {
-    initBodyOverlayScrollbars(document.body);
-  }, [initBodyOverlayScrollbars]);
 
   return null;
 }
@@ -53,7 +41,6 @@ export default function Client({ children }: { children: React.ReactNode }) {
       <PreferencesProvider>
         <MotionPreferences>
           <ThemeFaviconSync />
-          <BodyOverlayScrollbars />
           <main className="size-full overflow-clip flex justify-center items-center pt-[env(safe-area-inset-top,1rem)] pb-[env(safe-area-inset-bottom,1rem)] pl-[env(safe-area-inset-left,1rem)] pr-[env(safe-area-inset-right,1rem)]">
             {children}
           </main>

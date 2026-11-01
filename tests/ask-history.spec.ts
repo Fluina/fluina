@@ -90,16 +90,11 @@ test("chat loads older turns cumulatively without changing the current history",
   }
 
   const chatScroller = page.locator("div.w-full.overflow-y-auto").first();
-  const scrollMetrics = await chatScroller.evaluate((element) => {
-    const viewport =
-      element.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
-      element;
-    return {
-      top: viewport.scrollTop,
-      height: viewport.scrollHeight,
-      clientHeight: viewport.clientHeight,
-    };
-  });
+  const scrollMetrics = await chatScroller.evaluate((element) => ({
+    top: element.scrollTop,
+    height: element.scrollHeight,
+    clientHeight: element.clientHeight,
+  }));
   for (let turn = 1; turn <= 10; turn += 1) {
     const message = page.getByText(`質問${turn + 11}`, { exact: true });
     await expect(message).toBeVisible();
@@ -121,10 +116,7 @@ test("chat loads older turns cumulatively without changing the current history",
   });
   await expect(showOlderButton).toBeVisible();
   await chatScroller.evaluate((element) => {
-    const viewport =
-      element.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
-      element;
-    viewport.scrollTop = 0;
+    element.scrollTop = 0;
   });
   const existingMessage = page.getByText("質問12", { exact: true });
   const existingMessageTop = (await existingMessage.boundingBox())?.y;
@@ -142,10 +134,7 @@ test("chat loads older turns cumulatively without changing the current history",
     .toBeLessThan(32);
 
   await chatScroller.evaluate((element) => {
-    const viewport =
-      element.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
-      element;
-    viewport.scrollTop = 0;
+    element.scrollTop = 0;
   });
   await showOlderButton.click();
   await expect(page.getByText("質問1", { exact: true })).toBeVisible();
@@ -153,10 +142,7 @@ test("chat loads older turns cumulatively without changing the current history",
   await expect(showOlderButton).toHaveCount(0);
 
   await chatScroller.evaluate((element) => {
-    const viewport =
-      element.querySelector<HTMLElement>("[data-overlayscrollbars-viewport]") ??
-      element;
-    viewport.scrollTop = 0;
+    element.scrollTop = 0;
   });
 
   await prompt.fill("過去ページからの質問");
@@ -165,13 +151,10 @@ test("chat loads older turns cumulatively without changing the current history",
   await heldAskStarted;
   await expect
     .poll(() =>
-      chatScroller.evaluate((element) => {
-        const viewport =
-          element.querySelector<HTMLElement>(
-            "[data-overlayscrollbars-viewport]",
-          ) ?? element;
-        return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
-      }),
+      chatScroller.evaluate(
+        (element) =>
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      ),
     )
     .toBeLessThan(5);
   releaseHeldAsk();
@@ -191,13 +174,10 @@ test("chat loads older turns cumulatively without changing the current history",
   await expect(page.getByText("質問12", { exact: true })).toHaveCount(0);
   await expect
     .poll(() =>
-      chatScroller.evaluate((element) => {
-        const viewport =
-          element.querySelector<HTMLElement>(
-            "[data-overlayscrollbars-viewport]",
-          ) ?? element;
-        return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
-      }),
+      chatScroller.evaluate(
+        (element) =>
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      ),
     )
     .toBeLessThan(5);
   await expect(await getLatestMessages()).toEqual([

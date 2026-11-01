@@ -12,13 +12,13 @@ import {
 import { Virtualizer } from "virtua";
 import {
   type ScrollAxis,
-  type UseOverlayScrollOptions,
-  useOverlayScroll,
-} from "@/lib/overlayscrollbars";
+  type UseNativeScrollOptions,
+  useNativeScroll,
+} from "@/lib/native-scroll";
 
-type OverlayScrollConfig =
+type ScrollConfig =
   | false
-  | (Partial<UseOverlayScrollOptions> & { axis?: ScrollAxis });
+  | (Partial<UseNativeScrollOptions> & { axis?: ScrollAxis });
 
 export interface ScrollAreaProps<T> {
   children?: ReactNode;
@@ -29,8 +29,8 @@ export interface ScrollAreaProps<T> {
   motionProps?: HTMLMotionProps<"div">;
   virtual?: boolean;
   items?: T[];
-  overlayScroll?: OverlayScrollConfig;
-  overlayScrollDeps?: unknown[];
+  scroll?: ScrollConfig;
+  scrollDeps?: unknown[];
   header?: ReactNode;
   virtualConfig?: {
     bufferSize?: number;
@@ -52,58 +52,42 @@ export function ScrollArea<T>({
   motionProps,
   virtual = true,
   items = [],
-  overlayScroll = {},
-  overlayScrollDeps = [],
+  scroll = {},
+  scrollDeps = [],
   header,
   virtualConfig,
   renderItem,
 }: ScrollAreaProps<T>) {
   const internalScrollRef = useRef<HTMLDivElement>(null);
   const hostRef = scrollRef ?? internalScrollRef;
-  const [overlayViewport, setOverlayViewport] = useState<HTMLElement | null>(
-    null,
-  );
-  // viewport が作り直されたら Virtualizer も再マウントし、スクロール先を取り直させる
-  const lastViewportRef = useRef<HTMLElement | null>(null);
-  const [viewportGeneration, setViewportGeneration] = useState(0);
   const headerRef = useRef<HTMLDivElement>(null);
   const headerSizeRef = useRef(0);
   const [headerSize, setHeaderSize] = useState(0);
-  const overlayOptions = overlayScroll === false ? {} : overlayScroll;
-  const isOverlayScrollEnabled = overlayScroll !== false;
+  const [viewportGeneration, setViewportGeneration] = useState(0);
+  const scrollOptions = scroll === false ? {} : scroll;
   const {
-    onInit: overlayOnInit,
-    onScroll: overlayOnScroll,
-    ...restOverlayOptions
-  } = overlayOptions;
+    onInit: scrollOnInit,
+    onScroll: scrollOnScroll,
+    ...restScrollOptions
+  } = scrollOptions;
 
-  useOverlayScroll<HTMLDivElement>(
+  useNativeScroll<HTMLDivElement>(
     {
-      axis: restOverlayOptions.axis ?? "y",
-      ...restOverlayOptions,
+      axis: restScrollOptions.axis ?? "y",
+      ...restScrollOptions,
       elementRef: hostRef,
-      enabled: isOverlayScrollEnabled && restOverlayOptions.enabled !== false,
-      onInit: (viewport, instance) => {
-        if (lastViewportRef.current !== viewport) {
-          lastViewportRef.current = viewport;
-          setViewportGeneration((generation) => generation + 1);
-        }
-        setOverlayViewport(viewport);
-        return overlayOnInit?.(viewport, instance);
-      },
-      onScroll: (viewport, instance) => {
-        overlayOnScroll?.(viewport, instance);
-      },
+      onInit: scrollOnInit,
+      onScroll: scrollOnScroll,
     },
-    overlayScrollDeps,
+    scrollDeps,
   );
 
   const viewportScrollRef = useRef<HTMLElement | null>(null);
 
   useLayoutEffect(() => {
-    viewportScrollRef.current =
-      viewportEl ?? overlayViewport ?? hostRef.current;
-  }, [viewportEl, overlayViewport, hostRef]);
+    viewportScrollRef.current = viewportEl ?? hostRef.current;
+    setViewportGeneration((generation) => generation + 1);
+  }, [viewportEl, hostRef]);
 
   const hasHeader = header !== undefined;
 

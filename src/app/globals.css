@@ -163,7 +163,7 @@
 }
 
 [data-transparency="off"] .transparency-effect,
-[data-transparency="off"] .os-edge-blur {
+[data-transparency="off"] .scroll-edge-blur {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
@@ -275,59 +275,55 @@
   }
 }
 
-@property --os-fade-top {
+@property --scroll-fade-top {
   syntax: "<number>";
   inherits: true;
   initial-value: 0;
 }
 
-@property --os-fade-bottom {
+@property --scroll-fade-bottom {
   syntax: "<number>";
   inherits: true;
   initial-value: 0;
 }
 
-@property --os-fade-left {
+@property --scroll-fade-left {
   syntax: "<number>";
   inherits: true;
   initial-value: 0;
 }
 
-@property --os-fade-right {
+@property --scroll-fade-right {
   syntax: "<number>";
   inherits: true;
   initial-value: 0;
-}
-
-[data-overlayscrollbars-viewport] {
-  scroll-behavior: auto;
 }
 
 @media (hover: hover) and (pointer: fine) {
   @supports selector(::-webkit-scrollbar) {
-    :where(*:not([data-overlayscrollbars-viewport])) {
+    :where(*) {
       scrollbar-width: auto;
       scrollbar-color: auto;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar {
+    :where(*)::-webkit-scrollbar {
       width: 0.6rem !important;
       height: 0.6rem !important;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar-track {
+    :where(*)::-webkit-scrollbar-track {
       background: transparent !important;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar-track:vertical {
+    :where(*)::-webkit-scrollbar-track:vertical {
       margin-block: 0.1rem !important;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar-track:horizontal {
+    :where(*)::-webkit-scrollbar-track:horizontal {
       margin-inline: 0.1rem !important;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar-thumb {
+    :where(*)::-webkit-scrollbar-thumb {
       background-color: color-mix(
         in srgb,
         var(--color-fore-2) 50%,
@@ -336,15 +332,15 @@
       background-clip: content-box !important;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar-thumb:vertical {
+    :where(*)::-webkit-scrollbar-thumb:vertical {
       border-inline: 0.1rem solid transparent !important;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar-thumb:horizontal {
+    :where(*)::-webkit-scrollbar-thumb:horizontal {
       border-block: 0.1rem solid transparent !important;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar-thumb:hover {
+    :where(*)::-webkit-scrollbar-thumb:hover {
       background-color: color-mix(
         in srgb,
         var(--color-fore-4) 50%,
@@ -352,7 +348,7 @@
       ) !important;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar-thumb:active {
+    :where(*)::-webkit-scrollbar-thumb:active {
       background-color: color-mix(
         in srgb,
         var(--color-fore-3) 50%,
@@ -360,7 +356,7 @@
       ) !important;
     }
 
-    :where(*:not([data-overlayscrollbars-viewport]))::-webkit-scrollbar-button {
+    :where(*)::-webkit-scrollbar-button {
       display: none !important;
       width: 0 !important;
       height: 0 !important;
@@ -368,7 +364,7 @@
   }
 
   @supports not selector(::-webkit-scrollbar) {
-    :where(*:not([data-overlayscrollbars-viewport])) {
+    :where(*) {
       scrollbar-width: thin;
       scrollbar-color: color-mix(in srgb, var(--color-fore-2) 50%, transparent)
         transparent;
@@ -376,136 +372,120 @@
   }
 }
 
-.os-theme {
-  --os-size: 0.6rem;
-  --os-padding-perpendicular: 0.1rem;
-  --os-padding-axis: 0.1rem;
-  --os-track-bg: transparent;
-  --os-handle-min-size: 1rem;
-  --os-handle-perpendicular-size: 0.3rem;
-  --os-handle-perpendicular-size-hover: 0.5rem;
-  --os-handle-perpendicular-size-active: 0.4rem;
-  --os-handle-bg: color-mix(in srgb, var(--color-fore-2) 50%, transparent);
-  --os-handle-bg-hover: color-mix(in srgb, var(--color-fore-4) 50%, transparent);
-  --os-handle-bg-active: color-mix(
-    in srgb,
-    var(--color-fore-3) 50%,
-    transparent
-  );
-}
-
-.os-theme .os-scrollbar-handle {
-  transition-property: opacity, background-color, width, height;
-  transition-duration: calc(var(--transition-duration) * 0.5);
-  transition-timing-function: var(--transition-timing-function);
-}
-
 :root {
-  --os-fade-size: 5rem;
+  --scroll-fade-size: 5rem;
 }
 
-[data-os-edge-fade] {
-  --os-fade-min-alpha: 0;
-  --os-fade-top: 0;
-  --os-fade-bottom: 0;
-  --os-fade-left: 0;
-  --os-fade-right: 0;
+[data-scroll-edge-fade] {
+  --scroll-fade-min-alpha: 0;
+  --scroll-fade-top: 0;
+  --scroll-fade-bottom: 0;
+  --scroll-fade-left: 0;
+  --scroll-fade-right: 0;
 
   position: relative;
 }
 
-[data-os-edge-fade] > [data-overlayscrollbars-viewport],
-[data-os-edge-fade][data-os-native-scroll] {
+[data-scroll-edge-fade] {
   mask-image:
     linear-gradient(
       to bottom,
-      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))
+      rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
+      var(--color-back-0) calc(var(--scroll-fade-top) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to top,
-      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))
+      rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
+      var(--color-back-0) calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to right,
-      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))
+      rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
+      var(--color-back-0) calc(var(--scroll-fade-left) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to left,
-      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size))
+      rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
+      var(--color-back-0) calc(var(--scroll-fade-right) * var(--scroll-fade-size))
     );
   mask-composite: intersect;
 
   -webkit-mask-image:
     linear-gradient(
       to bottom,
-      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--os-fade-top) * var(--os-fade-size))
+      rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
+      var(--color-back-0) calc(var(--scroll-fade-top) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to top,
-      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--os-fade-bottom) * var(--os-fade-size))
+      rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
+      var(--color-back-0) calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to right,
-      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--os-fade-left) * var(--os-fade-size))
+      rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
+      var(--color-back-0) calc(var(--scroll-fade-left) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to left,
-      rgb(0 0 0 / var(--os-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--os-fade-right) * var(--os-fade-size))
+      rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
+      var(--color-back-0) calc(var(--scroll-fade-right) * var(--scroll-fade-size))
     );
   -webkit-mask-composite: source-in;
 
   transition:
-    --os-fade-top var(--transition-duration) var(--transition-timing-function),
-    --os-fade-bottom var(--transition-duration) var(--transition-timing-function),
-    --os-fade-left var(--transition-duration) var(--transition-timing-function),
-    --os-fade-right var(--transition-duration) var(--transition-timing-function);
+    --scroll-fade-top var(--transition-duration) var(--transition-timing-function),
+    --scroll-fade-bottom var(--transition-duration) var(--transition-timing-function),
+    --scroll-fade-left var(--transition-duration) var(--transition-timing-function),
+    --scroll-fade-right var(--transition-duration) var(--transition-timing-function);
 }
 
-[data-os-fade-cursor="row"],
-[data-os-fade-cursor="row"] * {
+[data-scroll-fade-cursor="row"],
+[data-scroll-fade-cursor="row"] * {
   cursor: row-resize !important;
 }
 
-[data-os-fade-cursor="col"],
-[data-os-fade-cursor="col"] * {
+[data-scroll-fade-cursor="col"],
+[data-scroll-fade-cursor="col"] * {
   cursor: col-resize !important;
 }
 
-[data-os-edge-fade]:not([data-os-native-scroll]) .os-scrollbar {
-  z-index: 11;
-}
-
-.os-edge-blur {
+.scroll-edge-blur {
   @apply absolute z-10 pointer-events-none;
   -webkit-backdrop-filter: blur(var(--blur-xs));
   backdrop-filter: blur(var(--blur-xs));
 
   mask-image:
-    linear-gradient(to bottom, var(--color-back-0) 0, transparent calc(var(--os-fade-top) * var(--os-fade-size))),
-    linear-gradient(to top, var(--color-back-0) 0, transparent calc(var(--os-fade-bottom) * var(--os-fade-size))),
-    linear-gradient(to right, var(--color-back-0) 0, transparent calc(var(--os-fade-left) * var(--os-fade-size))),
-    linear-gradient(to left, var(--color-back-0) 0, transparent calc(var(--os-fade-right) * var(--os-fade-size)));
+    linear-gradient(to bottom, var(--color-back-0) 0, transparent calc(var(--scroll-fade-top) * var(--scroll-fade-size))),
+    linear-gradient(to top, var(--color-back-0) 0, transparent calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))),
+    linear-gradient(to right, var(--color-back-0) 0, transparent calc(var(--scroll-fade-left) * var(--scroll-fade-size))),
+    linear-gradient(to left, var(--color-back-0) 0, transparent calc(var(--scroll-fade-right) * var(--scroll-fade-size)));
   mask-composite: add;
 
   -webkit-mask-image:
-    linear-gradient(to bottom, var(--color-back-0) 0, transparent calc(var(--os-fade-top) * var(--os-fade-size))),
-    linear-gradient(to top, var(--color-back-0) 0, transparent calc(var(--os-fade-bottom) * var(--os-fade-size))),
-    linear-gradient(to right, var(--color-back-0) 0, transparent calc(var(--os-fade-left) * var(--os-fade-size))),
-    linear-gradient(to left, var(--color-back-0) 0, transparent calc(var(--os-fade-right) * var(--os-fade-size)));
+    linear-gradient(to bottom, var(--color-back-0) 0, transparent calc(var(--scroll-fade-top) * var(--scroll-fade-size))),
+    linear-gradient(to top, var(--color-back-0) 0, transparent calc(var(--scroll-fade-bottom) * var(--scroll-fade-size))),
+    linear-gradient(to right, var(--color-back-0) 0, transparent calc(var(--scroll-fade-left) * var(--scroll-fade-size))),
+    linear-gradient(to left, var(--color-back-0) 0, transparent calc(var(--scroll-fade-right) * var(--scroll-fade-size)));
   -webkit-mask-composite: source-over;
 }
 
-body.os-interacting,
-body.os-interacting * {
-  pointer-events: none;
-  user-select: none;
-  -webkit-user-select: none;
+.scroll-edge-ripple[data-edge="top"] {
+  mask-image: linear-gradient(to bottom, black, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+}
+
+.scroll-edge-ripple[data-edge="bottom"] {
+  mask-image: linear-gradient(to top, black, transparent);
+  -webkit-mask-image: linear-gradient(to top, black, transparent);
+}
+
+.scroll-edge-ripple[data-edge="left"] {
+  mask-image: linear-gradient(to right, black, transparent);
+  -webkit-mask-image: linear-gradient(to right, black, transparent);
+}
+
+.scroll-edge-ripple[data-edge="right"] {
+  mask-image: linear-gradient(to left, black, transparent);
+  -webkit-mask-image: linear-gradient(to left, black, transparent);
 }

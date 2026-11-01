@@ -3,7 +3,6 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata, Viewport } from "next";
 import "katex/dist/katex.min.css";
-import "overlayscrollbars/overlayscrollbars.css";
 import "./globals.css";
 import Client from "@/app/client";
 import {

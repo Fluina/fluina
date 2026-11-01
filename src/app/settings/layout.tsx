@@ -16,7 +16,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Button } from "@/components/parts";
 import { TRANSITION } from "@/lib/motion";
-import { useOverlayScroll } from "@/lib/overlayscrollbars";
+import { useNativeScroll } from "@/lib/native-scroll";
 
 const settingsItems = {
     title: "システム",
@@ -35,10 +35,10 @@ const settingsItems = {
 export default function SettingsLayout({ children }: LayoutProps<"/settings">) {
     const pathname = usePathname();
     const router = useRouter();
-    const { elementRef: sidebarScrollRef } = useOverlayScroll<HTMLDivElement>({
+    const { elementRef: sidebarScrollRef } = useNativeScroll<HTMLDivElement>({
         axis: "y",
     });
-    const { elementRef: contentScrollRef } = useOverlayScroll<HTMLDivElement>({
+    const { elementRef: contentScrollRef } = useNativeScroll<HTMLDivElement>({
         axis: "y",
     });
     const settingsNavigationRef = useRef<HTMLDivElement>(null);
