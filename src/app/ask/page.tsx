@@ -946,7 +946,14 @@ export default function Ask() {
       }
     };
     host.addEventListener("scroll", handleScroll, true);
-    document.fonts?.ready.then(stick);
+    document.fonts?.ready.then(() => {
+      if (
+        shouldStickToLatestTurnRef.current &&
+        !nativeSmoothScrollCleanupRef.current
+      ) {
+        scrollToLatestTurn("smooth");
+      }
+    });
 
     const userEvents = [
       "wheel",
