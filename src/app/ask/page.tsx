@@ -60,8 +60,8 @@ import {
   saveChatArchiveSummary,
 } from "@/lib/chat-archive";
 import { THEME, TRANSITION } from "@/lib/motion";
-import { useNativeScroll } from "@/lib/native-scroll";
 import { useOS } from "@/lib/os";
+import { useNativeScroll } from "@/lib/scrollbar";
 
 const PLACEHOLDERS = [
   "Fluinaに訊いてみて！",
@@ -568,7 +568,7 @@ export default function Ask() {
     typeof setTimeout
   > | null>(null);
 
-  const hasText = value.length > 0;
+  const hasText = value.trim().length > 0;
   const hasInput = value.trim().length > 0;
   const hasFiles = files.length > 0;
 
@@ -2228,7 +2228,8 @@ export default function Ask() {
               <AnimatePresence mode="popLayout" initial={false}>
                 {archiveReady && hasOlderMessages && (
                   <motion.div
-                    key="older-messages-button"
+                    key="load-older-messages"
+                    layout="position"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -2266,6 +2267,8 @@ export default function Ask() {
               return (
                 <motion.div
                   key={turn[0].id}
+                  layout="position"
+                  transition={TRANSITION}
                   data-chat-last-turn={isLastTurn ? "" : undefined}
                   className={`flex flex-col gap-4 ${isLastTurn ? "" : "pb-8"}`}
                 >
@@ -2888,12 +2891,7 @@ export default function Ask() {
                   ref={editorRef}
                   onInput={(e) => {
                     const rawText = e.currentTarget.innerText;
-
-                    if (rawText === "\n" || rawText === "\r\n") {
-                      setValue("");
-                    } else {
-                      setValue(rawText);
-                    }
+                    setValue(rawText.trim() ? rawText : "");
                   }}
                   onKeyDown={handleTextareaKeyDown}
                   onPaste={pastePlainText}

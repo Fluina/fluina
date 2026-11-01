@@ -16,7 +16,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { Button } from "@/components/parts";
 import { TRANSITION } from "@/lib/motion";
-import { useNativeScroll } from "@/lib/native-scroll";
+import { useNativeScroll } from "@/lib/scrollbar";
 
 const settingsItems = {
     title: "システム",

@@ -10,11 +10,12 @@ import {
   useState,
 } from "react";
 import { Virtualizer } from "virtua";
+import { TRANSITION } from "@/lib/motion";
 import {
   type ScrollAxis,
   type UseNativeScrollOptions,
   useNativeScroll,
-} from "@/lib/native-scroll";
+} from "@/lib/scrollbar";
 
 type ScrollConfig =
   | false
@@ -91,7 +92,6 @@ export function ScrollArea<T>({
 
   const hasHeader = header !== undefined;
 
-  // header は Virtualizer の外にあるため、高さを startMargin として伝える
   useLayoutEffect(() => {
     const el = headerRef.current;
     if (!el) return;
@@ -102,7 +102,6 @@ export function ScrollArea<T>({
       headerSizeRef.current = next;
       setHeaderSize(next);
 
-      // header の増減で内容が動かないよう、スクロール位置を補正する
       const scroller = viewportScrollRef.current;
       if (scroller && delta !== 0 && scroller.scrollTop > 0) {
         scroller.scrollTop += delta;
@@ -116,6 +115,8 @@ export function ScrollArea<T>({
   return (
     <motion.div
       ref={hostRef}
+      layout="position"
+      transition={TRANSITION}
       className={className}
       style={style}
       {...motionProps}
