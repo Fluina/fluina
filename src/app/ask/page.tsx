@@ -861,9 +861,10 @@ export default function Ask() {
 
     let frame = 0;
     let stableFrames = 0;
-    let previousHeight = -1;
-    let previousClientHeight = -1;
+    let previousLayout = "";
     let previousViewport: HTMLElement | null = null;
+    const latestMessageRole = messages.at(-1)?.role;
+    const expectsDisclaimer = !isLoading && latestMessageRole === "assistant";
 
     const positionInitialChat = () => {
       const chatScrollHost = chatScrollRef.current;
@@ -873,22 +874,43 @@ export default function Ask() {
         return;
       }
 
+      const lastTurn = viewport.querySelector<HTMLElement>(
+        "[data-chat-last-turn]",
+      );
+      const disclaimer = viewport.querySelector<HTMLElement>(
+        "[data-chat-disclaimer]",
+      );
+      if (
+        viewport.clientHeight === 0 ||
+        (messages.length > 0 && !lastTurn) ||
+        (expectsDisclaimer && !disclaimer)
+      ) {
+        frame = requestAnimationFrame(positionInitialChat);
+        return;
+      }
+
       scrollToLatestTurn("instant", viewport);
 
       const isAtBottom =
         Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) <= 1;
+      const layout = [
+        viewport.clientHeight,
+        viewport.scrollHeight,
+        lastTurn?.getBoundingClientRect().height ?? 0,
+        disclaimer?.getBoundingClientRect().height ?? 0,
+        viewport.querySelector<HTMLElement>("[data-chat-tail-spacer]")?.style
+          .height ?? "",
+      ].join("/");
       if (
         isAtBottom &&
         viewport === previousViewport &&
-        viewport.scrollHeight === previousHeight &&
-        viewport.clientHeight === previousClientHeight
+        layout === previousLayout
       ) {
         stableFrames += 1;
       } else {
         stableFrames = 0;
         previousViewport = viewport;
-        previousHeight = viewport.scrollHeight;
-        previousClientHeight = viewport.clientHeight;
+        previousLayout = layout;
       }
 
       if (stableFrames >= 2) {
@@ -899,15 +921,17 @@ export default function Ask() {
       frame = requestAnimationFrame(positionInitialChat);
     };
 
-    let active = true;
-    document.fonts.ready.then(() => {
-      if (active) frame = requestAnimationFrame(positionInitialChat);
-    });
+    frame = requestAnimationFrame(positionInitialChat);
     return () => {
-      active = false;
       cancelAnimationFrame(frame);
     };
-  }, [archiveReady, isInitialChatPositioned, scrollToLatestTurn]);
+  }, [
+    archiveReady,
+    isInitialChatPositioned,
+    isLoading,
+    messages,
+    scrollToLatestTurn,
+  ]);
 
   useEffect(() => {
     if (!isInitialChatPositioned) return;
@@ -2606,6 +2630,7 @@ export default function Ask() {
                 {!isLoading && messages.at(-1)?.role === "assistant" && (
                   <motion.div
                     key="assistant-disclaimer"
+                    data-chat-disclaimer=""
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}

@@ -1,63 +1,59 @@
 import { expect, test } from "@playwright/test";
 
-test("positions a mobile chat before revealing the disclaimer", async ({
+test("waits for mobile chat layout before revealing the disclaimer", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.addInitScript(() => {
-    const fontSet = document.fonts;
-    let resolveFonts: (fonts: FontFaceSet) => void = () => {};
-    Object.defineProperty(fontSet, "ready", {
-      configurable: true,
-      value: new Promise<FontFaceSet>((resolve) => {
-        resolveFonts = resolve;
+  await page.goto("/");
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("fluina-chat-archive", 1);
+        request.onupgradeneeded = () => {
+          const database = request.result;
+          const messages = database.createObjectStore("messages", {
+            keyPath: "sequence",
+            autoIncrement: true,
+          });
+          messages.createIndex("id", "id", { unique: true });
+          database.createObjectStore("metadata", { keyPath: "key" });
+        };
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction("messages", "readwrite");
+          const messages = transaction.objectStore("messages");
+          messages.add({
+            id: "startup-user",
+            role: "user",
+            content: "Startup question",
+            timestamp: 1,
+          });
+          messages.add({
+            id: "startup-assistant",
+            role: "assistant",
+            content: "Startup answer",
+            timestamp: 2,
+          });
+          transaction.oncomplete = () => {
+            database.close();
+            resolve();
+          };
+          transaction.onerror = () => reject(transaction.error);
+        };
       }),
-    });
+  );
+  await page.addInitScript(() => {
+    const style = document.createElement("style");
+    style.textContent =
+      "main [data-scroll-edge-fade] { height: 0 !important; }";
+    document.documentElement.append(style);
     (
-      window as Window & { __releaseInitialFonts?: () => void }
-    ).__releaseInitialFonts = () => resolveFonts(fontSet);
-
-    const request = indexedDB.open("fluina-chat-archive", 1);
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      const messages = database.createObjectStore("messages", {
-        keyPath: "sequence",
-        autoIncrement: true,
-      });
-      messages.createIndex("id", "id", { unique: true });
-      database.createObjectStore("metadata", { keyPath: "key" });
-    };
-    request.onsuccess = () => {
-      const database = request.result;
-      const transaction = database.transaction("messages", "readwrite");
-      const messages = transaction.objectStore("messages");
-      messages.add({
-        id: "startup-user",
-        role: "user",
-        content: "Startup question",
-        timestamp: 1,
-      });
-      messages.add({
-        id: "startup-assistant",
-        role: "assistant",
-        content: "Startup answer",
-        timestamp: 2,
-      });
-      transaction.oncomplete = () => {
-        document.documentElement.dataset.archiveSeeded = "true";
-        database.close();
-      };
-    };
+      window as Window & { __releaseInitialLayout?: () => void }
+    ).__releaseInitialLayout = () => style.remove();
   });
 
   await page.goto("/ask", { waitUntil: "domcontentloaded" });
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () => document.documentElement.dataset.archiveSeeded === "true",
-      ),
-    )
-    .toBe(true);
 
   const disclaimer = page
     .getByRole("main")
@@ -68,8 +64,8 @@ test("positions a mobile chat before revealing the disclaimer", async ({
 
   await page.evaluate(() => {
     (
-      window as Window & { __releaseInitialFonts?: () => void }
-    ).__releaseInitialFonts?.();
+      window as Window & { __releaseInitialLayout?: () => void }
+    ).__releaseInitialLayout?.();
   });
 
   await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
