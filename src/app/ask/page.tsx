@@ -899,8 +899,14 @@ export default function Ask() {
       frame = requestAnimationFrame(positionInitialChat);
     };
 
-    frame = requestAnimationFrame(positionInitialChat);
-    return () => cancelAnimationFrame(frame);
+    let active = true;
+    document.fonts.ready.then(() => {
+      if (active) frame = requestAnimationFrame(positionInitialChat);
+    });
+    return () => {
+      active = false;
+      cancelAnimationFrame(frame);
+    };
   }, [archiveReady, isInitialChatPositioned, scrollToLatestTurn]);
 
   useEffect(() => {
@@ -946,15 +952,6 @@ export default function Ask() {
       }
     };
     host.addEventListener("scroll", handleScroll, true);
-    document.fonts?.ready.then(() => {
-      if (
-        shouldStickToLatestTurnRef.current &&
-        !nativeSmoothScrollCleanupRef.current
-      ) {
-        scrollToLatestTurn("smooth");
-      }
-    });
-
     const userEvents = [
       "wheel",
       "touchstart",

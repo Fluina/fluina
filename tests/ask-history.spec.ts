@@ -1,5 +1,97 @@
 import { expect, test } from "@playwright/test";
 
+test("positions a mobile chat before revealing the disclaimer", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    const fontSet = document.fonts;
+    let resolveFonts: (fonts: FontFaceSet) => void = () => {};
+    Object.defineProperty(fontSet, "ready", {
+      configurable: true,
+      value: new Promise<FontFaceSet>((resolve) => {
+        resolveFonts = resolve;
+      }),
+    });
+    (
+      window as Window & { __releaseInitialFonts?: () => void }
+    ).__releaseInitialFonts = () => resolveFonts(fontSet);
+
+    const request = indexedDB.open("fluina-chat-archive", 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      const messages = database.createObjectStore("messages", {
+        keyPath: "sequence",
+        autoIncrement: true,
+      });
+      messages.createIndex("id", "id", { unique: true });
+      database.createObjectStore("metadata", { keyPath: "key" });
+    };
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction("messages", "readwrite");
+      const messages = transaction.objectStore("messages");
+      messages.add({
+        id: "startup-user",
+        role: "user",
+        content: "Startup question",
+        timestamp: 1,
+      });
+      messages.add({
+        id: "startup-assistant",
+        role: "assistant",
+        content: "Startup answer",
+        timestamp: 2,
+      });
+      transaction.oncomplete = () => {
+        document.documentElement.dataset.archiveSeeded = "true";
+        database.close();
+      };
+    };
+  });
+
+  await page.goto("/ask", { waitUntil: "domcontentloaded" });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.dataset.archiveSeeded === "true",
+      ),
+    )
+    .toBe(true);
+
+  const disclaimer = page
+    .getByRole("main")
+    .locator("p")
+    .filter({ hasText: "回答はAIによって書かれている" });
+  await expect(page.getByLabel("Loading Chat")).toBeVisible();
+  await expect(disclaimer).toBeHidden();
+
+  await page.evaluate(() => {
+    (
+      window as Window & { __releaseInitialFonts?: () => void }
+    ).__releaseInitialFonts?.();
+  });
+
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await expect(disclaimer).toBeVisible();
+  await expect(
+    page.getByText("Startup question", { exact: true }),
+  ).toBeVisible();
+
+  const alignment = await page
+    .locator("main [data-scroll-edge-fade].overflow-y-auto")
+    .first()
+    .evaluate((viewport) => {
+      const lastTurn = viewport.querySelector("[data-chat-last-turn]");
+      if (!lastTurn) return Number.POSITIVE_INFINITY;
+      return Math.abs(
+        lastTurn.getBoundingClientRect().top -
+          viewport.getBoundingClientRect().top,
+      );
+    });
+  expect(alignment).toBeLessThan(2);
+});
+
 test("chat loads older turns cumulatively without changing the current history", async ({
   page,
 }) => {
