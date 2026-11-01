@@ -1,5 +1,4 @@
 "use client";
-import type { HTMLMotionProps } from "motion/react";
 import {
   type CSSProperties,
   type ReactElement,
@@ -26,7 +25,6 @@ export interface ScrollAreaProps<T> {
   viewportEl?: HTMLElement | null;
   className?: string;
   style?: CSSProperties;
-  motionProps?: HTMLMotionProps<"div">;
   virtual?: boolean;
   items?: T[];
   scroll?: ScrollConfig;

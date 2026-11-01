@@ -86,16 +86,12 @@ export const SelectValue = <T extends object>({
 
   return (
     <motion.span
-      // selectedKey が変わるたびに要素を張り替え、対応する SelectItem 側の
-      // 同じ layoutId から/へ FLIP アニメーションでモーフさせる
       layoutId={
         morphContext && selectedKey != null
           ? `${morphContext.groupId}-${selectedKey}`
           : undefined
       }
-      // デバッグ用: 動作確認のため一時的に1.2秒へ引き延ばしている
-      // (動作確認できたら transition={TRANSITION} に戻す)
-      transition={{ duration: 1.2, ease: "easeInOut" }}
+      transition={TRANSITION}
       className="inline-flex"
     >
       <RACSelectValue
@@ -274,8 +270,6 @@ export const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(
             (renderProps.isHovered || renderProps.isFocused) &&
             !renderProps.isDisabled;
 
-          // 選択中のアイテムだけ SelectValue と同じ layoutId を持たせることで、
-          // 選択操作時にこのオプションがトリガー側の表示位置までモーフする
           const valueLayoutId =
             renderProps.isSelected && morphContext && id != null
               ? `${morphContext.groupId}-${id}`
@@ -293,8 +287,7 @@ export const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(
 
               <motion.span
                 layoutId={valueLayoutId}
-                // デバッグ用: 動作確認のため一時的に1.2秒へ引き延ばしている
-                transition={{ duration: 1.2, ease: "easeInOut" }}
+                transition={TRANSITION}
                 className="relative z-10 flex w-full items-center"
               >
                 {typeof children === "function"

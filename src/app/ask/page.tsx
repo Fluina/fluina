@@ -567,6 +567,14 @@ export default function Ask() {
     typeof setTimeout
   > | null>(null);
 
+  const collapseComposer = useCallback(() => {
+    setIsExpanded(false);
+  }, []);
+
+  const toggleComposerExpanded = useCallback(() => {
+    setIsExpanded((expanded) => !expanded);
+  }, []);
+
   const hasText = value.trim().length > 0;
   const hasInput = value.trim().length > 0;
   const hasFiles = files.length > 0;
@@ -1278,7 +1286,7 @@ export default function Ask() {
     if (editorRef.current) editorRef.current.innerText = "";
     setIsAdjusted(false);
     setIsScrollable(false);
-    setIsExpanded(false);
+    collapseComposer();
     setFiles([]);
 
     if (typeof window !== "undefined" && !navigator.onLine) {
@@ -1430,38 +1438,49 @@ export default function Ask() {
       singleLineWidthRef.current = editor.getBoundingClientRect().width;
     }
 
-    const originalWidth = editor.style.width;
+    const editorWidth = editor.getBoundingClientRect().width;
+    const measurement = editor.cloneNode(true) as HTMLDivElement;
+    measurement.removeAttribute("id");
+    measurement.setAttribute("aria-hidden", "true");
+    measurement.contentEditable = "false";
+    measurement.style.position = "absolute";
+    measurement.style.left = "-10000px";
+    measurement.style.top = "0";
+    measurement.style.visibility = "hidden";
+    measurement.style.height = "auto";
+    measurement.style.maxHeight = "none";
+    measurement.style.width = `${
+      isAdjusted && singleLineWidthRef.current > 0
+        ? singleLineWidthRef.current
+        : editorWidth
+    }px`;
+    editor.after(measurement);
 
-    if (isAdjusted && singleLineWidthRef.current > 0) {
-      editor.style.width = `${singleLineWidthRef.current}px`;
-    }
-
-    editor.style.height = "auto";
-
-    const checkHeight = editor.scrollHeight;
-
-    if (isAdjusted && singleLineWidthRef.current > 0) {
-      editor.style.width = originalWidth;
-    }
+    const checkHeight = measurement.scrollHeight;
+    measurement.style.width = `${editorWidth}px`;
+    const nextHeight = Math.max(
+      singleLineRef.current,
+      measurement.scrollHeight,
+    );
+    measurement.remove();
 
     const nextIsAdjusted = checkHeight > singleLineRef.current;
 
     if (nextIsAdjusted !== isAdjusted) {
       setIsAdjusted(nextIsAdjusted);
-    } else {
-      editor.style.height = `${editor.scrollHeight}px`;
     }
+    editor.style.height = `${nextHeight}px`;
 
     const MAX_LINES = 5;
     const maxScrollHeight = singleLineRef.current * MAX_LINES;
-    const nextIsScrollable = editor.scrollHeight >= maxScrollHeight;
+    const nextIsScrollable = nextHeight >= maxScrollHeight;
 
     if (nextIsScrollable !== isScrollable) {
       setIsScrollable(nextIsScrollable);
     }
 
     if (!nextIsScrollable && isExpanded) {
-      setIsExpanded(false);
+      collapseComposer();
     }
 
     if (scrollContainer) {
@@ -1473,7 +1492,7 @@ export default function Ask() {
         scrollContainer.scrollTop = currentScrollTop;
       }
     }
-  }, [isAdjusted, isScrollable, isExpanded, scrollRef]);
+  }, [collapseComposer, isAdjusted, isScrollable, isExpanded, scrollRef]);
 
   useLayoutEffect(() => {
     if (value === undefined) return;
@@ -1948,7 +1967,7 @@ export default function Ask() {
           e.preventDefault();
           setValue("");
           if (editorRef.current) editorRef.current.innerText = "";
-          setIsExpanded(false);
+          collapseComposer();
 
           editorRef.current?.focus();
 
@@ -1959,7 +1978,7 @@ export default function Ask() {
           e.preventDefault();
           if (isScrollable || isExpanded) {
             captureCaretPosition();
-            setIsExpanded((prev) => !prev);
+            toggleComposerExpanded();
           }
           return;
         }
@@ -2010,6 +2029,8 @@ export default function Ask() {
     isExpanded,
     hasInput,
     captureCaretPosition,
+    toggleComposerExpanded,
+    collapseComposer,
     handleClearFiles,
     handlePasteClipboardAsFile,
   ]);
@@ -2046,7 +2067,7 @@ export default function Ask() {
   const handleClearText = () => {
     setValue("");
     setIsAdjusted(false);
-    setIsExpanded(false);
+    collapseComposer();
 
     if (editorRef.current) {
       editorRef.current.innerText = "";
@@ -2131,12 +2152,16 @@ export default function Ask() {
       : null;
   const loadingMessage = (
     <motion.div
-      key="assistant-loading"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="p-4 bg-back-2 border border-back-5 self-start animate-pulse"
+      key="assistant-responding"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={TRANSITION}
+      className="p-4 animate-pulse cursor-wait"
     >
-      <p>Fluinaが考えています...</p>
+      <output aria-label="Responding to the message">
+        <Loader aria-hidden="true" className="animate-spin" />
+      </output>
     </motion.div>
   );
 
@@ -2145,6 +2170,7 @@ export default function Ask() {
       <AnimatePresence mode="popLayout" initial={false}>
         {isDragOver && (
           <motion.div
+            key="drag-over"
             initial={{ opacity: 0, backdropFilter: "blur(0)" }}
             animate={{ opacity: 1, backdropFilter: "blur(1rem)" }}
             exit={{ opacity: 0, backdropFilter: "blur(0)" }}
@@ -2168,7 +2194,7 @@ export default function Ask() {
       <AnimatePresence initial={false}>
         {!isInitialChatPositioned && (
           <motion.output
-            key="initial-chat-loader"
+            key="chat-loading"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -2182,9 +2208,10 @@ export default function Ask() {
       </AnimatePresence>
 
       <motion.div
+        key="chat-container"
         initial={false}
         animate={{ opacity: isInitialChatPositioned ? 1 : 0 }}
-        transition={{ duration: 0.25, ease: "easeOut" }}
+        transition={TRANSITION}
         style={{
           visibility: isInitialChatPositioned ? "visible" : "hidden",
         }}
@@ -2194,6 +2221,7 @@ export default function Ask() {
           <AnimatePresence mode="popLayout" initial={false}>
             {messages.length === 0 && !isExpanded && (
               <motion.div
+                key="chat-title"
                 layout="position"
                 initial={{ opacity: 0, y: 25 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -2204,6 +2232,7 @@ export default function Ask() {
                   `}
               >
                 <motion.div
+                  key="chat-title-image"
                   layout="position"
                   transition={TRANSITION}
                   className="relative size-15"
@@ -2226,6 +2255,7 @@ export default function Ask() {
                 </motion.div>
 
                 <motion.h1
+                  key="chat-title-text"
                   layout="position"
                   transition={TRANSITION}
                   className="text-center text-3xl text-fore-1"
@@ -2236,244 +2266,245 @@ export default function Ask() {
             )}
           </AnimatePresence>
 
-          <ScrollArea
-            scrollRef={chatScrollRef}
-            scroll={{
-              axis: "y",
-              onInit: (viewport) => {
-                const previousOverflowAnchor = viewport.style.overflowAnchor;
-                viewport.style.overflowAnchor = "none";
-                if (archiveReady) {
-                  scrollToLatestTurn("instant", viewport);
-                }
-                return () => {
-                  viewport.style.overflowAnchor = previousOverflowAnchor;
-                };
-              },
-            }}
-            scrollDeps={[archiveReady]}
-            className="w-full"
-            style={{
-              visibility: isInitialChatPositioned ? "visible" : "hidden",
-            }}
-            virtual
-            items={isExpanded ? [] : messageTurns}
-            virtualConfig={{
-              bufferSize: 4000,
-              itemSize: 400,
-              shift: isPrependingHistory,
-              keepMounted: chatKeepMounted,
-            }}
-            header={
-              <AnimatePresence mode="popLayout" initial={false}>
-                {archiveReady && hasOlderMessages && (
-                  <motion.div
-                    key="load-older-messages"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={TRANSITION}
-                    className="flex w-full justify-center items-center p-2"
-                  >
-                    <Button
-                      onPress={showOlderMessages}
-                      isDisabled={isLoadingOlderMessages}
-                      aria-label="Load Older Messages"
-                      className="w-full text-xs text-fore-5 p-2 border border-dotted border-back-5"
+          <motion.div
+            key="chat-area"
+            animate={{ opacity: isExpanded ? 0 : 1 }}
+            transition={TRANSITION}
+            className="size-full min-h-0"
+            aria-hidden={isExpanded}
+            inert={isExpanded}
+          >
+            <ScrollArea
+              scrollRef={chatScrollRef}
+              scroll={{
+                axis: "y",
+                onInit: (viewport) => {
+                  const previousOverflowAnchor = viewport.style.overflowAnchor;
+                  viewport.style.overflowAnchor = "none";
+                  if (archiveReady) {
+                    scrollToLatestTurn("instant", viewport);
+                  }
+                  return () => {
+                    viewport.style.overflowAnchor = previousOverflowAnchor;
+                  };
+                },
+              }}
+              scrollDeps={[archiveReady]}
+              className={`size-full ${
+                isLoading
+                  ? visibleStreamingMessage?.content
+                    ? "cursor-progress"
+                    : "cursor-wait"
+                  : ""
+              } ${isExpanded ? "pointer-events-none" : ""}`}
+              style={{
+                visibility: isInitialChatPositioned ? "visible" : "hidden",
+              }}
+              virtual
+              items={messageTurns}
+              virtualConfig={{
+                bufferSize: 4000,
+                itemSize: 400,
+                shift: isPrependingHistory,
+                keepMounted: chatKeepMounted,
+              }}
+              header={
+                <AnimatePresence mode="popLayout" initial={false}>
+                  {archiveReady && hasOlderMessages && (
+                    <motion.div
+                      key="load-older-messages"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={TRANSITION}
+                      className="flex w-full justify-center items-center p-2"
                     >
-                      {isLoadingOlderMessages ? (
-                        <output
-                          aria-label="Loading Older Messages"
-                          className="flex justify-center"
-                        >
-                          <Loader
-                            size={16}
-                            aria-hidden="true"
-                            className="animate-spin"
-                          />
-                        </output>
-                      ) : (
-                        "◢◤ 続きを読み込む ◢◤"
-                      )}
-                    </Button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            }
-            renderItem={(turn, turnIndex) => {
-              const isLastTurn = turnIndex === messageTurns.length - 1;
-
-              return (
-                <motion.div
-                  key={turn[0].id}
-                  transition={TRANSITION}
-                  data-chat-last-turn={isLastTurn ? "" : undefined}
-                  className={`flex flex-col gap-4 ${isLastTurn ? "" : "pb-8"}`}
-                >
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    {turn.map((msg) => {
-                      const isEditing = editingMessageId === msg.id;
-                      const isUser = msg.role === "user";
-                      const isAssistant = msg.role === "assistant";
-
-                      return (
-                        <motion.div
-                          key={msg.id}
-                          data-chat-message-id={msg.id}
-                          data-scroll-fade-top-anchor=""
-                          initial={
-                            streamedMessageIdsRef.current.has(msg.id)
-                              ? false
-                              : { opacity: 0 }
-                          }
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          transition={TRANSITION}
-                          className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}
-                        >
-                          <div
-                            className={`**:select-text min-w-0 max-w-full ${isUser && "bg-back-2 px-6 py-4"}`}
+                      <Button
+                        onPress={showOlderMessages}
+                        isDisabled={isLoadingOlderMessages}
+                        aria-label="Load Older Messages"
+                        className="w-full text-xs text-fore-5 p-2 border border-dotted border-back-5 rounded-4xl"
+                      >
+                        {isLoadingOlderMessages ? (
+                          <output
+                            aria-label="Loading Older Messages"
+                            className="flex justify-center"
                           >
-                            {isEditing ? (
-                              <motion.div
-                                ref={editingRef}
-                                onInput={(e) => {
-                                  setEditingValue(
-                                    e.currentTarget.innerText ?? "",
-                                  );
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSubmitEdit(msg.id);
-                                  } else if (e.key === "Escape") {
-                                    e.preventDefault();
-                                    handleCancelEdit();
-                                  }
-                                }}
-                                onPaste={pastePlainText}
-                                autoFocus
-                                contentEditable
-                                suppressContentEditableWarning
-                                spellCheck={false}
-                                aria-multiline="true"
-                                id="reprompt"
-                                className="animate-caret outline-none"
-                              />
-                            ) : isUser ? (
-                              <div className="flex flex-col gap-2 items-end">
-                                {msg.attachments && (
-                                  <MessageAttachments
-                                    attachments={msg.attachments}
-                                  />
-                                )}
-                                <p>{msg.content}</p>
-                              </div>
-                            ) : (
-                              msg.content && (
-                                <AssistantMarkdown
-                                  content={msg.content}
-                                  isAnimating={
-                                    isLoading && msg.id === messages.at(-1)?.id
-                                  }
-                                />
-                              )
-                            )}
-                          </div>
-
-                          {isAssistant && (msg.notice || !msg.content) && (
-                            <MessageNoticeBox
-                              notice={
-                                msg.notice ?? {
-                                  kind: "error",
-                                  text: EMPTY_ASSISTANT_MESSAGE,
-                                }
-                              }
+                            <Loader
+                              size={16}
+                              aria-hidden="true"
+                              className="animate-spin"
                             />
-                          )}
+                          </output>
+                        ) : (
+                          "◢◤ 続きを読み込む ◢◤"
+                        )}
+                      </Button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              }
+              renderItem={(turn, turnIndex) => {
+                const isLastTurn = turnIndex === messageTurns.length - 1;
 
-                          {isUser && isEditing && (
-                            <div className="flex justify-center items-center gap-2 p-2">
-                              <Tooltip content="取消" placement="bottom">
-                                <Button
-                                  onPress={handleCancelEdit}
-                                  aria-label="Cancel Edit"
-                                  shape="circle"
-                                  className="bg-back-2"
-                                >
-                                  <X />
-                                </Button>
-                              </Tooltip>
+                return (
+                  <motion.div
+                    key={turn[0].id}
+                    transition={TRANSITION}
+                    data-chat-last-turn={isLastTurn ? "" : undefined}
+                    className={`flex flex-col gap-4 ${isLastTurn ? "" : "pb-8"}`}
+                  >
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      {turn.map((msg) => {
+                        const isEditing = editingMessageId === msg.id;
+                        const isUser = msg.role === "user";
+                        const isAssistant = msg.role === "assistant";
 
-                              <Tooltip content="送信" placement="bottom">
-                                <Button
-                                  onPress={() => handleSubmitEdit(msg.id)}
-                                  isDisabled={!editingValue.trim() || isLoading}
-                                  aria-label="Save Edit"
-                                  shape="circle"
-                                  color="primary"
-                                >
-                                  <Check className="text-back-1_" />
-                                </Button>
-                              </Tooltip>
-                            </div>
-                          )}
-
-                          {isUser && !isEditing && (
-                            <div className="flex items-center gap-2 p-2">
-                              {msg.edited && (
-                                <span className="text-sm text-fore-5">
-                                  編集済
-                                </span>
-                              )}
-
-                              <span className="text-sm text-fore-5">
-                                {formatMessageTime(msg.timestamp)}
-                              </span>
-
-                              <Tooltip content="再試行" placement="bottom">
-                                <Button
-                                  onPress={() => handleRetryMessage(msg.id)}
-                                  isDisabled={isLoading}
-                                  aria-label="Retry"
-                                  shape="circle"
-                                  className="size-5"
-                                >
-                                  <RotateCcw
-                                    size={16}
-                                    className="text-fore-5"
+                        return (
+                          <motion.div
+                            key={msg.id}
+                            data-chat-message-id={msg.id}
+                            data-scroll-fade-top-anchor=""
+                            initial={
+                              streamedMessageIdsRef.current.has(msg.id)
+                                ? false
+                                : { opacity: 0 }
+                            }
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={TRANSITION}
+                            className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}
+                          >
+                            <div
+                              className={`**:select-text min-w-0 max-w-full ${isUser && "bg-back-2 px-6 py-4"}`}
+                            >
+                              {isEditing ? (
+                                <motion.div
+                                  ref={editingRef}
+                                  onInput={(e) => {
+                                    setEditingValue(
+                                      e.currentTarget.innerText ?? "",
+                                    );
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && !e.shiftKey) {
+                                      e.preventDefault();
+                                      handleSubmitEdit(msg.id);
+                                    } else if (e.key === "Escape") {
+                                      e.preventDefault();
+                                      handleCancelEdit();
+                                    }
+                                  }}
+                                  onPaste={pastePlainText}
+                                  autoFocus
+                                  contentEditable
+                                  suppressContentEditableWarning
+                                  spellCheck={false}
+                                  aria-multiline="true"
+                                  id="reprompt"
+                                  className="outline-none"
+                                />
+                              ) : isUser ? (
+                                <div className="flex flex-col gap-2 items-end">
+                                  {msg.attachments && (
+                                    <MessageAttachments
+                                      attachments={msg.attachments}
+                                    />
+                                  )}
+                                  <p>{msg.content}</p>
+                                </div>
+                              ) : (
+                                msg.content && (
+                                  <AssistantMarkdown
+                                    content={msg.content}
+                                    isAnimating={
+                                      isLoading &&
+                                      msg.id === messages.at(-1)?.id
+                                    }
                                   />
-                                </Button>
-                              </Tooltip>
-
-                              <Tooltip content="編集" placement="bottom">
-                                <Button
-                                  onPress={() => handleStartEdit(msg)}
-                                  isDisabled={isLoading}
-                                  aria-label="Edit"
-                                  shape="circle"
-                                  className="size-5"
-                                >
-                                  <Pencil size={16} className="text-fore-5" />
-                                </Button>
-                              </Tooltip>
-
-                              <Tooltip content="コピー" placement="bottom">
-                                <Button
-                                  onPress={() => handleCopyMessage(msg.content)}
-                                  aria-label="Copy"
-                                  shape="circle"
-                                  className="size-5"
-                                >
-                                  <Copy size={16} className="text-fore-5" />
-                                </Button>
-                              </Tooltip>
+                                )
+                              )}
                             </div>
-                          )}
 
-                          {isAssistant && (
-                            <div className="flex items-center gap-2 p-2">
-                              {msg.content && (
+                            {isAssistant && (msg.notice || !msg.content) && (
+                              <MessageNoticeBox
+                                notice={
+                                  msg.notice ?? {
+                                    kind: "error",
+                                    text: EMPTY_ASSISTANT_MESSAGE,
+                                  }
+                                }
+                              />
+                            )}
+
+                            {isUser && isEditing && (
+                              <div className="flex justify-center items-center gap-2 p-2">
+                                <Tooltip content="取消" placement="bottom">
+                                  <Button
+                                    onPress={handleCancelEdit}
+                                    aria-label="Cancel Edit"
+                                    shape="circle"
+                                    className="bg-back-2"
+                                  >
+                                    <X />
+                                  </Button>
+                                </Tooltip>
+
+                                <Tooltip content="送信" placement="bottom">
+                                  <Button
+                                    onPress={() => handleSubmitEdit(msg.id)}
+                                    isDisabled={
+                                      !editingValue.trim() || isLoading
+                                    }
+                                    aria-label="Save Edit"
+                                    shape="circle"
+                                    color="primary"
+                                  >
+                                    <Check className="text-back-1_" />
+                                  </Button>
+                                </Tooltip>
+                              </div>
+                            )}
+
+                            {isUser && !isEditing && (
+                              <div className="flex items-center gap-2 p-2">
+                                {msg.edited && (
+                                  <span className="text-sm text-fore-5">
+                                    編集済
+                                  </span>
+                                )}
+
+                                <span className="text-sm text-fore-5">
+                                  {formatMessageTime(msg.timestamp)}
+                                </span>
+
+                                <Tooltip content="再試行" placement="bottom">
+                                  <Button
+                                    onPress={() => handleRetryMessage(msg.id)}
+                                    isDisabled={isLoading}
+                                    aria-label="Retry"
+                                    shape="circle"
+                                    className="size-5"
+                                  >
+                                    <RotateCcw
+                                      size={16}
+                                      className="text-fore-5"
+                                    />
+                                  </Button>
+                                </Tooltip>
+
+                                <Tooltip content="編集" placement="bottom">
+                                  <Button
+                                    onPress={() => handleStartEdit(msg)}
+                                    isDisabled={isLoading}
+                                    aria-label="Edit"
+                                    shape="circle"
+                                    className="size-5"
+                                  >
+                                    <Pencil size={16} className="text-fore-5" />
+                                  </Button>
+                                </Tooltip>
+
                                 <Tooltip content="コピー" placement="bottom">
                                   <Button
                                     onPress={() =>
@@ -2486,73 +2517,89 @@ export default function Ask() {
                                     <Copy size={16} className="text-fore-5" />
                                   </Button>
                                 </Tooltip>
-                              )}
+                              </div>
+                            )}
 
-                              {msg.duration !== undefined && (
-                                <span className="flex items-center gap-1 text-sm text-fore-5">
-                                  <Timer size={16} />
-                                  {formatDuration(msg.duration)}
+                            {isAssistant && (
+                              <div className="flex items-center gap-2 p-2">
+                                {msg.content && (
+                                  <Tooltip content="コピー" placement="bottom">
+                                    <Button
+                                      onPress={() =>
+                                        handleCopyMessage(msg.content)
+                                      }
+                                      aria-label="Copy"
+                                      shape="circle"
+                                      className="size-5"
+                                    >
+                                      <Copy size={16} className="text-fore-5" />
+                                    </Button>
+                                  </Tooltip>
+                                )}
+
+                                {msg.duration !== undefined && (
+                                  <span className="flex items-center gap-1 text-sm text-fore-5">
+                                    <Timer size={16} />
+                                    {formatDuration(msg.duration)}
+                                  </span>
+                                )}
+
+                                <span className="text-sm text-fore-5">
+                                  {formatMessageTime(msg.timestamp)}
                                 </span>
-                              )}
+                              </div>
+                            )}
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              }}
+            >
+              {visibleStreamingMessage && (
+                <motion.div
+                  key={visibleStreamingMessage.id}
+                  data-scroll-fade-top-anchor=""
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={TRANSITION}
+                  className="flex flex-col gap-2 items-start"
+                >
+                  {visibleStreamingMessage.content ? (
+                    <AssistantMarkdown
+                      content={visibleStreamingMessage.content}
+                      isAnimating={isLoading}
+                    />
+                  ) : (
+                    loadingMessage
+                  )}
 
-                              <span className="text-sm text-fore-5">
-                                {formatMessageTime(msg.timestamp)}
-                              </span>
-                            </div>
-                          )}
-                        </motion.div>
-                      );
-                    })}
-                  </AnimatePresence>
+                  {visibleStreamingMessage.content && (
+                    <div className="flex items-center gap-2 py-2">
+                      <Tooltip content="コピー" placement="bottom">
+                        <Button
+                          onPress={() =>
+                            handleCopyMessage(visibleStreamingMessage.content)
+                          }
+                          aria-label="Copy"
+                          shape="circle"
+                          className="size-5"
+                        >
+                          <Copy size={16} className="text-fore-5" />
+                        </Button>
+                      </Tooltip>
+
+                      <span className="text-sm text-fore-5">
+                        {formatMessageTime(visibleStreamingMessage.timestamp)}
+                      </span>
+                    </div>
+                  )}
                 </motion.div>
-              );
-            }}
-          >
-            {visibleStreamingMessage && !isExpanded && (
-              <motion.div
-                key={visibleStreamingMessage.id}
-                data-scroll-fade-top-anchor=""
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={TRANSITION}
-                className="flex flex-col gap-2 items-start"
-              >
-                {visibleStreamingMessage.content ? (
-                  <AssistantMarkdown
-                    content={visibleStreamingMessage.content}
-                    isAnimating={isLoading}
-                  />
-                ) : (
-                  loadingMessage
-                )}
+              )}
 
-                {visibleStreamingMessage.content && (
-                  <div className="flex items-center gap-2 py-2">
-                    <Tooltip content="コピー" placement="bottom">
-                      <Button
-                        onPress={() =>
-                          handleCopyMessage(visibleStreamingMessage.content)
-                        }
-                        aria-label="Copy"
-                        shape="circle"
-                        className="size-5"
-                      >
-                        <Copy size={16} className="text-fore-5" />
-                      </Button>
-                    </Tooltip>
-
-                    <span className="text-sm text-fore-5">
-                      {formatMessageTime(visibleStreamingMessage.timestamp)}
-                    </span>
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-            <AnimatePresence mode="popLayout" initial={false}>
-              {!isExpanded &&
-                !isLoading &&
-                messages.at(-1)?.role === "assistant" && (
+              <AnimatePresence mode="popLayout" initial={false}>
+                {!isLoading && messages.at(-1)?.role === "assistant" && (
                   <motion.div
                     key="assistant-disclaimer"
                     initial={{ opacity: 0 }}
@@ -2561,19 +2608,21 @@ export default function Ask() {
                     transition={TRANSITION}
                     className="py-2"
                   >
-                    <p className="select-text text-xs text-fore-5 p-2 border border-dashed border-back-5">
+                    <p className="select-text text-xs text-fore-5 p-2 border border-dashed border-back-5 rounded-xl">
                       ⚠
                       回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
                     </p>
                   </motion.div>
                 )}
-            </AnimatePresence>
-            <div data-chat-tail-spacer aria-hidden="true" />
-          </ScrollArea>
+              </AnimatePresence>
+              <div data-chat-tail-spacer aria-hidden="true" />
+            </ScrollArea>
+          </motion.div>
 
           <motion.form
             onSubmit={handleSubmit}
             ref={formRef}
+            key="form-area"
             layout
             transition={TRANSITION}
             className={`flex-none grid gap-1 w-full items-center border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip rounded-4xl
@@ -2929,7 +2978,6 @@ export default function Ask() {
                   onInput={(e) => {
                     const rawText = e.currentTarget.innerText;
                     setValue(rawText.trim() ? rawText : "");
-                    calcTextarea();
                   }}
                   onKeyDown={handleTextareaKeyDown}
                   onPaste={pastePlainText}
@@ -2947,7 +2995,7 @@ export default function Ask() {
                   spellCheck={false}
                   aria-multiline="true"
                   id="prompt"
-                  className="block outline-none overflow-y-clip resize-none w-full min-w-0 wrap-anywhere animate-caret"
+                  className="block outline-none overflow-y-clip resize-none w-full min-w-0 wrap-anywhere"
                 />
               </motion.div>
             </motion.div>
@@ -3019,7 +3067,7 @@ export default function Ask() {
                     <Button
                       onPress={() => {
                         captureCaretPosition();
-                        setIsExpanded(!isExpanded);
+                        toggleComposerExpanded();
                       }}
                       aria-label={isExpanded ? "Minimize" : "Maximize"}
                       shape="circle"

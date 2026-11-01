@@ -204,10 +204,6 @@
   @apply transition-none;
 }
 
-@utility animate-caret {
-  animation: caret-fade calc(var(--transition-duration) * 10) infinite linear;
-}
-
 @layer base {
   html,
   body,
@@ -254,31 +250,6 @@
 
   *::-ms-reveal {
     display: none;
-  }
-
-  @keyframes caret-fade {
-    0%,
-    100% {
-      caret-color: var(--color-red);
-    }
-    14.3% {
-      caret-color: var(--color-orange);
-    }
-    28.6% {
-      caret-color: var(--color-yellow);
-    }
-    42.9% {
-      caret-color: var(--color-green);
-    }
-    57.2% {
-      caret-color: var(--color-blue);
-    }
-    71.5% {
-      caret-color: var(--color-indigo);
-    }
-    85.8% {
-      caret-color: var(--color-violet);
-    }
   }
 }
 
@@ -333,6 +304,7 @@
     :where(*)::-webkit-scrollbar-thumb {
       background-color: color-mix(in srgb, var(--color-fore-2) 50%, transparent);
       background-clip: content-box;
+      border-radius: 1rem;
     }
 
     :where(*)::-webkit-scrollbar-thumb:vertical {
