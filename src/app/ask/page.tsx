@@ -1275,6 +1275,7 @@ export default function Ask() {
     }
 
     setValue("");
+    if (editorRef.current) editorRef.current.innerText = "";
     setIsAdjusted(false);
     setIsScrollable(false);
     setIsExpanded(false);
@@ -1408,12 +1409,21 @@ export default function Ask() {
       : false;
 
     if (singleLineRef.current === 0) {
-      const originalText = editor.innerText;
-
-      editor.innerText = "A";
-      editor.style.height = "auto";
-      singleLineRef.current = editor.scrollHeight;
-      editor.innerText = originalText;
+      const measurement = editor.cloneNode(false) as HTMLDivElement;
+      measurement.removeAttribute("id");
+      measurement.setAttribute("aria-hidden", "true");
+      measurement.contentEditable = "false";
+      measurement.textContent = "A";
+      measurement.style.position = "absolute";
+      measurement.style.left = "-10000px";
+      measurement.style.top = "0";
+      measurement.style.visibility = "hidden";
+      measurement.style.height = "auto";
+      measurement.style.maxHeight = "none";
+      measurement.style.width = `${editor.getBoundingClientRect().width}px`;
+      editor.after(measurement);
+      singleLineRef.current = measurement.scrollHeight;
+      measurement.remove();
     }
 
     if (!isAdjusted) {
@@ -1475,7 +1485,10 @@ export default function Ask() {
     if (!editorRef.current) return;
 
     if (value === "") {
-      if (editorRef.current.innerText !== "") {
+      if (
+        document.activeElement !== editorRef.current &&
+        editorRef.current.innerText !== ""
+      ) {
         editorRef.current.innerText = "";
 
         calcTextarea();
@@ -1934,6 +1947,7 @@ export default function Ask() {
         if (e.key === "Backspace") {
           e.preventDefault();
           setValue("");
+          if (editorRef.current) editorRef.current.innerText = "";
           setIsExpanded(false);
 
           editorRef.current?.focus();
@@ -2915,6 +2929,7 @@ export default function Ask() {
                   onInput={(e) => {
                     const rawText = e.currentTarget.innerText;
                     setValue(rawText.trim() ? rawText : "");
+                    calcTextarea();
                   }}
                   onKeyDown={handleTextareaKeyDown}
                   onPaste={pastePlainText}
