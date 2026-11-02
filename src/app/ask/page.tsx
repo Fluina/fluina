@@ -859,6 +859,11 @@ export default function Ask() {
   useLayoutEffect(() => {
     if (!archiveReady || isInitialChatPositioned) return;
 
+    if (messages.length === 0) {
+      setIsInitialChatPositioned(true);
+      return;
+    }
+
     let frame = 0;
     let stableFrames = 0;
     let previousLayout = "";
@@ -2306,9 +2311,9 @@ export default function Ask() {
             key="chat-area"
             animate={{ opacity: isExpanded ? 0 : 1 }}
             transition={TRANSITION}
-            className="size-full min-h-0"
-            aria-hidden={isExpanded}
-            inert={isExpanded}
+            className={`size-full min-h-0 ${messages.length === 0 && !isExpanded ? "hidden" : ""}`}
+            aria-hidden={isExpanded || (messages.length === 0 && !isExpanded)}
+            inert={isExpanded || (messages.length === 0 && !isExpanded)}
           >
             <ScrollArea
               scrollRef={chatScrollRef}
