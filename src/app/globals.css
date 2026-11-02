@@ -4,9 +4,6 @@
 @plugin "@tailwindcss/typography";
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 @custom-variant font-serif (&:where([data-font=serif], [data-font=serif] *));
-@custom-variant font-sans-serif (&:where([data-font=sans-serif], [data-font=sans-serif] *));
-@custom-variant font-monospace (&:where([data-font=monospace], [data-font=monospace] *));
-@custom-variant font-rounded (&:where([data-font=rounded], [data-font=rounded] *));
 
 @theme inline {
   --color-back-0: var(--back-0);
@@ -62,16 +59,8 @@
   --color-indigo: hsl(255, 100%, 50%);
   --color-violet: hsl(300, 100%, 50%);
 
-  --font-unifont:
-    var(--font-unifont), var(--font-unifont-jp), var(--font-unifont-t),
-    var(--font-unifont-upper), var(--font-unifont-csur), system-ui;
-  --font-unifont-jp:
-    var(--font-unifont-jp), var(--font-unifont), var(--font-unifont-t),
-    var(--font-unifont-upper), var(--font-unifont-csur), system-ui;
-  --font-serif: serif, ui-serif, system-ui;
-  --font-sans-serif: sans-serif, ui-sans-serif, system-ui;
-  --font-monospace: monospace, ui-monospace, system-ui;
-  --font-rounded: rounded, ui-rounded, system-ui;
+  --font-serif: var(--font-noto-serif), serif;
+  --font-sans-serif: var(--font-noto-sans), sans-serif;
 
   --transition-duration: 500ms;
   --transition-timing-function: ease-out;
@@ -227,8 +216,8 @@
   }
 
   body {
-    @apply w-dvw h-dvh overflow-clip text-left overscroll-none font-unifont font-normal text-base bg-back-1 text-fore-1 whitespace-normal wrap-break-word colors;
-    @apply font-sans-serif:font-sans-serif font-serif:font-serif font-monospace:font-monospace font-rounded:font-rounded;
+    @apply w-dvw h-dvh overflow-clip text-left overscroll-none font-sans-serif font-normal text-base bg-back-1 text-fore-1 whitespace-normal wrap-break-word colors;
+    @apply font-serif:font-serif;
   }
 
   input,

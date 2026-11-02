@@ -144,11 +144,8 @@ export default function EnvironmentPage() {
           </SelectTrigger>
           <SelectPopover>
             <SelectListBox>
-              <SelectItem id="default">既定</SelectItem>
-              <SelectItem id="serif">明朝</SelectItem>
               <SelectItem id="sans-serif">ゴシック</SelectItem>
-              <SelectItem id="monospace">等幅</SelectItem>
-              <SelectItem id="rounded">丸ゴシック</SelectItem>
+              <SelectItem id="serif">明朝</SelectItem>
             </SelectListBox>
           </SelectPopover>
         </Select>

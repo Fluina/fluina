@@ -403,8 +403,6 @@ export function useNativeScroll<T extends HTMLElement = HTMLDivElement>(
   const onScrollRef = useRef(onScroll);
   const onInitRef = useRef(onInit);
   const initCleanupRef = useRef<(() => void) | undefined>(undefined);
-  const hasInitEffectRunRef = useRef(false);
-  const reinitializeCallbacksRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     onScrollRef.current = onScroll;
@@ -428,7 +426,6 @@ export function useNativeScroll<T extends HTMLElement = HTMLDivElement>(
 
     host.addEventListener("scroll", handleScroll, { passive: true });
     initializeCallbacks();
-    reinitializeCallbacksRef.current = initializeCallbacks;
 
     return () => {
       host.removeEventListener("scroll", handleScroll);
@@ -437,22 +434,8 @@ export function useNativeScroll<T extends HTMLElement = HTMLDivElement>(
       initCleanupRef.current = undefined;
       restoreOverflow();
     };
-  }, [axis, enableEdgeFade, elementRef]);
-
-  useEffect(() => {
-    if (!hasInitEffectRunRef.current) {
-      hasInitEffectRunRef.current = true;
-      return;
-    }
-
-    initCleanupRef.current?.();
-    reinitializeCallbacksRef.current();
-
-    return () => {
-      initCleanupRef.current?.();
-      initCleanupRef.current = undefined;
-    };
-  }, [...deps]);
+    // deps lets conditionally mounted hosts be re-attached
+  }, [axis, enableEdgeFade, elementRef, ...deps]);
 
   return { elementRef };
 }

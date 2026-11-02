@@ -5,13 +5,7 @@ import type { Metadata, Viewport } from "next";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import Client from "@/app/client";
-import {
-  unifont,
-  unifontCsur,
-  unifontJp,
-  unifontT,
-  unifontUpper,
-} from "@/app/fonts";
+import { notoSans, notoSerif } from "@/app/fonts";
 import Server from "@/app/server";
 
 export const metadata: Metadata = {
@@ -38,7 +32,7 @@ export default function RootLayout({
       lang="ja"
       data-scroll-behavior="smooth"
       suppressHydrationWarning
-      className={`${unifont.variable} ${unifontJp.variable} ${unifontCsur.variable} ${unifontT.variable} ${unifontUpper.variable}`}
+      className={`${notoSans.variable} ${notoSerif.variable}`}
     >
       <head>
         <Server />

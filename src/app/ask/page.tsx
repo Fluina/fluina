@@ -135,7 +135,7 @@ const getChatScrollTarget = (viewport: HTMLElement) => {
 const MessageNoticeBox = ({ notice }: { notice: MessageNotice }) => (
   <p
     role={notice.kind === "error" ? "alert" : "status"}
-    className={`select-text text-sm p-2 border border-dashed ${
+    className={`select-text text-sm p-2 border border-dashed rounded-lg ${
       notice.kind === "error"
         ? "text-red border-red bg-red/25"
         : "text-yellow border-yellow bg-yellow/25"
@@ -146,6 +146,79 @@ const MessageNoticeBox = ({ notice }: { notice: MessageNotice }) => (
 );
 const markdownPlugins = { math: mathPlugin };
 
+const FILE_TILE_CLASS =
+  "size-30 relative flex-none overflow-clip flex justify-start items-center bg-back-2 border border-back-5 rounded-2xl";
+
+const FilePreview = ({
+  name,
+  type,
+  url,
+}: {
+  name: string;
+  type: string;
+  url: string | null | undefined;
+}) => {
+  const lastDotIndex = name.lastIndexOf(".");
+  const isExtensionOnly = name.startsWith(".") && lastDotIndex === 0;
+  const hasExtension = lastDotIndex > 0;
+  const baseName = isExtensionOnly
+    ? ""
+    : hasExtension
+      ? name.slice(0, lastDotIndex)
+      : name;
+  const badge = isExtensionOnly
+    ? name.slice(1).toUpperCase()
+    : hasExtension
+      ? name.slice(lastDotIndex + 1).toUpperCase()
+      : "";
+
+  if (url) {
+    return (
+      <div className="relative size-full">
+        {type.startsWith("video/") ? (
+          <video
+            src={url}
+            className="size-full object-cover"
+            preload="metadata"
+          >
+            <track kind="captions" />
+          </video>
+        ) : (
+          <Image
+            src={url}
+            alt={name}
+            fill
+            unoptimized
+            className="size-full object-cover"
+          />
+        )}
+
+        {badge && (
+          <div className="absolute left-1 right-1 bottom-1">
+            <span className="block text-xs text-center font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-2xl">
+              {badge}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-1 size-full flex flex-col justify-between">
+      <span className="line-clamp-3 p-1 break-all text-ellipsis text-sm">
+        {baseName || name}
+      </span>
+
+      {badge && (
+        <span className="text-xs text-center font-light truncate w-full p-1 border border-back-5 bg-back-3 rounded-2xl">
+          {badge}
+        </span>
+      )}
+    </div>
+  );
+};
+
 const MessageAttachments = ({
   attachments,
 }: {
@@ -154,7 +227,9 @@ const MessageAttachments = ({
   const urls = useMemo(
     () =>
       attachments.map(({ blob, type }) =>
-        type.startsWith("image/") ? URL.createObjectURL(blob) : null,
+        type.startsWith("image/") || type.startsWith("video/")
+          ? URL.createObjectURL(blob)
+          : null,
       ),
     [attachments],
   );
@@ -168,30 +243,18 @@ const MessageAttachments = ({
     [urls],
   );
 
-  return (
-    <div className="flex flex-wrap justify-end gap-2">
-      {attachments.map(({ id, name }, index) => {
-        const url = urls[index];
+  const { elementRef } = useNativeScroll<HTMLDivElement>({ axis: "x" });
 
-        return url ? (
-          <Image
-            key={id}
-            src={url}
-            alt={name}
-            width={160}
-            height={160}
-            unoptimized
-            className="size-40 object-cover border border-back-5"
-          />
-        ) : (
-          <span
-            key={id}
-            className="max-w-60 truncate text-sm px-2 py-1 border border-back-5 bg-back-3"
-          >
-            {name}
-          </span>
-        );
-      })}
+  return (
+    <div
+      ref={elementRef}
+      className="flex flex-nowrap justify-start items-center gap-2 p-2 min-w-0 max-w-full"
+    >
+      {attachments.map(({ id, name, type }, index) => (
+        <div key={id} title={name} className={FILE_TILE_CLASS}>
+          <FilePreview name={name} type={type} url={urls[index]} />
+        </div>
+      ))}
     </div>
   );
 };
@@ -516,6 +579,8 @@ const insertTextIntoEditor = (editor: HTMLDivElement, text: string) => {
     }),
   );
 };
+
+const PAGE_LOAD_EXTRA_DELAY_MS = 250;
 
 export default function Ask() {
   const os = useOS();
@@ -859,9 +924,14 @@ export default function Ask() {
   useLayoutEffect(() => {
     if (!archiveReady || isInitialChatPositioned) return;
 
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
     if (messages.length === 0) {
-      setIsInitialChatPositioned(true);
-      return;
+      timeout = setTimeout(
+        () => setIsInitialChatPositioned(true),
+        PAGE_LOAD_EXTRA_DELAY_MS,
+      );
+      return () => clearTimeout(timeout);
     }
 
     let frame = 0;
@@ -927,7 +997,10 @@ export default function Ask() {
       }
 
       if (stableFrames >= 2) {
-        setIsInitialChatPositioned(true);
+        timeout = setTimeout(
+          () => setIsInitialChatPositioned(true),
+          PAGE_LOAD_EXTRA_DELAY_MS,
+        );
         return;
       }
 
@@ -937,6 +1010,7 @@ export default function Ask() {
     frame = requestAnimationFrame(positionInitialChat);
     return () => {
       cancelAnimationFrame(frame);
+      clearTimeout(timeout);
     };
   }, [
     archiveReady,
@@ -2299,7 +2373,7 @@ export default function Ask() {
                   key="chat-title-text"
                   layout="position"
                   transition={TRANSITION}
-                  className="text-center text-3xl text-fore-1"
+                  className="text-center text-3xl text-fore-1 font-serif"
                 >
                   何でも訊いてみてね！
                 </motion.h1>
@@ -2416,8 +2490,16 @@ export default function Ask() {
                             transition={TRANSITION}
                             className={`flex flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}
                           >
+                            {isUser &&
+                              !isEditing &&
+                              !!msg.attachments?.length && (
+                                <MessageAttachments
+                                  attachments={msg.attachments}
+                                />
+                              )}
+
                             <div
-                              className={`**:select-text min-w-0 max-w-full ${isUser && "bg-back-2 px-6 py-4"}`}
+                              className={`**:select-text min-w-0 max-w-full ${isUser && "bg-back-2 px-6 py-4 rounded-4xl"}`}
                             >
                               {isEditing ? (
                                 <motion.div
@@ -2446,14 +2528,7 @@ export default function Ask() {
                                   className="outline-none"
                                 />
                               ) : isUser ? (
-                                <div className="flex flex-col gap-2 items-end">
-                                  {msg.attachments && (
-                                    <MessageAttachments
-                                      attachments={msg.attachments}
-                                    />
-                                  )}
-                                  <p>{msg.content}</p>
-                                </div>
+                                <p>{msg.content}</p>
                               ) : (
                                 msg.content && (
                                   <AssistantMarkdown
@@ -2650,7 +2725,7 @@ export default function Ask() {
                     transition={TRANSITION}
                     className="py-2"
                   >
-                    <p className="select-text text-xs text-fore-5 p-2 border border-dashed border-back-5 rounded-xl">
+                    <p className="select-text text-xs text-fore-5 p-2 border border-dashed border-back-5 rounded-lg">
                       ⚠
                       回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
                     </p>
@@ -2795,30 +2870,6 @@ export default function Ask() {
                   >
                     <AnimatePresence mode="popLayout" initial={false}>
                       {files.map(({ id, file }, fileIndex) => {
-                        const lastDotIndex = file.name.lastIndexOf(".");
-                        const isExtensionOnly =
-                          file.name.startsWith(".") && lastDotIndex === 0;
-                        const hasExtension =
-                          lastDotIndex !== -1 && lastDotIndex !== 0;
-
-                        let fileNameWithoutExt = "";
-                        let fileExtension = "";
-
-                        if (isExtensionOnly) {
-                          fileNameWithoutExt = "";
-                          fileExtension = file.name.slice(1).toUpperCase();
-                        } else if (hasExtension) {
-                          fileNameWithoutExt = file.name.slice(0, lastDotIndex);
-                          fileExtension = file.name
-                            .slice(lastDotIndex + 1)
-                            .toUpperCase();
-                        } else {
-                          fileNameWithoutExt = file.name;
-                          fileExtension = "";
-                        }
-
-                        const displayBadge = fileExtension;
-
                         return (
                           <motion.div
                             key={id}
@@ -2827,7 +2878,7 @@ export default function Ask() {
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             transition={TRANSITION}
-                            className="group size-30 relative flex-none overflow-clip flex justify-start items-center bg-back-2 border border-back-5 focus-within:border-2 focus-within:border-fore-1"
+                            className={`group ${FILE_TILE_CLASS} focus-within:border-2 focus-within:border-fore-1`}
                           >
                             <Tooltip content={file.name} placement="bottom">
                               <Button
@@ -2843,47 +2894,11 @@ export default function Ask() {
                                 aria-label={file.name}
                                 className="size-full scale-100! [&>*:not(:first-child)]:scale-100!"
                               >
-                                {filePreviewUrls[fileIndex] ? (
-                                  <div className="relative size-full">
-                                    {file.type.startsWith("video/") ? (
-                                      <video
-                                        src={filePreviewUrls[fileIndex] ?? ""}
-                                        className="size-full object-cover"
-                                        preload="metadata"
-                                      >
-                                        <track kind="captions" />
-                                      </video>
-                                    ) : (
-                                      <Image
-                                        src={filePreviewUrls[fileIndex] ?? ""}
-                                        alt={file.name}
-                                        fill
-                                        unoptimized
-                                        className="size-full object-cover"
-                                      />
-                                    )}
-
-                                    {displayBadge && (
-                                      <div className="absolute left-1 right-1 bottom-1">
-                                        <span className="block text-xs text-center font-light truncate w-full p-1 border border-back-5 bg-back-3">
-                                          {displayBadge}
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div className="p-1 size-full flex flex-col justify-between">
-                                    <span className="line-clamp-3 p-1 break-all text-ellipsis text-sm">
-                                      {fileNameWithoutExt || file.name}
-                                    </span>
-
-                                    {displayBadge ? (
-                                      <span className="text-xs text-cente font-light truncate w-full p-1 border border-back-5 bg-back-3">
-                                        {displayBadge}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                )}
+                                <FilePreview
+                                  name={file.name}
+                                  type={file.type}
+                                  url={filePreviewUrls[fileIndex]}
+                                />
                               </Button>
                             </Tooltip>
 

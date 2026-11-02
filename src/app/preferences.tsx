@@ -6,12 +6,7 @@ import { setMotionEnabled } from "@/lib/motion";
 const STORAGE_KEY = "fluina-preferences";
 
 export type EffectPreference = "system" | "on" | "off";
-export type FontPreference =
-  | "default"
-  | "serif"
-  | "sans-serif"
-  | "monospace"
-  | "rounded";
+export type FontPreference = "sans-serif" | "serif";
 
 interface Preferences {
   transparency: EffectPreference;
@@ -30,21 +25,11 @@ interface PreferencesContextValue extends Preferences {
 const defaultPreferences: Preferences = {
   transparency: "system",
   parallax: "system",
-  font: "default",
+  font: "sans-serif",
 };
 
 function normalizeFontPreference(value: unknown): FontPreference {
-  if (
-    value === "default" ||
-    value === "serif" ||
-    value === "sans-serif" ||
-    value === "monospace" ||
-    value === "rounded"
-  ) {
-    return value;
-  }
-
-  return "default";
+  return value === "serif" ? "serif" : "sans-serif";
 }
 
 function readStoredPreferences(): Preferences {

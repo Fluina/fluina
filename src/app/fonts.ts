@@ -1,41 +1,13 @@
-import localFont from "next/font/local";
+import { Noto_Sans_JP, Noto_Serif_JP } from "next/font/google";
 
-export const unifont = localFont({
-  src: "../../public/fonts/unifont-18.0.01.woff2",
-  weight: "400",
-  style: "normal",
+export const notoSans = Noto_Sans_JP({
+  weight: ["400", "500", "700"],
   display: "swap",
-  variable: "--font-unifont",
+  variable: "--font-noto-sans",
 });
 
-export const unifontJp = localFont({
-  src: "../../public/fonts/unifont_jp-18.0.01.woff2",
-  weight: "400",
-  style: "normal",
+export const notoSerif = Noto_Serif_JP({
+  weight: ["400", "500", "700"],
   display: "swap",
-  variable: "--font-unifont-jp",
-});
-
-export const unifontT = localFont({
-  src: "../../public/fonts/unifont_t-18.0.01.woff2",
-  weight: "400",
-  style: "normal",
-  display: "swap",
-  variable: "--font-unifont-t",
-});
-
-export const unifontUpper = localFont({
-  src: "../../public/fonts/unifont_upper-18.0.01.woff2",
-  weight: "400",
-  style: "normal",
-  display: "swap",
-  variable: "--font-unifont-upper",
-});
-
-export const unifontCsur = localFont({
-  src: "../../public/fonts/unifont_csur-18.0.01.woff2",
-  weight: "400",
-  style: "normal",
-  display: "swap",
-  variable: "--font-unifont-csur",
+  variable: "--font-noto-serif",
 });
