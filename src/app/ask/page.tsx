@@ -641,8 +641,8 @@ export default function Ask() {
   }, []);
 
   const hasText = value.trim().length > 0;
-  const hasInput = value.trim().length > 0;
   const hasFiles = files.length > 0;
+  const hasInput = hasText || hasFiles;
 
   const updateTailSpacer = useCallback((viewportOverride?: HTMLElement) => {
     const host = chatScrollRef.current;
@@ -2452,7 +2452,7 @@ export default function Ask() {
                             />
                           </output>
                         ) : (
-                          "◢◤ 続きを読み込む ◢◤"
+                          "続きを読み込む"
                         )}
                       </Button>
                     </motion.div>
@@ -2498,49 +2498,51 @@ export default function Ask() {
                                 />
                               )}
 
-                            <div
-                              className={`**:select-text min-w-0 max-w-full ${isUser && "bg-back-2 px-6 py-4 rounded-4xl"}`}
-                            >
-                              {isEditing ? (
-                                <motion.div
-                                  ref={editingRef}
-                                  onInput={(e) => {
-                                    setEditingValue(
-                                      e.currentTarget.innerText ?? "",
-                                    );
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter" && !e.shiftKey) {
-                                      e.preventDefault();
-                                      handleSubmitEdit(msg.id);
-                                    } else if (e.key === "Escape") {
-                                      e.preventDefault();
-                                      handleCancelEdit();
-                                    }
-                                  }}
-                                  onPaste={pastePlainText}
-                                  autoFocus
-                                  contentEditable
-                                  suppressContentEditableWarning
-                                  spellCheck={false}
-                                  aria-multiline="true"
-                                  id="reprompt"
-                                  className="outline-none"
-                                />
-                              ) : isUser ? (
-                                <p>{msg.content}</p>
-                              ) : (
-                                msg.content && (
-                                  <AssistantMarkdown
-                                    content={msg.content}
-                                    isAnimating={
-                                      isLoading &&
-                                      msg.id === messages.at(-1)?.id
-                                    }
+                            {(isEditing || !isUser || msg.content.trim()) && (
+                              <div
+                                className={`**:select-text min-w-0 max-w-full ${isUser && "bg-back-2 px-6 py-4 rounded-4xl"}`}
+                              >
+                                {isEditing ? (
+                                  <motion.div
+                                    ref={editingRef}
+                                    onInput={(e) => {
+                                      setEditingValue(
+                                        e.currentTarget.innerText ?? "",
+                                      );
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleSubmitEdit(msg.id);
+                                      } else if (e.key === "Escape") {
+                                        e.preventDefault();
+                                        handleCancelEdit();
+                                      }
+                                    }}
+                                    onPaste={pastePlainText}
+                                    autoFocus
+                                    contentEditable
+                                    suppressContentEditableWarning
+                                    spellCheck={false}
+                                    aria-multiline="true"
+                                    id="reprompt"
+                                    className="outline-none"
                                   />
-                                )
-                              )}
-                            </div>
+                                ) : isUser ? (
+                                  <p>{msg.content}</p>
+                                ) : (
+                                  msg.content && (
+                                    <AssistantMarkdown
+                                      content={msg.content}
+                                      isAnimating={
+                                        isLoading &&
+                                        msg.id === messages.at(-1)?.id
+                                      }
+                                    />
+                                  )
+                                )}
+                              </div>
+                            )}
 
                             {isAssistant && (msg.notice || !msg.content) && (
                               <MessageNoticeBox
@@ -2789,7 +2791,11 @@ export default function Ask() {
                     <Plus className="text-fore-1" />
                   </Button>
 
-                  <Menu.Content>
+                  <Menu.Content
+                    triggerRef={formRef}
+                    placement="top start"
+                    offset={8}
+                  >
                     <Menu.Item
                       icon={<Paperclip />}
                       shortcut="Ctrl+Shift+Alt+U"
@@ -2813,7 +2819,7 @@ export default function Ask() {
                       <Menu.Item icon={<Folder />}>
                         プロジェクトに追加
                       </Menu.Item>
-                      <Menu.Content>
+                      <Menu.Content mobileSheet={false}>
                         <Menu.Item>プロジェクト A</Menu.Item>
                         <Menu.Item>プロジェクト B</Menu.Item>
                       </Menu.Content>

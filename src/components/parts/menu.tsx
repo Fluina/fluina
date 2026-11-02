@@ -1,7 +1,14 @@
 "use client";
 import { Check, ChevronRight } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import type { ReactElement, ReactNode } from "react";
+import { motion, useDragControls } from "motion/react";
+import {
+  type ReactElement,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   Menu as AriaMenu,
   MenuItem as AriaMenuItem,
@@ -11,11 +18,14 @@ import {
   type MenuSectionProps as AriaMenuSectionProps,
   MenuTrigger as AriaMenuTrigger,
   type MenuTriggerProps as AriaMenuTriggerProps,
+  Modal as AriaModal,
+  ModalOverlay as AriaModalOverlay,
   Popover as AriaPopover,
   type PopoverProps as AriaPopoverProps,
   Separator as AriaSeparator,
   SubmenuTrigger as AriaSubmenuTrigger,
   Header,
+  OverlayTriggerStateContext,
 } from "react-aria-components";
 import { tv } from "tailwind-variants";
 import { cn } from "@/lib/cn";
@@ -38,46 +48,135 @@ function SubmenuTrigger({
 type MenuContentProps<T extends object> = AriaMenuProps<T> &
   Pick<
     AriaPopoverProps,
-    "placement" | "offset" | "crossOffset" | "className"
+    "placement" | "offset" | "crossOffset" | "className" | "triggerRef"
   > & {
     popoverClassName?: string;
+    mobileSheet?: boolean;
   };
+
+const MOBILE_QUERY = "(max-width: 767px)";
+
+function useIsMobile() {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia(MOBILE_QUERY);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(MOBILE_QUERY).matches,
+    () => false,
+  );
+}
+
+const DISMISS_DISTANCE = 100;
+const DISMISS_VELOCITY = 500;
 
 function Content<T extends object>({
   placement = "bottom start",
   offset = 8,
   crossOffset,
+  triggerRef,
   className,
   popoverClassName,
+  mobileSheet = true,
   ...menuProps
 }: MenuContentProps<T>) {
+  const state = useContext(OverlayTriggerStateContext);
+  const isOpen = state?.isOpen ?? false;
+  const [exitDone, setExitDone] = useState(true);
+  const isMobile = useIsMobile();
+  const dragControls = useDragControls();
+
+  useEffect(() => {
+    if (isOpen) setExitDone(false);
+  }, [isOpen]);
+
+  const menu = (
+    <AriaMenu
+      {...menuProps}
+      className={cn(
+        "flex max-h-[inherit] flex-col gap-0.5 overflow-y-auto outline-none",
+        className,
+      )}
+    />
+  );
+
+  if (isMobile && mobileSheet) {
+    return (
+      <AriaModalOverlay
+        isDismissable
+        isExiting={!isOpen && !exitDone}
+        className={cn(
+          "fixed inset-0 z-50 flex items-end all",
+          isOpen ? "bg-back-0/50" : "bg-transparent",
+        )}
+      >
+        <AriaModal className="w-full outline-none">
+          <motion.div
+            initial={{ y: "100%" }}
+            animate={{ y: isOpen ? 0 : "100%" }}
+            transition={TRANSITION}
+            drag="y"
+            dragControls={dragControls}
+            dragListener={false}
+            dragConstraints={{ top: 0, bottom: 0 }}
+            dragElastic={{ top: 0.05, bottom: 0.8 }}
+            onDragEnd={(_, { offset: dragOffset, velocity }) => {
+              if (
+                dragOffset.y > DISMISS_DISTANCE ||
+                velocity.y > DISMISS_VELOCITY
+              ) {
+                state?.close();
+              }
+            }}
+            onAnimationComplete={() => {
+              if (!isOpen) setExitDone(true);
+            }}
+            className="flex max-h-[85dvh] w-full flex-col rounded-t-2xl border-t border-back-5 bg-back-1 shadow-lg outline-none"
+          >
+            <div
+              onPointerDown={(e) => dragControls.start(e)}
+              className="flex flex-none cursor-grab touch-none justify-center py-3"
+            >
+              <div className="h-1 w-15 rounded-full bg-back-5" />
+            </div>
+
+            <div className="min-h-0 overflow-y-auto px-2 pb-2">{menu}</div>
+          </motion.div>
+        </AriaModal>
+      </AriaModalOverlay>
+    );
+  }
+
   return (
     <AriaPopover
       placement={placement}
       offset={offset}
       crossOffset={crossOffset}
-      className={cn("outline-none z-50", popoverClassName)}
+      triggerRef={triggerRef}
+      isExiting={!isOpen && !exitDone}
+      className={cn("outline-none", popoverClassName)}
     >
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={TRANSITION}
-          className={cn(
-            "min-w-56 max-w-80 rounded-2xl border border-back-5 bg-back-2 p-1.5 shadow-lg outline-none",
-            "data-[placement=top]:origin-bottom data-[placement=bottom]:origin-top data-[placement=left]:origin-right data-[placement=right]:origin-left",
-          )}
-        >
-          <AriaMenu
-            {...menuProps}
-            className={cn(
-              "flex max-h-[inherit] flex-col gap-0.5 overflow-y-auto outline-none",
-              className,
-            )}
-          />
-        </motion.div>
-      </AnimatePresence>
+      {() => {
+        const hidden = { opacity: 0, scale: 0.9, filter: "blur(0.1rem)" };
+
+        return (
+          <motion.div
+            initial={hidden}
+            animate={
+              isOpen ? { opacity: 1, scale: 1, filter: "blur(0)" } : hidden
+            }
+            transition={TRANSITION}
+            onAnimationComplete={() => {
+              if (!isOpen) setExitDone(true);
+            }}
+            style={{ transformOrigin: "bottom left" }}
+            className="min-w-56 max-w-80 rounded-2xl border border-back-5 bg-back-1 p-2 shadow-lg outline-none"
+          >
+            {menu}
+          </motion.div>
+        );
+      }}
     </AriaPopover>
   );
 }
