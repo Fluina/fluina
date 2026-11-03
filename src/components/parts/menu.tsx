@@ -234,7 +234,7 @@ function Content<T extends object>({
 
             <div
               className={cn(
-                "min-h-0 px-2 pb-2",
+                "min-h-0 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]",
                 isExpanded ? "overflow-y-auto" : "overflow-y-hidden",
               )}
             >
