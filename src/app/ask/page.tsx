@@ -9,7 +9,6 @@ import {
   Delete,
   Folder,
   Globe,
-  Images,
   Loader,
   Maximize2,
   Mic,
@@ -615,7 +614,6 @@ export default function Ask() {
 
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const photoInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const scrollTopRef = useRef(0);
@@ -2800,26 +2798,22 @@ export default function Ask() {
                     offset={8}
                   >
                     {isMobile ? (
-                      <>
+                      <Menu.Section className="grid grid-cols-2 gap-2">
                         <Menu.Item
-                          icon={<Images />}
-                          onAction={() => photoInputRef.current?.click()}
+                          icon={<Paperclip />}
+                          className="h-20 flex-col justify-center"
+                          onAction={() => fileInputRef.current?.click()}
                         >
-                          写真ライブラリ
+                          ファイル
                         </Menu.Item>
                         <Menu.Item
                           icon={<Camera />}
+                          className="h-20 flex-col justify-center"
                           onAction={() => cameraInputRef.current?.click()}
                         >
-                          写真またはビデオを撮る
+                          カメラ
                         </Menu.Item>
-                        <Menu.Item
-                          icon={<Paperclip />}
-                          onAction={() => fileInputRef.current?.click()}
-                        >
-                          ファイルを選択
-                        </Menu.Item>
-                      </>
+                      </Menu.Section>
                     ) : (
                       <>
                         <Menu.Item
@@ -2873,14 +2867,6 @@ export default function Ask() {
               onChange={handleFileInputChange}
               ref={fileInputRef}
               type="file"
-              multiple
-              hidden
-            />
-            <input
-              onChange={handleFileInputChange}
-              ref={photoInputRef}
-              type="file"
-              accept="image/*,video/*"
               multiple
               hidden
             />
