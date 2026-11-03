@@ -1,11 +1,12 @@
 "use client";
 import { Check, ChevronRight } from "lucide-react";
-import { motion, useDragControls } from "motion/react";
+import { motion } from "motion/react";
 import {
   type ReactElement,
   type ReactNode,
   useContext,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -31,10 +32,30 @@ import { tv } from "tailwind-variants";
 import { cn } from "@/lib/cn";
 import { TRANSITION } from "@/lib/motion";
 
+const TRANSITION_LOCK_MS = () => TRANSITION.duration * 1000 + 50;
+
 type MenuTriggerProps = AriaMenuTriggerProps;
 
-function Trigger(props: MenuTriggerProps) {
-  return <AriaMenuTrigger {...props} />;
+function Trigger({ onOpenChange, ...props }: MenuTriggerProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const lockedUntilRef = useRef(0);
+
+  const handleOpenChange = (open: boolean) => {
+    const now = performance.now();
+    if (open === isOpen || now < lockedUntilRef.current) return;
+
+    lockedUntilRef.current = now + TRANSITION_LOCK_MS();
+    setIsOpen(open);
+    onOpenChange?.(open);
+  };
+
+  return (
+    <AriaMenuTrigger
+      {...props}
+      isOpen={isOpen}
+      onOpenChange={handleOpenChange}
+    />
+  );
 }
 
 function SubmenuTrigger({
@@ -69,6 +90,7 @@ function useIsMobile() {
 }
 
 const DISMISS_DISTANCE = 100;
+const EXPAND_DISTANCE = 40;
 const DISMISS_VELOCITY = 500;
 
 function Content<T extends object>({
@@ -83,19 +105,53 @@ function Content<T extends object>({
 }: MenuContentProps<T>) {
   const state = useContext(OverlayTriggerStateContext);
   const isOpen = state?.isOpen ?? false;
-  const [exitDone, setExitDone] = useState(true);
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  const [phase, setPhase] = useState<
+    "closed" | "entering" | "open" | "exiting"
+  >(isOpen ? "open" : "closed");
+  const [isDragging, setIsDragging] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const isMobile = useIsMobile();
-  const dragControls = useDragControls();
+
+  if (prevOpen !== isOpen) {
+    setPrevOpen(isOpen);
+    if (!isOpen) setIsExpanded(false);
+    setPhase(isOpen ? "entering" : "exiting");
+  }
+
+  const isExiting = phase === "exiting";
+  const isInteractive = phase === "open" && !isDragging;
 
   useEffect(() => {
-    if (isOpen) setExitDone(false);
-  }, [isOpen]);
+    if (phase !== "entering" && phase !== "exiting") return;
+    const timer = setTimeout(
+      () => setPhase(phase === "entering" ? "open" : "closed"),
+      TRANSITION_LOCK_MS(),
+    );
+    return () => clearTimeout(timer);
+  }, [phase]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      // フォーカスがメニュー外(bodyなど)にある場合、react-aria が拾えないためここで閉じる
+      const active = document.activeElement;
+      if (active && active !== document.body && active.closest("[role=menu]")) {
+        return;
+      }
+      state?.close();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, state]);
 
   const menu = (
     <AriaMenu
       {...menuProps}
       className={cn(
         "flex max-h-[inherit] flex-col gap-0.5 overflow-y-auto outline-none",
+        !isInteractive && "pointer-events-none",
         className,
       )}
     />
@@ -105,43 +161,85 @@ function Content<T extends object>({
     return (
       <AriaModalOverlay
         isDismissable
-        isExiting={!isOpen && !exitDone}
+        isExiting={isExiting}
         className={cn(
-          "fixed inset-0 z-50 flex items-end all",
-          isOpen ? "bg-back-0/50" : "bg-transparent",
+          "fixed inset-0 z-50 flex items-end",
+          !isOpen && "pointer-events-none",
         )}
       >
-        <AriaModal className="w-full outline-none">
+        <motion.div
+          aria-hidden="true"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: isOpen ? 1 : 0 }}
+          transition={TRANSITION}
+          className="pointer-events-none absolute inset-0 bg-back-0/50"
+        />
+        <AriaModal
+          className={cn(
+            "relative z-10 w-full outline-none",
+            !isOpen && "pointer-events-none",
+          )}
+        >
           <motion.div
-            initial={{ y: "100%" }}
-            animate={{ y: isOpen ? 0 : "100%" }}
+            initial={{ y: "100%", height: "auto" }}
+            animate={{
+              y: isOpen ? 0 : "100%",
+              height: isExpanded && isOpen ? "calc(100dvh - 1rem)" : "auto",
+            }}
             transition={TRANSITION}
             drag="y"
-            dragControls={dragControls}
-            dragListener={false}
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.05, bottom: 0.8 }}
+            onDragStart={() => setIsDragging(true)}
             onDragEnd={(_, { offset: dragOffset, velocity }) => {
-              if (
+              setTimeout(() => setIsDragging(false), 0);
+              const draggedDown =
                 dragOffset.y > DISMISS_DISTANCE ||
-                velocity.y > DISMISS_VELOCITY
-              ) {
-                state?.close();
+                velocity.y > DISMISS_VELOCITY;
+              const draggedUp =
+                dragOffset.y < -EXPAND_DISTANCE ||
+                velocity.y < -DISMISS_VELOCITY;
+              if (draggedUp) {
+                setIsExpanded(true);
+              } else if (draggedDown) {
+                if (isExpanded) setIsExpanded(false);
+                else state?.close();
               }
             }}
-            onAnimationComplete={() => {
-              if (!isOpen) setExitDone(true);
-            }}
-            className="flex max-h-[85dvh] w-full flex-col rounded-t-2xl border-t border-back-5 bg-back-1 shadow-lg outline-none"
+            className={cn(
+              "relative flex max-h-dvh w-full flex-col rounded-t-2xl border-t border-back-5 bg-back-1 shadow-lg outline-none",
+              isDragging ? "cursor-grabbing" : "cursor-grab",
+            )}
           >
             <div
-              onPointerDown={(e) => dragControls.start(e)}
-              className="flex flex-none cursor-grab touch-none justify-center py-3"
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-full h-dvh bg-back-1"
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Switch menu height"
+              className="group flex flex-none cursor-[inherit] justify-center py-3 outline-none"
+              onDoubleClick={() => setIsExpanded((prev) => !prev)}
             >
-              <div className="h-1 w-15 rounded-full bg-back-5" />
-            </div>
+              <div
+                className={cn(
+                  "h-1 w-15 rounded-full all",
+                  isDragging
+                    ? "bg-back-4 animate-pulse"
+                    : "bg-back-5 group-hover:bg-back-6 group-active:bg-back-4",
+                )}
+              />
+            </button>
 
-            <div className="min-h-0 overflow-y-auto px-2 pb-2">{menu}</div>
+            <div
+              className={cn(
+                "min-h-0 px-2 pb-2",
+                isExpanded ? "overflow-y-auto" : "overflow-y-hidden",
+              )}
+            >
+              {menu}
+            </div>
           </motion.div>
         </AriaModal>
       </AriaModalOverlay>
@@ -154,8 +252,12 @@ function Content<T extends object>({
       offset={offset}
       crossOffset={crossOffset}
       triggerRef={triggerRef}
-      isExiting={!isOpen && !exitDone}
-      className={cn("outline-none", popoverClassName)}
+      isExiting={isExiting}
+      className={cn(
+        "outline-none",
+        !isOpen && "pointer-events-none",
+        popoverClassName,
+      )}
     >
       {() => {
         const hidden = { opacity: 0, scale: 0.9, filter: "blur(0.1rem)" };
@@ -167,9 +269,6 @@ function Content<T extends object>({
               isOpen ? { opacity: 1, scale: 1, filter: "blur(0)" } : hidden
             }
             transition={TRANSITION}
-            onAnimationComplete={() => {
-              if (!isOpen) setExitDone(true);
-            }}
             style={{ transformOrigin: "bottom left" }}
             className="min-w-56 max-w-80 rounded-2xl border border-back-5 bg-back-1 p-2 shadow-lg outline-none"
           >

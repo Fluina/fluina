@@ -2272,7 +2272,7 @@ export default function Ask() {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={TRANSITION}
-      className="p-4 animate-pulse cursor-wait"
+      className="p-4 cursor-wait"
     >
       <output aria-label="Responding to the message">
         <Loader aria-hidden="true" className="animate-spin" />
