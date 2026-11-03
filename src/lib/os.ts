@@ -31,3 +31,27 @@ export function useOS(): OS {
 
   return os;
 }
+
+function detectMobile(): boolean {
+  if (typeof navigator === "undefined") return false;
+
+  if (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent,
+    )
+  ) {
+    return true;
+  }
+
+  return detectOS() === "mac" && navigator.maxTouchPoints > 1;
+}
+
+export function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    setIsMobile(detectMobile());
+  }, []);
+
+  return isMobile;
+}

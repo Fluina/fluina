@@ -5,7 +5,7 @@ import {
   type TooltipProps as RACTooltipProps,
   TooltipTrigger,
 } from "react-aria-components";
-import { useOS } from "@/lib/os";
+import { useIsMobile, useOS } from "@/lib/os";
 
 export type ShortcutSpec = {
   mac?: string[];
@@ -31,6 +31,7 @@ export function Tooltip({
   ...props
 }: TooltipProps) {
   const os = useOS();
+  const isMobile = useIsMobile();
   const resolvedKeys = shortcut
     ? os === "mac"
       ? (shortcut.mac ?? shortcut.windows)
@@ -38,7 +39,7 @@ export function Tooltip({
     : undefined;
 
   return (
-    <TooltipTrigger delay={delay} closeDelay={closeDelay}>
+    <TooltipTrigger delay={delay} closeDelay={closeDelay} isDisabled={isMobile}>
       {children}
 
       <RACTooltip

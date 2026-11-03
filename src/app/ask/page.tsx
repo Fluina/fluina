@@ -60,7 +60,7 @@ import {
   saveChatArchiveSummary,
 } from "@/lib/chat-archive";
 import { THEME, TRANSITION } from "@/lib/motion";
-import { useOS } from "@/lib/os";
+import { useIsMobile, useOS } from "@/lib/os";
 import { useNativeScroll } from "@/lib/scrollbar";
 
 const PLACEHOLDERS = [
@@ -584,7 +584,7 @@ const PAGE_LOAD_EXTRA_DELAY_MS = 250;
 
 export default function Ask() {
   const os = useOS();
-  const [isMobile, setIsMobile] = useState(false);
+  const isMobile = useIsMobile();
 
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [value, setValue] = useState("");
@@ -1883,23 +1883,8 @@ export default function Ask() {
   }, [handleFilesAdded, dragFileCount]);
 
   //  ================================================================
-  //    キーボードショートカット＆モバイル判定
+  //    キーボードショートカット
   //  ================================================================
-
-  const isMobileDevice = useCallback(() => {
-    return (
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-        navigator.userAgent,
-      ) ||
-      ("maxTouchPoints" in navigator &&
-        navigator.maxTouchPoints > 0 &&
-        window.innerWidth <= 768)
-    );
-  }, []);
-
-  useEffect(() => {
-    setIsMobile(isMobileDevice());
-  }, [isMobileDevice]);
 
   const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (
@@ -1914,7 +1899,7 @@ export default function Ask() {
       return;
     }
 
-    if (isMobileDevice()) return;
+    if (isMobile) return;
 
     if (
       e.key === "Enter" &&
@@ -2801,14 +2786,14 @@ export default function Ask() {
                       <Menu.Section className="grid grid-cols-2 gap-2">
                         <Menu.Item
                           icon={<Paperclip />}
-                          className="h-20 flex-col justify-center"
+                          className="h-20 flex flex-col justify-center items-center"
                           onAction={() => fileInputRef.current?.click()}
                         >
                           ファイル
                         </Menu.Item>
                         <Menu.Item
                           icon={<Camera />}
-                          className="h-20 flex-col justify-center"
+                          className="h-20 flex flex-col justify-center items-center"
                           onAction={() => cameraInputRef.current?.click()}
                         >
                           カメラ

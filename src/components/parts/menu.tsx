@@ -8,7 +8,6 @@ import {
   useEffect,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import {
   Menu as AriaMenu,
@@ -31,6 +30,7 @@ import {
 import { tv } from "tailwind-variants";
 import { cn } from "@/lib/cn";
 import { TRANSITION } from "@/lib/motion";
+import { useIsMobile } from "@/lib/os";
 
 const TRANSITION_LOCK_MS = () => TRANSITION.duration * 1000 + 50;
 
@@ -74,20 +74,6 @@ type MenuContentProps<T extends object> = AriaMenuProps<T> &
     popoverClassName?: string;
     mobileSheet?: boolean;
   };
-
-const MOBILE_QUERY = "(max-width: 767px)";
-
-function useIsMobile() {
-  return useSyncExternalStore(
-    (onChange) => {
-      const query = window.matchMedia(MOBILE_QUERY);
-      query.addEventListener("change", onChange);
-      return () => query.removeEventListener("change", onChange);
-    },
-    () => window.matchMedia(MOBILE_QUERY).matches,
-    () => false,
-  );
-}
 
 const DISMISS_DISTANCE = 100;
 const EXPAND_DISTANCE = 40;
@@ -135,7 +121,6 @@ function Content<T extends object>({
     if (!isOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
-      // フォーカスがメニュー外(bodyなど)にある場合、react-aria が拾えないためここで閉じる
       const active = document.activeElement;
       if (active && active !== document.body && active.closest("[role=menu]")) {
         return;
@@ -289,7 +274,7 @@ function Content<T extends object>({
 
 const menuItemVariants = tv({
   base: [
-    "relative flex cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-1.5 outline-none all",
+    "relative flex cursor-pointer select-none items-center gap-2.5 rounded-4xl px-2.5 py-1.5 outline-none all",
     "text-sm text-fore-1",
     "data-hovered:bg-back-3 data-focus-visible:bg-back-3",
     "data-pressed:bg-back-4",
@@ -339,9 +324,7 @@ function Item({
       {(renderProps) => (
         <>
           {icon && (
-            <span className="flex size-4 items-center justify-center [&>svg]:size-4 [&>svg]:text-fore-9">
-              {icon}
-            </span>
+            <span className="flex items-center justify-center">{icon}</span>
           )}
 
           <span className="flex-1 truncate text-left">
