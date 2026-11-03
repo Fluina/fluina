@@ -9,6 +9,7 @@ import {
   Delete,
   Folder,
   Globe,
+  Images,
   Loader,
   Maximize2,
   Mic,
@@ -614,6 +615,8 @@ export default function Ask() {
 
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const scrollTopRef = useRef(0);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -2796,21 +2799,43 @@ export default function Ask() {
                     placement="top start"
                     offset={8}
                   >
-                    <Menu.Item
-                      icon={<Paperclip />}
-                      shortcut="Ctrl+Shift+Alt+U"
-                      onAction={() => fileInputRef.current?.click()}
-                    >
-                      ファイルを添付
-                    </Menu.Item>
-
-                    {!isMobile && (
-                      <Menu.Item
-                        onAction={handleTakeScreenshot}
-                        icon={<Camera />}
-                      >
-                        スクリーンショットを撮影
-                      </Menu.Item>
+                    {isMobile ? (
+                      <>
+                        <Menu.Item
+                          icon={<Images />}
+                          onAction={() => photoInputRef.current?.click()}
+                        >
+                          写真ライブラリ
+                        </Menu.Item>
+                        <Menu.Item
+                          icon={<Camera />}
+                          onAction={() => cameraInputRef.current?.click()}
+                        >
+                          写真またはビデオを撮る
+                        </Menu.Item>
+                        <Menu.Item
+                          icon={<Paperclip />}
+                          onAction={() => fileInputRef.current?.click()}
+                        >
+                          ファイルを選択
+                        </Menu.Item>
+                      </>
+                    ) : (
+                      <>
+                        <Menu.Item
+                          icon={<Paperclip />}
+                          shortcut="Ctrl+Shift+Alt+U"
+                          onAction={() => fileInputRef.current?.click()}
+                        >
+                          ファイルを添付
+                        </Menu.Item>
+                        <Menu.Item
+                          onAction={handleTakeScreenshot}
+                          icon={<Camera />}
+                        >
+                          スクリーンショットを撮影
+                        </Menu.Item>
+                      </>
                     )}
 
                     <Menu.Separator />
@@ -2849,6 +2874,22 @@ export default function Ask() {
               ref={fileInputRef}
               type="file"
               multiple
+              hidden
+            />
+            <input
+              onChange={handleFileInputChange}
+              ref={photoInputRef}
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              hidden
+            />
+            <input
+              onChange={handleFileInputChange}
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*,video/*"
+              capture="environment"
               hidden
             />
 

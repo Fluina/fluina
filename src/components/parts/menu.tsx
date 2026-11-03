@@ -181,10 +181,17 @@ function Content<T extends object>({
           )}
         >
           <motion.div
-            initial={{ y: "100%", height: "auto" }}
+            initial={{
+              y: "100%",
+              height: "auto",
+              opacity: 0,
+              filter: "blur(0.1rem)",
+            }}
             animate={{
               y: isOpen ? 0 : "100%",
-              height: isExpanded && isOpen ? "calc(100dvh - 1rem)" : "auto",
+              height: isExpanded && isOpen ? "100dvh" : "auto",
+              opacity: isOpen ? 1 : 0,
+              filter: isOpen ? "blur(0rem)" : "blur(0.1rem)",
             }}
             transition={TRANSITION}
             drag="y"
@@ -286,11 +293,12 @@ const menuItemVariants = tv({
     "text-sm text-fore-1",
     "data-hovered:bg-back-3 data-focus-visible:bg-back-3",
     "data-pressed:bg-back-4",
+    "max-md:bg-back-2 max-md:data-hovered:bg-back-3 max-md:data-focus-visible:bg-back-3 max-md:data-pressed:bg-back-4",
     "data-disabled:pointer-events-none data-disabled:opacity-40",
   ],
   variants: {
     destructive: {
-      true: "text-red data-hovered:bg-red/10 data-focus-visible:bg-red/10 data-pressed:bg-red/15",
+      true: "text-red data-hovered:bg-red/10 data-focus-visible:bg-red/10 data-pressed:bg-red/15 max-md:data-hovered:bg-red/10 max-md:data-focus-visible:bg-red/10 max-md:data-pressed:bg-red/15",
       false: "",
     },
   },
