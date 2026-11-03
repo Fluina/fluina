@@ -199,7 +199,7 @@ function Content<T extends object>({
               }
             }}
             className={cn(
-              "relative flex max-h-dvh w-full flex-col rounded-t-2xl border-t border-back-5 bg-back-1 shadow-lg outline-none",
+              "relative flex max-h-dvh w-full flex-col rounded-t-4xl border border-back-5 bg-back-1 shadow-lg outline-none",
               isDragging ? "cursor-grabbing" : "cursor-grab",
             )}
           >
@@ -219,7 +219,7 @@ function Content<T extends object>({
                   "h-1 w-15 rounded-full all",
                   isDragging
                     ? "bg-back-4 animate-pulse"
-                    : "bg-back-5 group-hover:bg-back-6 group-active:bg-back-4",
+                    : "bg-back-5 group-data-hovered:bg-back-6 group-data-actived:bg-back-4",
                 )}
               />
             </button>
@@ -274,8 +274,7 @@ function Content<T extends object>({
 
 const menuItemVariants = tv({
   base: [
-    "relative flex cursor-pointer select-none items-center gap-2.5 rounded-4xl px-2.5 py-1.5 outline-none all",
-    "text-sm text-fore-1",
+    "relative flex cursor-pointer items-center gap-2 rounded-4xl p-2 outline-none",
     "data-hovered:bg-back-3 data-focus-visible:bg-back-3",
     "data-pressed:bg-back-4",
     "max-md:bg-back-2 max-md:data-hovered:bg-back-3 max-md:data-focus-visible:bg-back-3 max-md:data-pressed:bg-back-4",
