@@ -1579,6 +1579,8 @@ export default function Ask() {
 
     setValue("");
     if (editorRef.current) editorRef.current.innerText = "";
+    // モバイルでは送信後にカーソルとキーボードを閉じる
+    if (isMobile) editorRef.current?.blur();
     setIsAdjusted(false);
     setIsScrollable(false);
     collapseComposer();
