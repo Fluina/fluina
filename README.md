@@ -40,8 +40,10 @@ The upload bucket must allow browser `PUT` requests from the Fluina site origin
 with the `Content-Type` request header. Configure a one-day R2 lifecycle
 expiration rule for the `uploads/` prefix in this bucket. Uploads use random
 object keys in a shared prefix; there is no per-user account or folder.
-Fluina does not impose attachment count or file-size caps, but R2, OpenRouter,
-and selected model/provider limits still apply.
+Fluina attempts to delete uploaded objects when AI processing ends or fails;
+the one-day lifecycle rule is a fallback for abandoned uploads or failed
+deletions. Fluina does not impose attachment count or file-size caps, but R2,
+OpenRouter, and selected model/provider limits still apply.
 
 ## Manim visual answers
 

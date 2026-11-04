@@ -6,6 +6,7 @@ import {
 } from "./manim-renderer";
 import {
   createAttachmentReadUrl,
+  deleteUploadedAttachments,
   readUploadedAttachmentText,
   type UploadedAttachment,
 } from "./r2-storage";
@@ -258,7 +259,7 @@ const parseStreamEvent = (event: string) => {
   return { done: false, content: "" };
 };
 
-export const generateAskResponse = async function* (
+const generateAskResponseContent = async function* (
   message: string,
   summary = "",
   history: { role: "user" | "assistant"; content: string }[] = [],
@@ -432,6 +433,20 @@ export const generateAskResponse = async function* (
   }
   if (trailingText) yield `\n\n${trailingText}`;
   yield `\n\n[[FLUINA_MEDIA:${encodeURIComponent(JSON.stringify(media))}]]`;
+};
+
+export const generateAskResponse = async function* (
+  message: string,
+  summary = "",
+  history: { role: "user" | "assistant"; content: string }[] = [],
+  signal?: AbortSignal,
+  files: UploadedAttachment[] = [],
+): AsyncGenerator<string> {
+  try {
+    yield* generateAskResponseContent(message, summary, history, signal, files);
+  } finally {
+    await deleteUploadedAttachments(files);
+  }
 };
 
 export const generateHistorySummary = async (

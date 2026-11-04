@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { S3Client } from "@aws-sdk/client-s3";
 
 process.env.OPENROUTER_API_KEY ??= "test-openrouter-key";
 process.env.MANIM_RENDERER_URL ??= "https://renderer.example.test";
@@ -15,12 +16,15 @@ const { renderVisualScene } = await import("../src/services/manim-renderer");
 const { askController } = await import("../src/modules/ask/controller");
 let restoreFetch = () => {};
 let restoreConsole = () => {};
+let restoreR2 = () => {};
 
 afterEach(() => {
   restoreFetch();
   restoreFetch = () => {};
   restoreConsole();
   restoreConsole = () => {};
+  restoreR2();
+  restoreR2 = () => {};
 });
 
 test("streams OpenRouter chat completion deltas", async () => {
@@ -108,6 +112,10 @@ test("signs direct uploads to the private R2 attachment bucket", async () => {
 });
 
 test("sends signed R2 URLs for image and PDF attachments to OpenRouter", async () => {
+  const deleteSpy = spyOn(S3Client.prototype, "send").mockImplementation(
+    async () => ({}) as never,
+  );
+  restoreR2 = () => deleteSpy.mockRestore();
   const encoder = new TextEncoder();
   const bytes = encoder.encode(
     [
@@ -173,9 +181,17 @@ test("sends signed R2 URLs for image and PDF attachments to OpenRouter", async (
       "X-Amz-Expires=86400",
     ),
   ).toBe(true);
+  expect(deleteSpy).toHaveBeenCalledTimes(2);
+  expect(
+    deleteSpy.mock.calls.map(([command]) => command.constructor.name),
+  ).toEqual(["DeleteObjectCommand", "DeleteObjectCommand"]);
 });
 
 test("sends attachment-only requests without adding an empty text part", async () => {
+  const deleteSpy = spyOn(S3Client.prototype, "send").mockImplementation(
+    async () => ({}) as never,
+  );
+  restoreR2 = () => deleteSpy.mockRestore();
   const encoder = new TextEncoder();
   const bytes = encoder.encode(
     [
@@ -230,6 +246,7 @@ test("sends attachment-only requests without adding an empty text part", async (
       },
     },
   ]);
+  expect(deleteSpy).toHaveBeenCalledTimes(1);
 });
 
 test("rejects an empty prompt when no attachments are supplied", async () => {
@@ -411,6 +428,46 @@ test("returns provider failures before opening the chat response stream", async 
     error:
       "OpenRouter request failed (404): ZDR violation: no eligible free providers",
   });
+});
+
+test("deletes uploaded attachments when OpenRouter rejects the request", async () => {
+  const deleteSpy = spyOn(S3Client.prototype, "send").mockImplementation(
+    async () => ({}) as never,
+  );
+  restoreR2 = () => deleteSpy.mockRestore();
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      async () =>
+        Response.json(
+          { error: { message: "Invalid request" } },
+          { status: 400 },
+        ),
+      { preconnect: globalThis.fetch.preconnect },
+    ),
+  );
+  restoreFetch = () => fetchSpy.mockRestore();
+
+  await expect(
+    (async () => {
+      for await (const _chunk of generateAskResponse(
+        "質問",
+        "",
+        [],
+        undefined,
+        [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "photo.png",
+            type: "image/png",
+          },
+        ],
+      )) {
+        // Consume the stream to observe the request error and cleanup.
+      }
+    })(),
+  ).rejects.toThrow("OpenRouter request failed");
+
+  expect(deleteSpy).toHaveBeenCalledTimes(1);
 });
 
 test("generates a history summary with a non-streaming completion", async () => {

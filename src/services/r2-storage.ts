@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -117,4 +118,33 @@ export const readUploadedAttachmentText = async (id: string) => {
 
   if (!result.Body) throw new Error("Uploaded attachment was not found.");
   return result.Body.transformToString();
+};
+
+export const deleteUploadedAttachments = async (
+  attachments: Pick<UploadedAttachment, "id">[],
+) => {
+  if (attachments.length === 0) return;
+
+  try {
+    const config = getStorageConfig();
+    const s3 = getClient(config);
+    const results = await Promise.allSettled(
+      attachments.map((attachment) =>
+        s3.send(
+          new DeleteObjectCommand({
+            Bucket: config.bucket,
+            Key: getObjectKey(attachment.id),
+          }),
+        ),
+      ),
+    );
+
+    if (results.some((result) => result.status === "rejected")) {
+      console.error(
+        "One or more temporary R2 attachments could not be deleted.",
+      );
+    }
+  } catch {
+    console.error("Temporary R2 attachments could not be deleted.");
+  }
 };
