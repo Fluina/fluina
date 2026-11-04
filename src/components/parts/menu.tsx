@@ -199,7 +199,7 @@ function Content<T extends object>({
               }
             }}
             className={cn(
-              "relative flex max-h-dvh w-full flex-col rounded-t-4xl border border-back-5 bg-back-1 shadow-lg outline-none",
+              "relative flex max-h-dvh w-full flex-col rounded-4xl border border-back-5 bg-back-1 shadow-lg outline-none",
               isDragging ? "cursor-grabbing" : "cursor-grab",
             )}
           >

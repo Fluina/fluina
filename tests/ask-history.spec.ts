@@ -27,13 +27,13 @@ test("waits for mobile chat layout before revealing the disclaimer", async ({
             id: "startup-user",
             role: "user",
             content: "Startup question",
-            timestamp: 1,
+            timestamp: Date.now() - 2000,
           });
           messages.add({
             id: "startup-assistant",
             role: "assistant",
             content: "Startup answer",
-            timestamp: 2,
+            timestamp: Date.now() - 1000,
           });
           transaction.oncomplete = () => {
             database.close();

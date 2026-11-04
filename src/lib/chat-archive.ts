@@ -207,6 +207,155 @@ export const appendChatMessage = async (message: ArchivedMessage) => {
   });
 };
 
+export const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+// 端末の時計が変更されても期限が狂わないよう、サーバー時刻との差を保持する。
+// 同期できていない間は、直近の差（未同期なら端末の時計）で代用する。
+const CLOCK_OFFSET_KEY = "clockOffset";
+let clockOffset = 0;
+
+export const serverNow = () => Date.now() + clockOffset;
+
+export const syncServerClock = async (apiUrl: string) => {
+  const requestedAt = Date.now();
+  const response = await fetch(`${apiUrl}/api/ask/time`, { cache: "no-store" });
+  if (!response.ok) throw new Error("サーバー時刻を取得できませんでした。");
+
+  const payload: unknown = await response.json();
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("now" in payload) ||
+    typeof payload.now !== "number"
+  ) {
+    throw new Error("サーバー時刻の応答が不正です。");
+  }
+
+  // 往復時間の半分を通信遅延として補正する
+  const receivedAt = Date.now();
+  clockOffset = payload.now - (requestedAt + receivedAt) / 2;
+
+  const database = await openDatabase();
+  await new Promise<void>((resolve) => {
+    const transaction = database.transaction(METADATA_STORE, "readwrite");
+    transaction
+      .objectStore(METADATA_STORE)
+      .put({ key: CLOCK_OFFSET_KEY, value: clockOffset });
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+  });
+};
+
+// 直近に同期したオフセットを読み込む。通信できない場合の代用になる。
+export const loadStoredClockOffset = async () => {
+  const database = await openDatabase();
+
+  return new Promise<void>((resolve) => {
+    const transaction = database.transaction(METADATA_STORE, "readonly");
+    const request = transaction
+      .objectStore(METADATA_STORE)
+      .get(CLOCK_OFFSET_KEY);
+    request.onsuccess = () => {
+      const stored = request.result as { value: number } | undefined;
+      if (stored && typeof stored.value === "number")
+        clockOffset = stored.value;
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+  });
+};
+
+const PURGE_EPOCH_KEY = "purgeEpoch";
+
+// 削除のたびに増える世代番号。要約の作成中に削除が起きたか判定するために使う。
+export const getChatPurgeEpoch = async () => {
+  const database = await openDatabase();
+
+  return new Promise<number>((resolve, reject) => {
+    const transaction = database.transaction(METADATA_STORE, "readonly");
+    const request = transaction
+      .objectStore(METADATA_STORE)
+      .get(PURGE_EPOCH_KEY);
+
+    request.onsuccess = () => {
+      resolve((request.result as { value: number } | undefined)?.value ?? 0);
+    };
+    transaction.onerror = () => {
+      reject(
+        transaction.error ?? new Error("会話要約を読み込めませんでした。"),
+      );
+    };
+  });
+};
+
+// 1ターン（ユーザーの送信とそれに続く返答）を、送信時刻から24時間後にまとめて削除する。
+// 削除された会話を含む要約も、内容が残らないよう同じトランザクションで破棄する。
+export const purgeExpiredChatTurns = async (now = serverNow()) => {
+  const database = await openDatabase();
+  const cutoff = now - CHAT_RETENTION_MS;
+
+  return new Promise<number[]>((resolve, reject) => {
+    const transaction = database.transaction(
+      [MESSAGE_STORE, METADATA_STORE],
+      "readwrite",
+    );
+    const metadata = transaction.objectStore(METADATA_STORE);
+    const request = transaction.objectStore(MESSAGE_STORE).openCursor();
+    const deleted: number[] = [];
+    let turnExpired: boolean | null = null;
+
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        if (deleted.length === 0) return;
+        metadata.delete(SUMMARY_KEY);
+        const epochRequest = metadata.get(PURGE_EPOCH_KEY);
+        epochRequest.onsuccess = () => {
+          const epoch =
+            (epochRequest.result as { value: number } | undefined)?.value ?? 0;
+          metadata.put({ key: PURGE_EPOCH_KEY, value: epoch + 1 });
+        };
+        return;
+      }
+
+      const message = cursor.value as ChatArchiveRecord;
+      if (message.role === "user" || turnExpired === null) {
+        turnExpired = message.timestamp < cutoff;
+      }
+      if (!turnExpired) return;
+
+      cursor.delete();
+      deleted.push(message.sequence);
+      cursor.continue();
+    };
+    transaction.oncomplete = () => resolve(deleted);
+    transaction.onerror = () => {
+      reject(
+        transaction.error ??
+          new Error("期限切れの会話を削除できませんでした。"),
+      );
+    };
+  });
+};
+
+export const getOldestChatSequence = async () => {
+  const database = await openDatabase();
+
+  return new Promise<number | null>((resolve, reject) => {
+    const transaction = database.transaction(MESSAGE_STORE, "readonly");
+    const request = transaction.objectStore(MESSAGE_STORE).openKeyCursor();
+
+    request.onsuccess = () => {
+      resolve(request.result ? Number(request.result.key) : null);
+    };
+    transaction.onerror = () => {
+      reject(
+        transaction.error ?? new Error("チャット履歴を読み込めませんでした。"),
+      );
+    };
+  });
+};
+
 export const loadLatestChatPage = (limit: number) =>
   readPage(null, "prev", limit, false);
 
@@ -277,17 +426,32 @@ export const loadMessagesToSummarize = async (
   });
 };
 
-export const saveChatArchiveSummary = async (summary: ChatArchiveSummary) => {
+// 要約の作成中に削除が起きていた場合（世代番号が違う場合）は、期限切れの内容を
+// 含むため保存せず false を返す。
+export const saveChatArchiveSummary = async (
+  summary: ChatArchiveSummary,
+  expectedEpoch: number,
+) => {
   const database = await openDatabase();
 
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<boolean>((resolve, reject) => {
     const transaction = database.transaction(METADATA_STORE, "readwrite");
-    transaction.objectStore(METADATA_STORE).put({
-      key: SUMMARY_KEY,
-      content: summary.content,
-      throughSequence: summary.throughSequence,
-    });
-    transaction.oncomplete = () => resolve();
+    const store = transaction.objectStore(METADATA_STORE);
+    let saved = false;
+    const epochRequest = store.get(PURGE_EPOCH_KEY);
+
+    epochRequest.onsuccess = () => {
+      const epoch =
+        (epochRequest.result as { value: number } | undefined)?.value ?? 0;
+      if (epoch !== expectedEpoch) return;
+      store.put({
+        key: SUMMARY_KEY,
+        content: summary.content,
+        throughSequence: summary.throughSequence,
+      });
+      saved = true;
+    };
+    transaction.oncomplete = () => resolve(saved);
     transaction.onerror = () => {
       reject(
         transaction.error ?? new Error("会話要約を保存できませんでした。"),

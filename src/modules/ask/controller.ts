@@ -11,6 +11,10 @@ import { AskSchema, MAX_ATTACHMENT_BYTES } from "./schema";
 const KEEPALIVE_INTERVAL_MS = 5_000;
 
 export const askController = new Elysia({ prefix: "/ask" })
+  .get("/time", ({ set }) => {
+    set.headers["Cache-Control"] = "no-store";
+    return { now: Date.now() };
+  })
   .post(
     "/",
     async ({ body, request, set }) => {

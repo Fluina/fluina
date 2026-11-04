@@ -48,16 +48,23 @@ import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_sm
 import { Button, Menu, ScrollArea, Tooltip } from "@/components/parts";
 import {
   type ArchivedAttachment,
+  type ArchivedMessage,
   appendChatMessage,
   type ChatArchivePage,
   type ChatArchiveRecord,
   getChatArchiveSummary,
+  getChatPurgeEpoch,
+  getOldestChatSequence,
   loadLatestChatPage,
   loadLatestChatTurns,
   loadMessagesToSummarize,
   loadOlderChatTurns,
+  loadStoredClockOffset,
+  purgeExpiredChatTurns,
   requestPersistentChatStorage,
   saveChatArchiveSummary,
+  serverNow,
+  syncServerClock,
 } from "@/lib/chat-archive";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useIsMobile, useOS } from "@/lib/os";
@@ -110,6 +117,9 @@ const INTERRUPTED_NOTICE_TEXT =
   "ページが再読み込みされたため、返答が中断されました。";
 
 const CHAT_PAGE_TURN_LIMIT = 10;
+const getApiUrl = () =>
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const ARCHIVE_CHANNEL_NAME = "fluina-chat-archive";
 const CHAT_PAGE_MESSAGE_LIMIT = CHAT_PAGE_TURN_LIMIT * 2;
 const SUMMARY_BATCH_LIMIT = 20;
 const CHAT_MESSAGE_MAX_LENGTH = 4000;
@@ -137,8 +147,8 @@ const MessageNoticeBox = ({ notice }: { notice: MessageNotice }) => (
     role={notice.kind === "error" ? "alert" : "status"}
     className={`select-text text-sm p-2 border border-dashed rounded-lg ${
       notice.kind === "error"
-        ? "text-red border-red bg-red/25"
-        : "text-yellow border-yellow bg-yellow/25"
+        ? "text-red border-red"
+        : "text-yellow border-yellow"
     }`}
   >
     {notice.text}
@@ -804,6 +814,19 @@ export default function Ask() {
           console.warn("Persistent storage request failed:", error);
         }
 
+        try {
+          await loadStoredClockOffset();
+          await syncServerClock(getApiUrl());
+        } catch (error) {
+          console.warn("Server clock sync failed:", error);
+        }
+
+        try {
+          await purgeExpiredChatTurns();
+        } catch (error) {
+          console.warn("Expired chat purge failed:", error);
+        }
+
         let page = await loadLatestChatTurns(CHAT_PAGE_TURN_LIMIT);
         const lastMessage = page.messages.at(-1);
         if (lastMessage?.role === "user") {
@@ -813,7 +836,7 @@ export default function Ask() {
               role: "assistant",
               content: "",
               notice: { kind: "error", text: INTERRUPTED_NOTICE_TEXT },
-              timestamp: Date.now(),
+              timestamp: serverNow(),
             });
           } catch (error) {
             console.warn("Interrupted notice was not saved:", error);
@@ -870,17 +893,115 @@ export default function Ask() {
     [isExpanded],
   );
 
+  // IndexedDBの読み込みと削除、画面への反映を1本の列で直列に実行する
+  const archiveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const runArchiveTask = useCallback(<T,>(task: () => Promise<T>) => {
+    const result = archiveQueueRef.current.then(task, task);
+    archiveQueueRef.current = result.catch(() => undefined);
+    return result;
+  }, []);
+
   const refreshVisibleArchivePage = useCallback(
-    async (scrollBehavior: ChatScrollBehavior | null = null) => {
-      const page = await loadLatestChatTurns(
-        CHAT_PAGE_TURN_LIMIT,
-        loadedFirstSequenceRef.current,
-      );
-      applyArchivePage(page, scrollBehavior);
-      return page;
-    },
-    [applyArchivePage],
+    (scrollBehavior: ChatScrollBehavior | null = null) =>
+      runArchiveTask(async () => {
+        const page = await loadLatestChatTurns(
+          CHAT_PAGE_TURN_LIMIT,
+          loadedFirstSequenceRef.current,
+        );
+        applyArchivePage(page, scrollBehavior);
+        return page;
+      }),
+    [applyArchivePage, runArchiveTask],
   );
+
+  const appendQueuedMessage = useCallback(
+    (message: ArchivedMessage) =>
+      runArchiveTask(() => appendChatMessage(message)),
+    [runArchiveTask],
+  );
+
+  useEffect(() => {
+    if (!archiveReady) return;
+
+    const channel =
+      typeof BroadcastChannel === "undefined"
+        ? null
+        : new BroadcastChannel(ARCHIVE_CHANNEL_NAME);
+
+    // 削除したターンを画面から外す。先頭側の削除なので、表示位置は末尾基準で維持する
+    const reflectDeletion = async (deleted: Set<number>) => {
+      setIsPrependingHistory(true);
+      setMessages((current) =>
+        current.filter((message) => !deleted.has(message.sequence)),
+      );
+
+      // 表示中の先頭が消えた場合は、残った最古のターンが新しい先頭になる
+      const oldest = await getOldestChatSequence();
+      const currentFirst = loadedFirstSequenceRef.current;
+      const first =
+        currentFirst !== null && !deleted.has(currentFirst)
+          ? currentFirst
+          : oldest;
+      loadedFirstSequenceRef.current = first;
+      setFirstMessageSequence(first);
+      setHasOlderMessages(oldest !== null && first !== null && oldest < first);
+    };
+
+    const purge = () =>
+      runArchiveTask(async () => {
+        try {
+          await syncServerClock(getApiUrl()).catch(() => undefined);
+          const sequences = await purgeExpiredChatTurns();
+          if (sequences.length === 0) return;
+
+          await reflectDeletion(new Set(sequences));
+          channel?.postMessage({ type: "purged", sequences });
+        } catch (error) {
+          console.warn("Expired chat purge failed:", error);
+        }
+      });
+
+    // 他のタブでの削除を、このタブの画面にも反映する
+    if (channel) {
+      channel.onmessage = (event: MessageEvent) => {
+        const data: unknown = event.data;
+        if (
+          typeof data !== "object" ||
+          data === null ||
+          !("type" in data) ||
+          data.type !== "purged" ||
+          !("sequences" in data) ||
+          !Array.isArray(data.sequences)
+        ) {
+          return;
+        }
+        const sequences = new Set(
+          data.sequences.filter(
+            (value): value is number => typeof value === "number",
+          ),
+        );
+        void runArchiveTask(async () => {
+          try {
+            await reflectDeletion(sequences);
+          } catch (error) {
+            console.warn("Purge sync failed:", error);
+          }
+        });
+      };
+    }
+
+    const interval = setInterval(() => void purge(), 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void purge();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+      channel?.close();
+    };
+  }, [archiveReady, runArchiveTask]);
 
   const showOlderMessages = useCallback(async () => {
     if (
@@ -893,24 +1014,34 @@ export default function Ask() {
 
     setIsLoadingOlderMessages(true);
     try {
-      const olderPage = await loadOlderChatTurns(
-        firstMessageSequence,
-        CHAT_PAGE_TURN_LIMIT,
-      );
-      setIsPrependingHistory(true);
-      setMessages((currentMessages) => [
-        ...olderPage.messages,
-        ...currentMessages,
-      ]);
-      setHasOlderMessages(olderPage.hasOlder);
-      setFirstMessageSequence(olderPage.firstSequence);
-      loadedFirstSequenceRef.current = olderPage.firstSequence;
+      await runArchiveTask(async () => {
+        const beforeSequence = loadedFirstSequenceRef.current;
+        if (beforeSequence === null) return;
+
+        const olderPage = await loadOlderChatTurns(
+          beforeSequence,
+          CHAT_PAGE_TURN_LIMIT,
+        );
+        setIsPrependingHistory(true);
+        setMessages((currentMessages) => [
+          ...olderPage.messages,
+          ...currentMessages,
+        ]);
+        setHasOlderMessages(olderPage.hasOlder);
+        setFirstMessageSequence(olderPage.firstSequence);
+        loadedFirstSequenceRef.current = olderPage.firstSequence;
+      });
     } catch (error) {
       console.error("Older chat page load failed:", error);
     } finally {
       setIsLoadingOlderMessages(false);
     }
-  }, [firstMessageSequence, hasOlderMessages, isLoadingOlderMessages]);
+  }, [
+    firstMessageSequence,
+    hasOlderMessages,
+    isLoadingOlderMessages,
+    runArchiveTask,
+  ]);
 
   useLayoutEffect(() => {
     if (isPrependingHistory) setIsPrependingHistory(false);
@@ -921,6 +1052,47 @@ export default function Ask() {
       scrollToLatestTurn(scrollBehavior);
     }
   });
+
+  // 返答の完了時は、ストリーミング表示から仮想リスト内の末尾ターンへ描画が移る。
+  // 末尾ターンの高さが実測で確定するまで待ってから、位置を合わせ直す。
+  const hasVisibleStreamingMessage =
+    streamingMessage !== null &&
+    !messages.some((message) => message.id === streamingMessage.id);
+  const wasStreamingVisibleRef = useRef(false);
+  useLayoutEffect(() => {
+    const wasVisible = wasStreamingVisibleRef.current;
+    wasStreamingVisibleRef.current = hasVisibleStreamingMessage;
+    if (!wasVisible || hasVisibleStreamingMessage) return;
+    if (!shouldStickToLatestTurnRef.current) return;
+
+    let frame = 0;
+    let stableFrames = 0;
+    let previousSignature = "";
+    const startedAt = performance.now();
+    const settle = () => {
+      const viewport = chatScrollRef.current;
+      if (!viewport || !shouldStickToLatestTurnRef.current) return;
+
+      updateTailSpacer(viewport);
+      const lastTurn = viewport.querySelector<HTMLElement>(
+        "[data-chat-last-turn]",
+      );
+      const signature = `${lastTurn?.offsetHeight ?? 0}/${viewport.scrollHeight}`;
+      stableFrames = signature === previousSignature ? stableFrames + 1 : 0;
+      previousSignature = signature;
+
+      if (stableFrames < 3 && performance.now() - startedAt < 800) {
+        frame = requestAnimationFrame(settle);
+        return;
+      }
+      if (!nativeSmoothScrollCleanupRef.current) {
+        scrollToLatestTurn("instant");
+      }
+    };
+    frame = requestAnimationFrame(settle);
+
+    return () => cancelAnimationFrame(frame);
+  }, [hasVisibleStreamingMessage, scrollToLatestTurn, updateTailSpacer]);
 
   useLayoutEffect(() => {
     if (!archiveReady || isInitialChatPositioned) return;
@@ -1111,7 +1283,7 @@ export default function Ask() {
       );
       const assistantMessageId = generateId();
       streamedMessageIdsRef.current.add(assistantMessageId);
-      const startedAt = Date.now();
+      const startedAt = serverNow();
       let reply = "";
       let renderTimeout: ReturnType<typeof setTimeout> | null = null;
       let assistantMessagePersisted = false;
@@ -1156,6 +1328,7 @@ export default function Ask() {
           );
         }
 
+        let summaryEpoch = await getChatPurgeEpoch();
         let summary = await getChatArchiveSummary();
         if (latestPage.firstSequence !== null) {
           try {
@@ -1202,12 +1375,18 @@ export default function Ask() {
                 throw new Error("会話履歴の要約応答が不正です。");
               }
 
-              summary = {
+              const nextSummary = {
                 content: result.summary.slice(0, 12000),
                 throughSequence:
                   batch.at(-1)?.sequence ?? summary.throughSequence,
               };
-              await saveChatArchiveSummary(summary);
+              if (await saveChatArchiveSummary(nextSummary, summaryEpoch)) {
+                summary = nextSummary;
+              } else {
+                // 作成中に期限切れの削除が起きたため、残った会話から要約し直す
+                summaryEpoch = await getChatPurgeEpoch();
+                summary = await getChatArchiveSummary();
+              }
             }
           } catch (error) {
             if (controller.signal.aborted) throw error;
@@ -1286,12 +1465,12 @@ export default function Ask() {
             "AIから空の応答が返されました。時間をおいて再度お試しください。",
           );
         }
-        await appendChatMessage({
+        await appendQueuedMessage({
           id: assistantMessageId,
           role: "assistant",
           content: reply,
-          timestamp: Date.now(),
-          duration: Date.now() - startedAt,
+          timestamp: serverNow(),
+          duration: serverNow() - startedAt,
         });
         assistantMessagePersisted = true;
         await refreshVisibleArchivePage();
@@ -1340,15 +1519,15 @@ export default function Ask() {
           id: assistantMessageId,
           role: "assistant",
           content: reply,
-          timestamp: Date.now(),
-          duration: Date.now() - startedAt,
+          timestamp: serverNow(),
+          duration: serverNow() - startedAt,
           notice: isUserCancelled
             ? { kind: "cancelled", text: CANCELLED_NOTICE_TEXT }
             : { kind: "error", text: errorMessage },
         };
         if (!assistantMessagePersisted) {
           try {
-            await appendChatMessage(failedMessage);
+            await appendQueuedMessage(failedMessage);
             await refreshVisibleArchivePage();
           } catch (archiveFailure) {
             console.error("Failed to persist assistant error:", archiveFailure);
@@ -1363,7 +1542,7 @@ export default function Ask() {
         setIsLoading(false);
       }
     },
-    [refreshVisibleArchivePage],
+    [appendQueuedMessage, refreshVisibleArchivePage],
   );
 
   const handleStop = useCallback(() => {
@@ -1387,11 +1566,11 @@ export default function Ask() {
         size: file.size,
         blob: file,
       })),
-      timestamp: Date.now(),
+      timestamp: serverNow(),
     };
 
     try {
-      await appendChatMessage(newUserMessage);
+      await appendQueuedMessage(newUserMessage);
       await refreshVisibleArchivePage("smooth");
     } catch (error) {
       console.error("User message persistence failed:", error);
@@ -1407,7 +1586,7 @@ export default function Ask() {
 
     if (typeof window !== "undefined" && !navigator.onLine) {
       try {
-        await appendChatMessage({
+        await appendQueuedMessage({
           id: `${userMessageId}-error`,
           role: "assistant",
           content: "",
@@ -1415,7 +1594,7 @@ export default function Ask() {
             kind: "error",
             text: "ネットワークに接続されていないため、接続環境を確認してください。",
           },
-          timestamp: Date.now(),
+          timestamp: serverNow(),
         });
         await refreshVisibleArchivePage("smooth");
       } catch (error) {
@@ -1432,14 +1611,20 @@ export default function Ask() {
       if (!archiveReady || isLoading) return;
 
       try {
-        await appendChatMessage(message);
+        await appendQueuedMessage(message);
         await refreshVisibleArchivePage("smooth");
         await requestAssistantReply(message.content);
       } catch (error) {
         console.error("Appending a prompt to chat history failed:", error);
       }
     },
-    [archiveReady, isLoading, refreshVisibleArchivePage, requestAssistantReply],
+    [
+      appendQueuedMessage,
+      archiveReady,
+      isLoading,
+      refreshVisibleArchivePage,
+      requestAssistantReply,
+    ],
   );
 
   //  ================================================================
@@ -1484,7 +1669,7 @@ export default function Ask() {
         role: "user",
         content: trimmed,
         attachments: messages[index].attachments,
-        timestamp: Date.now(),
+        timestamp: serverNow(),
         edited: true,
       };
 
@@ -1507,7 +1692,7 @@ export default function Ask() {
         role: "user",
         content: messages[index].content,
         attachments: messages[index].attachments,
-        timestamp: Date.now(),
+        timestamp: serverNow(),
       };
 
       await appendPromptAtLatest(updatedMessage);
@@ -2716,6 +2901,9 @@ export default function Ask() {
                     <p className="select-text text-xs text-fore-5 p-2 border border-dashed border-back-5 rounded-lg">
                       ⚠
                       回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
+                    </p>
+                    <p className="select-text text-xs text-yellow p-2 border border-dashed border-yellow rounded-lg mt-2">
+                      現在アカウントに未接続であるため、試用版が適用されています。そのため、チャットに関して大幅な制限が発生しています。アカウントに接続すると無料版が適用され、制限が緩和されます。
                     </p>
                   </motion.div>
                 )}

@@ -159,7 +159,7 @@ def upload_to_r2(body: bytes, filename: str, content_type: str):
         Key=f"{R2_KEY_PREFIX}{filename}",
         Body=body,
         ContentType=content_type,
-        CacheControl="public, max-age=31536000, immutable",
+        CacheControl="public, max-age=3600",
     )
 
 
