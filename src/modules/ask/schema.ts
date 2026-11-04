@@ -132,10 +132,7 @@ export const AskSchema = {
     files: t.Array(attachmentInput),
   }),
   body: t.Object({
-    prompt: t.String({
-      minLength: 1,
-      error: "Prompt cannot be Empty.",
-    }),
+    prompt: t.String(),
     summary: t.Optional(t.String({ maxLength: 12000 })),
     history: t.Optional(t.ArrayString(historyMessage, { maxItems: 20 })),
     files: t.Optional(t.Array(attachmentReference)),

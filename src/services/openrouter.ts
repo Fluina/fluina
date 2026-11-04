@@ -278,7 +278,12 @@ export const generateAskResponse = async function* (
         {
           role: "user",
           content: attachmentParts.length
-            ? [{ type: "text", text: message }, ...attachmentParts]
+            ? [
+                ...(message.trim()
+                  ? [{ type: "text" as const, text: message }]
+                  : []),
+                ...attachmentParts,
+              ]
             : message,
         },
       ],

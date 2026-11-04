@@ -1430,7 +1430,7 @@
 
     "vfile-message": ["vfile-message@4.0.3", "", { "dependencies": { "@types/unist": "^3.0.0", "unist-util-stringify-position": "^4.0.0" } }, "sha512-QTHzsGd1EhbZs4AsQ20JX1rC3cOlt/IWJruk893DfLRr57lcnOeMaWG4K0JrRta4mIJZKth2Au3mM3u03/JWKw=="],
 
-    "virtua": ["virtua@0.54.1", "", { "peerDependencies": { "@angular/common": ">=20.0.0", "@angular/core": ">=20.0.0", "react": ">=16.14.0", "react-dom": ">=16.14.0", "solid-js": ">=1.0", "svelte": ">=5.0", "vue": ">=3.2" }, "optionalPeers": ["@angular/common", "@angular/core", "react", "react-dom", "solid-js", "svelte", "vue"] }, "sha512-qUl89ncxNDKLihVdIok8CnKxUPF9J+P6Uz58KDqsq8G9dIoMInif6KJ4oe9SkvtNsHkSzw0iV25Vr73L9L1BcQ=="],
+    "virtua": ["virtua@0.54.2", "", { "peerDependencies": { "@angular/common": ">=20.0.0", "@angular/core": ">=20.0.0", "react": ">=16.14.0", "react-dom": ">=16.14.0", "solid-js": ">=1.0", "svelte": ">=5.0", "vue": ">=3.2" }, "optionalPeers": ["@angular/common", "@angular/core", "react", "react-dom", "solid-js", "svelte", "vue"] }, "sha512-lYCAxyXCGkhXVvuKv8a+LklZquy0E9dIObYcOUyo6nP4VSvLeiIsiz94mA3ZKYuM5egkke5RIi2nXi5OIATc7A=="],
 
     "web-namespaces": ["web-namespaces@2.0.1", "", {}, "sha512-bKr1DkiNa2krS7qxNtdrtHAmzuYGFQLiQ13TsorsdT6ULTkPLKuu5+GsFpDlg6JFjUTwX2DyhMPG2be8uPrqsQ=="],
 

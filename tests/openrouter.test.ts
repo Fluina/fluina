@@ -175,6 +175,78 @@ test("sends signed R2 URLs for image and PDF attachments to OpenRouter", async (
   ).toBe(true);
 });
 
+test("sends attachment-only requests without adding an empty text part", async () => {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(
+    [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "画像を確認しました。" } }] })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join(""),
+  );
+  let requestBody: Record<string, unknown> | undefined;
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      async (
+        _input: URL | RequestInfo,
+        init?: RequestInit | BunFetchRequestInit,
+      ) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(bytes, {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    ),
+  );
+  restoreFetch = () => fetchSpy.mockRestore();
+
+  const response = await askController.handle(
+    new Request("http://localhost/ask/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "",
+        files: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "photo.png",
+            type: "image/png",
+          },
+        ],
+      }),
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain("画像を確認しました。");
+  const messages = requestBody?.messages as
+    | { role: string; content: string | Record<string, unknown>[] }[]
+    | undefined;
+  expect(messages?.at(-1)?.content).toEqual([
+    {
+      type: "image_url",
+      image_url: {
+        url: expect.stringContaining("X-Amz-Expires=86400"),
+      },
+    },
+  ]);
+});
+
+test("rejects an empty prompt when no attachments are supplied", async () => {
+  const response = await askController.handle(
+    new Request("http://localhost/ask/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "" }),
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({
+    error: "質問または添付ファイルを指定してください。",
+  });
+});
+
 test("renders a requested visual and appends an embeddable media marker", async () => {
   const encoder = new TextEncoder();
   const scene = {

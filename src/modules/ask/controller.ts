@@ -42,6 +42,12 @@ export const askController = new Elysia({ prefix: "/ask" })
     async ({ body, request, set }) => {
       try {
         const files = body.files ?? [];
+        if (!body.prompt.trim() && files.length === 0) {
+          set.status = 400;
+          set.headers["Content-Type"] = "application/json; charset=utf-8";
+          return { error: "質問または添付ファイルを指定してください。" };
+        }
+
         const response = generateAskResponse(
           body.prompt,
           body.summary,
