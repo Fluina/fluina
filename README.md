@@ -23,6 +23,26 @@ OpenRouter account privacy settings (including Zero Data Retention) can exclude
 all free providers. If that happens, choose a compatible model/provider or
 review the account's [Privacy Settings](https://openrouter.ai/settings/privacy).
 
+### User attachment uploads
+
+The Fluina API uploads attachments directly from the browser to a **private**
+Cloudflare R2 bucket, then passes short-lived signed URLs to OpenRouter for
+images and PDFs. Text attachments are read by the API from that bucket. Set
+these variables on the Fluina API service, using an R2 token with access to the
+private upload bucket:
+
+- `R2_ACCOUNT_ID`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_UPLOAD_BUCKET`: the private bucket for user attachments.
+
+The upload bucket must allow browser `PUT` requests from the Fluina site origin
+with the `Content-Type` request header. Configure a one-day R2 lifecycle
+expiration rule for the `uploads/` prefix in this bucket. Uploads use random
+object keys in a shared prefix; there is no per-user account or folder.
+Fluina does not impose attachment count or file-size caps, but R2, OpenRouter,
+and selected model/provider limits still apply.
+
 ## Manim visual answers
 
 When the assistant decides a diagram or animation will help, it can request a
@@ -37,22 +57,23 @@ on the Fluina API service:
 - `MANIM_RENDERER_TOKEN`: the same secret value as the renderer's `RENDER_TOKEN`.
 
 On the renderer, Render's Blueprint generates `RENDER_TOKEN` and asks for the
-Cloudflare R2 settings. Finished media is uploaded to R2 under `media/`:
+Cloudflare R2 settings. Finished media is uploaded to a **private** R2 bucket
+under `media/` and served through signed URLs that expire after 24 hours:
 
 - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`: an R2 API token
-  with Object Read & Write on the bucket.
+  with Object Read & Write on the media bucket.
 - `R2_BUCKET`: the bucket name.
-- `R2_PUBLIC_URL`: the bucket's public URL (r2.dev or custom domain), without a
-  trailing slash. Add a CORS rule allowing `GET` from the Fluina site origin so
-  video captions load.
 
 No Render disk is needed. The renderer also compiles the bounded vector-point preprocessing helper with
 Cython. Cython does not accelerate Manim's Cairo/FFmpeg rendering itself, so
 any broader speed claim should be based on measured render timings.
 
 The visual scene format supports text, safe-subset math formulas, circles,
-rectangles, lines, and plotted point sequences. Add an R2 lifecycle rule on the
-`media/` prefix if you want old media deleted automatically.
+rectangles, lines, and plotted point sequences. Configure a one-day R2
+lifecycle expiration rule for the `media/` prefix in the renderer's bucket.
+Keep public access disabled. The bucket's CORS policy should allow `GET` and
+`HEAD` from the Fluina site origin so generated images, videos, and captions can
+be loaded in the browser.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

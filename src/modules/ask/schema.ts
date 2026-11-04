@@ -1,7 +1,18 @@
 import { t } from "elysia";
 
-export const MAX_ATTACHMENTS = 5;
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const attachmentInput = t.Object({
+  name: t.String({ minLength: 1, maxLength: 255 }),
+  type: t.String({ maxLength: 255 }),
+});
+
+const attachmentReference = t.Object({
+  id: t.String({
+    pattern:
+      "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+  }),
+  name: t.String({ minLength: 1, maxLength: 255 }),
+  type: t.String({ maxLength: 255 }),
+});
 
 const coordinate = t.Number({ minimum: -7, maximum: 7 });
 const sceneColor = t.Optional(t.String({ pattern: "^#[0-9A-Fa-f]{6}$" }));
@@ -117,6 +128,9 @@ const historyMessage = t.Object({
 });
 
 export const AskSchema = {
+  uploadBody: t.Object({
+    files: t.Array(attachmentInput),
+  }),
   body: t.Object({
     prompt: t.String({
       minLength: 1,
@@ -124,7 +138,7 @@ export const AskSchema = {
     }),
     summary: t.Optional(t.String({ maxLength: 12000 })),
     history: t.Optional(t.ArrayString(historyMessage, { maxItems: 20 })),
-    files: t.Optional(t.Files({ maxItems: MAX_ATTACHMENTS })),
+    files: t.Optional(t.Array(attachmentReference)),
   }),
   summarizeBody: t.Object({
     summary: t.Optional(t.String({ maxLength: 12000 })),

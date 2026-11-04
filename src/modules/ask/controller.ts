@@ -6,7 +6,11 @@ import {
   OpenRouterRequestError,
   UnsupportedAttachmentError,
 } from "../../services/openrouter";
-import { AskSchema, MAX_ATTACHMENT_BYTES } from "./schema";
+import {
+  createAttachmentUploads,
+  R2StorageConfigurationError,
+} from "../../services/r2-storage";
+import { AskSchema } from "./schema";
 
 const KEEPALIVE_INTERVAL_MS = 5_000;
 
@@ -16,15 +20,28 @@ export const askController = new Elysia({ prefix: "/ask" })
     return { now: Date.now() };
   })
   .post(
+    "/uploads",
+    async ({ body, set }) => {
+      try {
+        set.headers["Cache-Control"] = "no-store";
+        return { uploads: await createAttachmentUploads(body.files) };
+      } catch (error) {
+        console.error("R2 Attachment Upload Signing Error:", error);
+        set.status = error instanceof R2StorageConfigurationError ? 503 : 502;
+        return {
+          error: "添付ファイルのアップロードを準備できませんでした。",
+        };
+      }
+    },
+    {
+      body: AskSchema.uploadBody,
+    },
+  )
+  .post(
     "/",
     async ({ body, request, set }) => {
       try {
         const files = body.files ?? [];
-        if (files.some((file) => file.size > MAX_ATTACHMENT_BYTES)) {
-          set.status = 413;
-          return { error: "添付ファイルは1つあたり10MBまでです。" };
-        }
-
         const response = generateAskResponse(
           body.prompt,
           body.summary,

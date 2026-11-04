@@ -1409,17 +1409,70 @@ export default function Ask() {
                 : content,
           }));
 
-        const formData = new FormData();
-        formData.append("prompt", promptContent);
-        formData.append("summary", summary.content);
-        formData.append("history", JSON.stringify(recentHistory));
-        for (const { blob, name, type } of latestMessage.attachments ?? []) {
-          formData.append("files", new File([blob], name, { type }));
+        const attachments = latestMessage.attachments ?? [];
+        const uploadedAttachments: {
+          id: string;
+          name: string;
+          type: string;
+        }[] = [];
+
+        if (attachments.length > 0) {
+          const uploadResponse = await fetch(`${apiUrl}/api/ask/uploads`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              files: attachments.map(({ name, type }) => ({ name, type })),
+            }),
+            signal: controller.signal,
+          });
+
+          if (!uploadResponse.ok) {
+            throw new Error(await readAssistantError(uploadResponse));
+          }
+
+          const { uploads } = (await uploadResponse.json()) as {
+            uploads: {
+              id: string;
+              uploadUrl: string;
+              contentType: string;
+            }[];
+          };
+
+          for (const [index, attachment] of attachments.entries()) {
+            const upload = uploads[index];
+            if (!upload) {
+              throw new Error("添付ファイルのアップロード先が不正です。");
+            }
+
+            const uploadResult = await fetch(upload.uploadUrl, {
+              method: "PUT",
+              headers: { "Content-Type": upload.contentType },
+              body: attachment.blob,
+              signal: controller.signal,
+            });
+            if (!uploadResult.ok) {
+              throw new Error(
+                "添付ファイルをR2にアップロードできませんでした。",
+              );
+            }
+
+            uploadedAttachments.push({
+              id: upload.id,
+              name: attachment.name,
+              type: upload.contentType,
+            });
+          }
         }
 
         const response = await fetch(`${apiUrl}/api/ask`, {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: promptContent,
+            summary: summary.content,
+            history: recentHistory,
+            files: uploadedAttachments,
+          }),
           signal: controller.signal,
         });
 
@@ -2905,7 +2958,7 @@ export default function Ask() {
                       回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
                     </p>
                     <p className="select-text text-xs text-yellow p-2 border border-dashed border-yellow rounded-lg mt-2">
-                      現在アカウントに未接続であるため、試用版が適用されています。そのため、チャットに関して大幅な制限が発生しています。アカウントに接続すると無料版が適用され、制限が緩和されます。
+                      現在アカウントに未接続であるため、試用版が適用されています。そのため、チャットに対して大幅な制限が発生しています。アカウントに接続すると無料版が適用され、制限が緩和されます。
                     </p>
                   </motion.div>
                 )}

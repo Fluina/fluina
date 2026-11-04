@@ -17,5 +17,3 @@ services:
         sync: false
       - key: R2_BUCKET
         sync: false
-      - key: R2_PUBLIC_URL
-        sync: false

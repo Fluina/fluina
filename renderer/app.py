@@ -17,8 +17,8 @@ R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 R2_BUCKET = os.environ.get("R2_BUCKET", "")
-R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "").rstrip("/")
 R2_KEY_PREFIX = "media/"
+MEDIA_URL_EXPIRES_IN = 24 * 60 * 60
 RENDER_TOKEN = os.environ.get("RENDER_TOKEN", "")
 MAX_REQUEST_BYTES = 64 * 1024
 r2_client = None
@@ -135,7 +135,6 @@ def r2_configured() -> bool:
             R2_ACCESS_KEY_ID,
             R2_SECRET_ACCESS_KEY,
             R2_BUCKET,
-            R2_PUBLIC_URL,
         )
     )
 
@@ -159,7 +158,18 @@ def upload_to_r2(body: bytes, filename: str, content_type: str):
         Key=f"{R2_KEY_PREFIX}{filename}",
         Body=body,
         ContentType=content_type,
-        CacheControl="public, max-age=3600",
+        CacheControl=f"private, max-age={MEDIA_URL_EXPIRES_IN}",
+    )
+
+
+def create_media_url(filename: str) -> str:
+    return get_r2_client().generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": R2_BUCKET,
+            "Key": f"{R2_KEY_PREFIX}{filename}",
+        },
+        ExpiresIn=MEDIA_URL_EXPIRES_IN,
     )
 
 
@@ -324,10 +334,10 @@ async def render(
 
     return {
         "kind": scene.kind,
-        "url": f"{R2_PUBLIC_URL}/{R2_KEY_PREFIX}{filename}",
+        "url": create_media_url(filename),
         "alt": scene.title,
         **(
-            {"captions_url": f"{R2_PUBLIC_URL}/{R2_KEY_PREFIX}{output_stem}.vtt"}
+            {"captions_url": create_media_url(f"{output_stem}.vtt")}
             if scene.kind == "video"
             else {}
         ),

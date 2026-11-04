@@ -4,6 +4,11 @@ import {
   normalizeVisualScene,
   renderVisualScene,
 } from "./manim-renderer";
+import {
+  createAttachmentReadUrl,
+  readUploadedAttachmentText,
+  type UploadedAttachment,
+} from "./r2-storage";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -26,7 +31,7 @@ export class UnsupportedAttachmentError extends Error {
   }
 }
 
-const isTextFile = (file: File) =>
+const isTextFile = (file: Pick<File, "type" | "name">) =>
   file.type.startsWith("text/") ||
   ["application/json", "application/xml", "application/x-yaml"].includes(
     file.type,
@@ -35,34 +40,51 @@ const isTextFile = (file: File) =>
     file.name,
   );
 
-const toDataUrl = async (file: File, type: string) =>
-  `data:${type};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`;
+const safeFilename = (name: string) =>
+  [...name]
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return character === "\\" ||
+        character === "/" ||
+        code < 32 ||
+        code === 127
+        ? "_"
+        : character;
+    })
+    .join("")
+    .slice(0, 255) || "attachment";
 
-const createAttachmentParts = async (files: File[]): Promise<ContentPart[]> =>
+const createAttachmentParts = async (
+  files: UploadedAttachment[],
+): Promise<ContentPart[]> =>
   Promise.all(
-    files.map(async (file): Promise<ContentPart> => {
-      if (file.type.startsWith("image/")) {
+    files.map(async (attachment): Promise<ContentPart> => {
+      const filename = safeFilename(attachment.name);
+      if (attachment.type.startsWith("image/")) {
         return {
           type: "image_url",
-          image_url: { url: await toDataUrl(file, file.type) },
+          image_url: { url: await createAttachmentReadUrl(attachment.id) },
         };
       }
-      if (file.type === "application/pdf") {
+      if (
+        attachment.type === "application/pdf" ||
+        /\.pdf$/i.test(attachment.name)
+      ) {
         return {
           type: "file",
           file: {
-            filename: file.name,
-            file_data: await toDataUrl(file, file.type),
+            filename,
+            file_data: await createAttachmentReadUrl(attachment.id),
           },
         };
       }
-      if (isTextFile(file)) {
+      if (isTextFile(attachment)) {
         return {
           type: "text",
-          text: `添付ファイル「${file.name}」:\n\`\`\`\n${await file.text()}\n\`\`\``,
+          text: `添付ファイル「${filename}」:\n\`\`\`\n${await readUploadedAttachmentText(attachment.id)}\n\`\`\``,
         };
       }
-      throw new UnsupportedAttachmentError(file.name);
+      throw new UnsupportedAttachmentError(filename);
     }),
   );
 
@@ -241,7 +263,7 @@ export const generateAskResponse = async function* (
   summary = "",
   history: { role: "user" | "assistant"; content: string }[] = [],
   signal?: AbortSignal,
-  files: File[] = [],
+  files: UploadedAttachment[] = [],
 ): AsyncGenerator<string> {
   const attachmentParts = await createAttachmentParts(files);
   const response = await fetch(OPENROUTER_URL, {
