@@ -808,18 +808,26 @@ export default function Ask() {
 
     const initializeArchive = async () => {
       try {
+        const offsetLoaded = loadStoredClockOffset().catch((error) => {
+          console.warn("Stored clock offset load failed:", error);
+        });
+        void fetch(`${getApiUrl()}/api/ask/time`, { cache: "no-store" }).catch(
+          () => undefined,
+        );
+        void offsetLoaded
+          .then(() => syncServerClock(getApiUrl()))
+          .then(() => purgeExpiredChatTurns())
+          .catch((error) => {
+            console.warn("Server clock sync failed:", error);
+          });
+
         try {
           await requestPersistentChatStorage();
         } catch (error) {
           console.warn("Persistent storage request failed:", error);
         }
 
-        try {
-          await loadStoredClockOffset();
-          await syncServerClock(getApiUrl());
-        } catch (error) {
-          console.warn("Server clock sync failed:", error);
-        }
+        await offsetLoaded;
 
         try {
           await purgeExpiredChatTurns();

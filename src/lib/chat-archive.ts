@@ -218,7 +218,10 @@ export const serverNow = () => Date.now() + clockOffset;
 
 export const syncServerClock = async (apiUrl: string) => {
   const requestedAt = Date.now();
-  const response = await fetch(`${apiUrl}/api/ask/time`, { cache: "no-store" });
+  const response = await fetch(`${apiUrl}/api/ask/time`, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(60_000),
+  });
   if (!response.ok) throw new Error("サーバー時刻を取得できませんでした。");
 
   const payload: unknown = await response.json();
