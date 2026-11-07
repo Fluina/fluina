@@ -1,4 +1,120 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+
+async function mockHeldAnswer(page: Page) {
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch;
+    window.fetch = Object.assign(
+      (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url !== "http://localhost:3001/api/ask") {
+          return originalFetch(input, init);
+        }
+
+        const answer = Array.from(
+          { length: 60 },
+          (_, index) => `Paragraph ${index}: ${"Answer text ".repeat(12)}`,
+        ).join("\n\n");
+        const body = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(answer));
+            (
+              window as Window & { finishTestAnswer?: () => void }
+            ).finishTestAnswer = () => controller.close();
+          },
+        });
+        return Promise.resolve(new Response(body));
+      },
+      originalFetch,
+    );
+  });
+}
+
+test("keeps the reading position when a streamed answer is saved", async ({
+  page,
+}) => {
+  await mockHeldAnswer(page);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("A long answer");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const anchor = page.getByText("Paragraph 30:", { exact: false });
+  await expect(anchor).toBeVisible();
+  const scroller = page
+    .locator("main [data-scroll-edge-fade]")
+    .filter({ has: page.locator("[data-chat-last-turn]") })
+    .last();
+  await scroller.hover();
+  await page.mouse.wheel(0, 1);
+  await anchor.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const inViewport = await anchor.evaluate((element) => {
+    const viewport = element.closest("[data-scroll-edge-fade]");
+    if (!viewport) return false;
+    const rect = element.getBoundingClientRect();
+    const viewportRect = viewport.getBoundingClientRect();
+    return rect.top >= viewportRect.top && rect.bottom <= viewportRect.bottom;
+  });
+  expect(inViewport).toBe(true);
+  const before = await anchor.evaluate(
+    (element) => element.getBoundingClientRect().top,
+  );
+  await anchor.evaluate((element) => {
+    (
+      window as Window & { testAnswerAnchor?: Element | null }
+    ).testAnswerAnchor = element.closest("[data-chat-message-id]");
+  });
+
+  await page.evaluate(() => {
+    (window as Window & { finishTestAnswer?: () => void }).finishTestAnswer?.();
+  });
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  await page.waitForTimeout(1000);
+  const after = await anchor.evaluate(
+    (element) => element.getBoundingClientRect().top,
+  );
+  expect(Math.abs(after - before)).toBeLessThan(2);
+  expect(
+    await anchor.evaluate(
+      (element) =>
+        element.closest("[data-chat-message-id]") ===
+        (window as Window & { testAnswerAnchor?: Element }).testAnswerAnchor,
+    ),
+  ).toBe(true);
+});
+
+test("keeps the latest turn aligned when a streamed answer is saved", async ({
+  page,
+}) => {
+  await mockHeldAnswer(page);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("A long answer");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Paragraph 30:", { exact: false })).toBeVisible();
+
+  const scroller = page
+    .locator("main [data-scroll-edge-fade]")
+    .filter({ has: page.locator("[data-chat-last-turn]") })
+    .last();
+  const alignment = () =>
+    scroller.evaluate((viewport) => {
+      const lastTurn = viewport.querySelector("[data-chat-last-turn]");
+      if (!lastTurn) return Number.POSITIVE_INFINITY;
+      return Math.abs(
+        lastTurn.getBoundingClientRect().top -
+          viewport.getBoundingClientRect().top,
+      );
+    });
+
+  await expect.poll(alignment).toBeLessThan(2);
+  await page.evaluate(() => {
+    (window as Window & { finishTestAnswer?: () => void }).finishTestAnswer?.();
+  });
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(await alignment()).toBeLessThan(2);
+});
 
 test("waits for mobile chat layout before revealing the disclaimer", async ({
   page,

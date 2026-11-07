@@ -468,6 +468,14 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
         ) : (
           <Streamdown
             key={part.key}
+            animated={{
+              animation: "slideUp",
+              duration: 280,
+              easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+              sep: "word",
+              stagger: 300,
+              maxBacklogMs: Number.POSITIVE_INFINITY,
+            }}
             mode={isAnimating ? "streaming" : "static"}
             isAnimating={isAnimating}
             plugins={markdownPlugins}
@@ -1060,47 +1068,6 @@ export default function Ask() {
       scrollToLatestTurn(scrollBehavior);
     }
   });
-
-  // 返答の完了時は、ストリーミング表示から仮想リスト内の末尾ターンへ描画が移る。
-  // 末尾ターンの高さが実測で確定するまで待ってから、位置を合わせ直す。
-  const hasVisibleStreamingMessage =
-    streamingMessage !== null &&
-    !messages.some((message) => message.id === streamingMessage.id);
-  const wasStreamingVisibleRef = useRef(false);
-  useLayoutEffect(() => {
-    const wasVisible = wasStreamingVisibleRef.current;
-    wasStreamingVisibleRef.current = hasVisibleStreamingMessage;
-    if (!wasVisible || hasVisibleStreamingMessage) return;
-    if (!shouldStickToLatestTurnRef.current) return;
-
-    let frame = 0;
-    let stableFrames = 0;
-    let previousSignature = "";
-    const startedAt = performance.now();
-    const settle = () => {
-      const viewport = chatScrollRef.current;
-      if (!viewport || !shouldStickToLatestTurnRef.current) return;
-
-      updateTailSpacer(viewport);
-      const lastTurn = viewport.querySelector<HTMLElement>(
-        "[data-chat-last-turn]",
-      );
-      const signature = `${lastTurn?.offsetHeight ?? 0}/${viewport.scrollHeight}`;
-      stableFrames = signature === previousSignature ? stableFrames + 1 : 0;
-      previousSignature = signature;
-
-      if (stableFrames < 3 && performance.now() - startedAt < 800) {
-        frame = requestAnimationFrame(settle);
-        return;
-      }
-      if (!nativeSmoothScrollCleanupRef.current) {
-        scrollToLatestTurn("instant");
-      }
-    };
-    frame = requestAnimationFrame(settle);
-
-    return () => cancelAnimationFrame(frame);
-  }, [hasVisibleStreamingMessage, scrollToLatestTurn, updateTailSpacer]);
 
   useLayoutEffect(() => {
     if (!archiveReady || isInitialChatPositioned) return;
@@ -2704,10 +2671,16 @@ export default function Ask() {
                     className={`flex flex-col gap-4 ${isLastTurn ? "" : "pb-8"}`}
                   >
                     <AnimatePresence mode="popLayout" initial={false}>
-                      {turn.map((msg) => {
+                      {/* Keep the streamed message in the same turn after it is saved. */}
+                      {(isLastTurn && visibleStreamingMessage
+                        ? [...turn, visibleStreamingMessage]
+                        : turn
+                      ).map((msg) => {
                         const isEditing = editingMessageId === msg.id;
                         const isUser = msg.role === "user";
                         const isAssistant = msg.role === "assistant";
+                        const isStreaming =
+                          msg.id === visibleStreamingMessage?.id;
 
                         return (
                           <motion.div
@@ -2715,6 +2688,7 @@ export default function Ask() {
                             data-chat-message-id={msg.id}
                             data-scroll-fade-top-anchor=""
                             initial={
+                              !isStreaming &&
                               streamedMessageIdsRef.current.has(msg.id)
                                 ? false
                                 : { opacity: 0 }
@@ -2764,30 +2738,33 @@ export default function Ask() {
                                   />
                                 ) : isUser ? (
                                   <p>{msg.content}</p>
-                                ) : (
-                                  msg.content && (
-                                    <AssistantMarkdown
-                                      content={msg.content}
-                                      isAnimating={
-                                        isLoading &&
-                                        msg.id === messages.at(-1)?.id
-                                      }
-                                    />
-                                  )
-                                )}
+                                ) : msg.content ? (
+                                  <AssistantMarkdown
+                                    content={msg.content}
+                                    isAnimating={
+                                      isLoading &&
+                                      (isStreaming ||
+                                        msg.id === messages.at(-1)?.id)
+                                    }
+                                  />
+                                ) : isStreaming ? (
+                                  loadingMessage
+                                ) : null}
                               </div>
                             )}
 
-                            {isAssistant && (msg.notice || !msg.content) && (
-                              <MessageNoticeBox
-                                notice={
-                                  msg.notice ?? {
-                                    kind: "error",
-                                    text: EMPTY_ASSISTANT_MESSAGE,
+                            {isAssistant &&
+                              !isStreaming &&
+                              (msg.notice || !msg.content) && (
+                                <MessageNoticeBox
+                                  notice={
+                                    msg.notice ?? {
+                                      kind: "error",
+                                      text: EMPTY_ASSISTANT_MESSAGE,
+                                    }
                                   }
-                                }
-                              />
-                            )}
+                                />
+                              )}
 
                             {isUser && isEditing && (
                               <div className="flex justify-center items-center gap-2 p-2">
@@ -2872,7 +2849,7 @@ export default function Ask() {
                               </div>
                             )}
 
-                            {isAssistant && (
+                            {isAssistant && (!isStreaming || msg.content) && (
                               <div className="flex items-center gap-2 p-2">
                                 {msg.content && (
                                   <Tooltip content="コピー" placement="bottom">
@@ -2909,47 +2886,6 @@ export default function Ask() {
                 );
               }}
             >
-              {visibleStreamingMessage && (
-                <motion.div
-                  key={visibleStreamingMessage.id}
-                  data-scroll-fade-top-anchor=""
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={TRANSITION}
-                  className="flex flex-col gap-2 items-start"
-                >
-                  {visibleStreamingMessage.content ? (
-                    <AssistantMarkdown
-                      content={visibleStreamingMessage.content}
-                      isAnimating={isLoading}
-                    />
-                  ) : (
-                    loadingMessage
-                  )}
-
-                  {visibleStreamingMessage.content && (
-                    <div className="flex items-center gap-2 py-2">
-                      <Tooltip content="コピー" placement="bottom">
-                        <Button
-                          onPress={() =>
-                            handleCopyMessage(visibleStreamingMessage.content)
-                          }
-                          aria-label="Copy"
-                          shape="circle"
-                          className="size-5"
-                        >
-                          <Copy size={16} className="text-fore-5" />
-                        </Button>
-                      </Tooltip>
-
-                      <span className="text-sm text-fore-5">
-                        {formatMessageTime(visibleStreamingMessage.timestamp)}
-                      </span>
-                    </div>
-                  )}
-                </motion.div>
-              )}
-
               <AnimatePresence mode="popLayout" initial={false}>
                 {!isLoading && messages.at(-1)?.role === "assistant" && (
                   <motion.div
