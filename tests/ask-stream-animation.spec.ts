@@ -136,7 +136,7 @@ test("renders Markdown and HTML tables without the default frames or controls", 
   ).toHaveCount(0);
   await expect(tables.nth(1).getByText("牛乳")).toBeVisible();
   await expect(turn.locator("pre code")).toHaveText("const flour = 100;\n");
-  await expect(turn.getByRole("button", { name: "Copy Code" })).toHaveCount(0);
+  await expect(turn.getByRole("button", { name: "Copy code" })).toHaveCount(1);
   const region = turn.getByRole("region", { name: "表" }).first();
   expect(
     await region.evaluate(
@@ -264,7 +264,10 @@ for (const viewport of [
           turn: width(element),
           message: width(message),
           prose: width(prose),
-          blocks: Array.from(prose.querySelectorAll("pre"), width),
+          blocks: Array.from(
+            prose.querySelectorAll("[data-code-frame]"),
+            width,
+          ),
           tables: Array.from(
             prose.querySelectorAll<HTMLElement>("section[aria-label='表']"),
             (region) => {
@@ -330,7 +333,7 @@ for (const viewport of [
   });
 }
 
-test("renders and preserves a streamed code block without Streamdown controls", async ({
+test("renders and preserves a streamed code block with code controls", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -342,13 +345,14 @@ test("renders and preserves a streamed code block without Streamdown controls", 
   const turn = page.locator("[data-chat-last-turn]").last();
   const code = turn.locator("pre code");
   await expect(code).toContainText("const answer =");
-  await expect
-    .poll(() => code.locator(".syntax-token").count(), { timeout: 30000 })
-    .toBeGreaterThan(1);
+  await expect(code.locator(".syntax-token")).toHaveCount(0);
   await expect(turn.locator('[data-streamdown="code-block"]')).toHaveCount(0);
   const pre = turn.locator("pre");
   await expect(pre).toHaveCSS("overflow-x", "auto");
-  await expect(pre).toHaveCSS("border-radius", "16px");
+  await expect(pre.locator("../..")).toHaveCSS("border-radius", "16px");
+  await expect(turn.getByRole("button", { name: "Save code" })).toBeEnabled();
+  const header = pre.locator("..").locator("div").first();
+  await expect(header).toHaveCSS("border-bottom-width", "1px");
   const styling = await pre.evaluate((element) => {
     const before = getComputedStyle(element).paddingLeft;
     const prose = element.closest(".prose");
@@ -359,6 +363,9 @@ test("renders and preserves a streamed code block without Streamdown controls", 
     return { before, without };
   });
   expect(styling.before).not.toBe(styling.without);
+  await turn.getByRole("button", { name: "Expand code" }).click();
+  const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
+  await expect(dialog.locator("code")).toContainText("const answer =");
   await page.evaluate(() => {
     const stream = window as Window & {
       appendTestAnswer?: (chunk: string) => void;
@@ -368,9 +375,317 @@ test("renders and preserves a streamed code block without Streamdown controls", 
     stream.finishTestAnswer?.();
   });
   await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  await expect(dialog.locator("code")).toHaveText("const answer = 42;\n");
+  await dialog.getByRole("button", { name: "Close expanded code" }).click();
   await expect(code).toHaveText("const answer = 42;\n");
   await expect(code).toHaveClass(/language-js/);
-  await expect(turn.getByRole("button", { name: "Copy Code" })).toHaveCount(0);
+  await expect
+    .poll(() => code.locator(".syntax-token").count(), { timeout: 30000 })
+    .toBeGreaterThan(1);
+  await expect(turn.getByRole("button", { name: "Copy code" })).toHaveCount(1);
+});
+
+test("reports clipboard failures without claiming a successful copy", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          throw new Error("clipboard unavailable");
+        },
+      },
+    });
+  });
+  await mockAnswer(page, "```js\nexample();\n```");
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コピー");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  const frame = page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .locator("pre")
+    .locator("..");
+  await frame.getByRole("button", { name: "Copy code" }).click();
+  await expect(frame.getByRole("alert")).toHaveText(
+    "コードをコピーできませんでした。",
+  );
+  await expect(frame.locator("svg.lucide-copy")).toBeVisible();
+});
+
+test("morphs the code block into and out of fullscreen", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as Window & { copiedCode?: string }).copiedCode = text;
+        },
+      },
+    });
+  });
+  await mockAnswer(page, "```js\nlet x = 1;\n```");
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("拡大表示");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  const expand = page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .getByRole("button", { name: "Expand code" });
+  await page.evaluate(() => {
+    const state = window as Window & {
+      backdropSamples?: { opacity: number; blur: number }[];
+      stopBackdropSampling?: boolean;
+    };
+    state.backdropSamples = [];
+    state.stopBackdropSampling = false;
+    const sample = () => {
+      const backdrop = document.querySelector(".code-dialog-backdrop");
+      if (backdrop) {
+        const style = getComputedStyle(backdrop);
+        state.backdropSamples?.push({
+          opacity: Number(style.opacity),
+          blur: Number(
+            style.backdropFilter.match(/blur\(([\d.]+)px\)/)?.[1] ?? 0,
+          ),
+        });
+      }
+      if (!state.stopBackdropSampling) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await expand.evaluate((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error("Expand control is not a button");
+    }
+    button.click();
+  });
+  const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
+  await expect(dialog).toBeVisible();
+  const samples = await dialog
+    .locator("pre")
+    .locator("../..")
+    .evaluate(
+      (element) =>
+        new Promise<{ frame: number; text: number }[]>((resolve) => {
+          const samples: { frame: number; text: number }[] = [];
+          const start = performance.now();
+          const sample = () => {
+            const code = element.querySelector("code");
+            const text =
+              code &&
+              document.createTreeWalker(code, NodeFilter.SHOW_TEXT).nextNode();
+            if (text?.textContent) {
+              const range = document.createRange();
+              range.setStart(text, 0);
+              range.setEnd(text, Math.min(3, text.textContent.length));
+              samples.push({
+                frame: element.getBoundingClientRect().width,
+                text: range.getBoundingClientRect().width,
+              });
+            }
+            if (performance.now() - start < 800) requestAnimationFrame(sample);
+            else resolve(samples);
+          };
+          requestAnimationFrame(sample);
+        }),
+    );
+  const sizes = samples.map((sample) => sample.frame);
+  const textSizes = samples.map((sample) => sample.text);
+  expect(samples.length).toBeGreaterThan(2);
+  expect(Math.max(...textSizes) - Math.min(...textSizes)).toBeLessThan(1);
+  expect(Math.min(...sizes)).toBeLessThan(
+    (page.viewportSize()?.width ?? 0) - 20,
+  );
+  expect(Math.max(...sizes)).toBeGreaterThan(
+    (page.viewportSize()?.width ?? 0) - 2,
+  );
+  await expect(dialog.locator("span.select-text")).toHaveCSS(
+    "user-select",
+    "text",
+  );
+  await expect(dialog.locator("pre code")).toHaveCSS("user-select", "text");
+  await dialog.getByRole("button", { name: "Copy code" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { copiedCode?: string }).copiedCode,
+      ),
+    )
+    .toBe("let x = 1;\n");
+  await page.waitForTimeout(600);
+  const backdropSamples = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          backdropSamples?: { opacity: number; blur: number }[];
+        }
+      ).backdropSamples ?? [],
+  );
+  const opacitySamples = backdropSamples.map((sample) => sample.opacity);
+  const blurSamples = backdropSamples.map((sample) => sample.blur);
+  expect(backdropSamples.length).toBeGreaterThan(2);
+  expect(
+    Math.max(...opacitySamples) - Math.min(...opacitySamples),
+  ).toBeGreaterThan(0.1);
+  expect(Math.max(...blurSamples) - Math.min(...blurSamples)).toBeGreaterThan(
+    1,
+  );
+  await expect
+    .poll(() =>
+      dialog.locator("pre code").evaluate((code) => {
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        const rect = range.getBoundingClientRect();
+        const visibleElement = document.elementFromPoint(
+          rect.x + 1,
+          rect.y + 1,
+        );
+        return Boolean(visibleElement && code.contains(visibleElement));
+      }),
+    )
+    .toBe(true);
+  const code = dialog.locator("pre code");
+  await expect(code).toHaveCSS("user-select", "text");
+  await expect(code.locator(".syntax-token").first()).toHaveCSS(
+    "user-select",
+    "text",
+  );
+  const selectionBounds = await code.evaluate((element) => {
+    const text = document
+      .createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      .nextNode();
+    if (!text?.textContent || text.textContent.length < 2) {
+      throw new Error("Selectable code text not found");
+    }
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const rect = range.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  });
+  await page.mouse.move(
+    selectionBounds.x + 1,
+    selectionBounds.y + selectionBounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    selectionBounds.x + selectionBounds.width - 1,
+    selectionBounds.y + selectionBounds.height / 2,
+    { steps: 5 },
+  );
+  await page.mouse.up();
+  expect(
+    await page.evaluate(() => window.getSelection()?.toString()),
+  ).toBeTruthy();
+  await dialog.getByRole("button", { name: "Close expanded code" }).click();
+  await expect(dialog).toHaveCount(0);
+  const closingSizes = await expand
+    .locator("xpath=ancestor::div[@data-code-frame]")
+    .locator(":scope > div")
+    .evaluate(
+      (element) =>
+        new Promise<number[]>((resolve) => {
+          const samples: number[] = [];
+          const start = performance.now();
+          const sample = () => {
+            samples.push(element.getBoundingClientRect().width);
+            if (performance.now() - start < 800) requestAnimationFrame(sample);
+            else resolve(samples);
+          };
+          requestAnimationFrame(sample);
+        }),
+    );
+  expect(Math.max(...closingSizes) - Math.min(...closingSizes)).toBeGreaterThan(
+    20,
+  );
+  await expect(expand).toBeFocused();
+  await page.evaluate(() => {
+    (
+      window as Window & { stopBackdropSampling?: boolean }
+    ).stopBackdropSampling = true;
+  });
+});
+
+test("copies, saves and expands code blocks without losing their contents", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as Window & { copiedCode?: string }).copiedCode = text;
+        },
+      },
+    });
+  });
+  await mockAnswer(
+    page,
+    "```javascript\nconst first = 1;\n```\n\n```python\nprint('hello')\n```\n\n```\nplain\n```\n\n```jsx\n<div />\n```\n\n```rust\nfn main() {}\n```",
+  );
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コード操作");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  const turn = page.locator("[data-chat-last-turn]").last();
+  const first = turn.locator("pre").nth(0).locator("../..");
+  await expect(first).toContainText("javascript");
+  await expect(first.getByRole("button", { name: "Copy code" })).toBeVisible();
+  await first.getByRole("button", { name: "Copy code" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { copiedCode?: string }).copiedCode,
+      ),
+    )
+    .toBe("const first = 1;\n");
+  for (const [index, filename, content] of [
+    [0, "file.js", "const first = 1;\n"],
+    [1, "file.py", "print('hello')\n"],
+    [2, "file.txt", "plain\n"],
+    [3, "file.jsx", "<div />\n"],
+    [4, "file.rs", "fn main() {}\n"],
+  ] as const) {
+    const frame = turn.locator("pre").nth(index).locator("../..");
+    await frame.evaluate((element) =>
+      element.scrollIntoView({ block: "center", behavior: "instant" }),
+    );
+    const downloadPromise = page.waitForEvent("download");
+    const save = frame.getByRole("button", { name: "Save code" });
+    if (index === 0) {
+      await save.click();
+    } else {
+      await save.focus();
+      await page.keyboard.press("Enter");
+    }
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(filename);
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks).toString()).toBe(content);
+  }
+  const expand = first.getByRole("button", { name: "Expand code" });
+  await expand.click();
+  const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("pre code")).toHaveText("const first = 1;\n");
+  const size = await dialog.boundingBox();
+  expect(size?.width).toBe(page.viewportSize()?.width);
+  expect(size?.height).toBe(page.viewportSize()?.height);
+  await dialog.getByRole("button", { name: "Copy code" }).click();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(expand).toBeFocused();
 });
 
 for (const theme of ["light", "dark"]) {
@@ -497,7 +812,6 @@ test("applies button interaction effects to Markdown links", async ({
     name: "Link",
   });
   await expect(link).toBeVisible();
-  await expect(link).toHaveCSS("padding", "4px 8px");
   await link.hover();
   await expect
     .poll(() =>
@@ -521,6 +835,18 @@ test("applies button interaction effects to Markdown links", async ({
   await expect
     .poll(() => link.evaluate((element) => getComputedStyle(element).boxShadow))
     .not.toBe("none");
+  await expect
+    .poll(() =>
+      link.evaluate((element) => Number(getComputedStyle(element).scale)),
+    )
+    .toBeGreaterThan(1);
+  await page.keyboard.down("Enter");
+  await expect
+    .poll(() =>
+      link.evaluate((element) => Number(getComputedStyle(element).scale)),
+    )
+    .toBeLessThan(1);
+  await page.keyboard.up("Enter");
 });
 
 for (const motion of ["no-preference", "reduce"] as const) {
@@ -730,7 +1056,7 @@ for (const theme of ["light", "dark"]) {
       size: true,
       shadow: "none",
     });
-    await expect(turn.locator("pre").first()).toHaveCSS(
+    await expect(turn.locator("pre").first().locator("../..")).toHaveCSS(
       "border-radius",
       "16px",
     );
@@ -781,6 +1107,7 @@ for (const theme of ["light", "dark"]) {
         pre: getComputedStyle(required("pre")).backgroundColor,
         fore1: color("--fore-1"),
         fore5: color("--fore-5"),
+        back1: color("--back-1"),
         back2: color("--back-2"),
         back5: color("--back-5"),
       };
@@ -793,7 +1120,7 @@ for (const theme of ["light", "dark"]) {
     expect(themeColors.bullet).toBe(themeColors.fore5);
     expect(themeColors.hr).toBe(themeColors.back5);
     expect(themeColors.quoteBorder).toBe(themeColors.back5);
-    expect(themeColors.pre).toBe(themeColors.back2);
+    expect(themeColors.pre).toBe(themeColors.back1);
     expect(inlineStyles.background).toBe(themeColors.back2);
     expect(themeColors.fore1).toBe(
       theme === "light" ? "rgb(13, 13, 13)" : "rgb(242, 242, 242)",
@@ -815,8 +1142,8 @@ for (const theme of ["light", "dark"]) {
     const unknownCode = turn.locator("pre code").last();
     await expect(unknownCode).toHaveText("unrecognized code\n");
     await expect(unknownCode.locator(".syntax-token")).toHaveCount(0);
-    await expect(turn.getByRole("button", { name: "Copy Code" })).toHaveCount(
-      0,
+    await expect(turn.getByRole("button", { name: "Copy code" })).toHaveCount(
+      2,
     );
     await expect(
       turn.getByRole("button", { name: "Download file" }),
@@ -836,8 +1163,8 @@ for (const theme of ["light", "dark"]) {
     await expect(turn.locator("strong")).toHaveText("bold");
     await expect(turn.locator(".katex")).toHaveCount(2);
     await expect(highlightedCode).toHaveText("const result = 42;\n");
-    await expect(turn.getByRole("button", { name: "Copy Code" })).toHaveCount(
-      0,
+    await expect(turn.getByRole("button", { name: "Copy code" })).toHaveCount(
+      2,
     );
   });
 }

@@ -84,7 +84,7 @@
   --tw-prose-kbd-shadows: none;
   --tw-prose-code: var(--color-orange);
   --tw-prose-pre-code: var(--fore-1);
-  --tw-prose-pre-bg: var(--back-2);
+  --tw-prose-pre-bg: var(--back-1);
   --tw-prose-th-borders: var(--back-5);
   --tw-prose-td-borders: var(--back-5);
 }
@@ -172,6 +172,41 @@
 [data-transparency="off"] .scroll-edge-blur {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
+}
+
+.code-dialog-backdrop {
+  --code-dialog-backdrop-filter: blur(0);
+  animation: code-dialog-backdrop-in var(--transition-duration) ease-out both;
+  background-color: rgb(0 0 0 / 50%);
+  backdrop-filter: blur(0);
+  opacity: 0;
+}
+
+[data-transparency="on"] .code-dialog-backdrop {
+  --code-dialog-backdrop-filter: blur(1rem);
+}
+
+.code-dialog-overlay[data-exiting] .code-dialog-backdrop {
+  animation-name: code-dialog-backdrop-out;
+}
+
+@keyframes code-dialog-backdrop-in {
+  to {
+    backdrop-filter: var(--code-dialog-backdrop-filter);
+    opacity: 1;
+  }
+}
+
+@keyframes code-dialog-backdrop-out {
+  from {
+    backdrop-filter: var(--code-dialog-backdrop-filter);
+    opacity: 1;
+  }
+
+  to {
+    backdrop-filter: blur(0);
+    opacity: 0;
+  }
 }
 
 @utility all {

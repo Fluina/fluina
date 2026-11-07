@@ -7,6 +7,7 @@ import {
   Check,
   Copy,
   Delete,
+  Download,
   Folder,
   Globe,
   Loader,
@@ -33,21 +34,30 @@ import type {
   SyntheticEvent,
 } from "react";
 import {
+  createContext,
   Fragment,
   isValidElement,
   memo,
   useCallback,
+  useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { Dialog, Modal, ModalOverlay } from "react-aria-components";
 import type { BundledLanguage, ThemedToken } from "shiki";
 import { Streamdown } from "streamdown";
 import { usePreferences } from "@/app/preferences";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
+import {
+  MorphingDialog,
+  MorphingDialogContent,
+  MorphingDialogFrame,
+} from "@/components/motion-primitives/morphing-dialog";
 import { Button, Menu, ScrollArea, Tooltip } from "@/components/parts";
 import { getButtonScales } from "@/components/parts/button";
 import {
@@ -70,6 +80,7 @@ import {
   serverNow,
   syncServerClock,
 } from "@/lib/chat-archive";
+import { saveCodeFile } from "@/lib/code-file";
 import { THEME, TRANSITION } from "@/lib/motion";
 import { useIsMobile, useOS } from "@/lib/os";
 import { useNativeScroll } from "@/lib/scrollbar";
@@ -358,6 +369,7 @@ const MarkdownLink = ({
 }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) => {
   const { parallaxEnabled } = usePreferences();
   const linkRef = useRef<HTMLAnchorElement>(null);
+  const [keyboardPressed, setKeyboardPressed] = useState(false);
   const isFragment = href?.startsWith("#");
   const incomplete = href === "streamdown:incomplete-link";
 
@@ -385,9 +397,24 @@ const MarkdownLink = ({
     <a
       {...props}
       ref={linkRef}
-      className={`${props.className ?? ""} inline-block max-w-full wrap-anywhere leading-normal mx-2 my-1 outline-none all data-hovered:scale-(--button-hover-scale) data-pressed:scale-(--button-press-scale) data-pressed:[&>*:not(:first-child)]:scale-(--button-content-press-scale) data-focus-visible:scale-(--button-hover-scale) data-focus-visible:ring-2 data-focus-visible:ring-fore-1`}
+      className={`${props.className ?? ""} inline-block max-w-full wrap-anywhere leading-normal mx-2 my-1 outline-none all hover:scale-(--button-hover-scale) active:scale-(--button-press-scale) active:[&>*:not(:first-child)]:scale-(--button-content-press-scale) focus-visible:scale-(--button-hover-scale) focus-visible:ring-2 focus-visible:ring-fore-1 data-keyboard-pressed:scale-(--button-press-scale) data-keyboard-pressed:[&>*:not(:first-child)]:scale-(--button-content-press-scale)`}
       href={incomplete ? undefined : href}
       target={isFragment ? "_self" : props.target}
+      data-keyboard-pressed={keyboardPressed ? "" : undefined}
+      onKeyDown={(event) => {
+        props.onKeyDown?.(event);
+        if (event.key === "Enter" && !event.defaultPrevented && !incomplete) {
+          setKeyboardPressed(true);
+        }
+      }}
+      onKeyUp={(event) => {
+        props.onKeyUp?.(event);
+        if (event.key === "Enter") setKeyboardPressed(false);
+      }}
+      onBlur={(event) => {
+        props.onBlur?.(event);
+        setKeyboardPressed(false);
+      }}
       onClick={(event) => {
         if (!href || !isFragment) return;
         const anchor = event.currentTarget;
@@ -454,6 +481,8 @@ const MarkdownCode = ({
   className,
   ...props
 }: ComponentPropsWithoutRef<"code"> & { node?: unknown }) => {
+  const dialog = useContext(CodeDialogContext);
+  const isAnimating = dialog?.isAnimating ?? false;
   const language = className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
   const code = markdownText(children);
   const [highlighted, setHighlighted] = useState<{
@@ -463,7 +492,7 @@ const MarkdownCode = ({
   } | null>(null);
 
   useEffect(() => {
-    if (!language) return;
+    if (!language || isAnimating) return;
     let active = true;
     const highlight = async () => {
       const shiki = await import("shiki");
@@ -481,24 +510,31 @@ const MarkdownCode = ({
     return () => {
       active = false;
     };
-  }, [code, language]);
+  }, [code, isAnimating, language]);
 
   const visible =
+    !isAnimating &&
     highlighted &&
     highlighted.language === language &&
     code.startsWith(highlighted.code)
       ? highlighted
       : null;
+  let lineOffset = 0;
+  const lines = visible?.tokens.map((tokens) => {
+    const offset = lineOffset;
+    lineOffset +=
+      tokens.reduce((length, token) => length + token.content.length, 0) + 1;
+    return { offset, tokens };
+  });
 
   return (
     <code {...props} className={className}>
       {visible ? (
         <>
-          {visible.tokens.map((line, lineIndex) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: Highlighted lines are ordered by their source position.
-            <Fragment key={lineIndex}>
+          {lines?.map((line, lineIndex) => (
+            <Fragment key={line.offset}>
               {lineIndex > 0 && "\n"}
-              {line.map((token) => (
+              {line.tokens.map((token) => (
                 <span
                   key={token.offset}
                   className="syntax-token"
@@ -515,6 +551,299 @@ const MarkdownCode = ({
         children
       )}
     </code>
+  );
+};
+
+type ExpandedCode = {
+  id: string;
+  root: HTMLElement;
+  index: number;
+  code: string;
+  language?: string;
+};
+
+const CodeDialogContext = createContext<{
+  expanded: ExpandedCode | null;
+  setExpanded: React.Dispatch<React.SetStateAction<ExpandedCode | null>>;
+  isAnimating: boolean;
+} | null>(null);
+
+const CodeControls = ({
+  code,
+  language,
+  fullscreen,
+  toggle,
+  motionId,
+}: {
+  code: string;
+  language?: string;
+  fullscreen: boolean;
+  toggle: () => void;
+  motionId?: string;
+}) => {
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setError("");
+      setCopied(true);
+    } catch (copyError) {
+      console.error("コードのコピーに失敗しました。", copyError);
+      setError("コードをコピーできませんでした。");
+    }
+  };
+  const save = async () => {
+    try {
+      await saveCodeFile(code, language);
+      setError("");
+    } catch (saveError) {
+      console.error("コードの保存に失敗しました。", saveError);
+      setError("コードを保存できませんでした。");
+    }
+  };
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <>
+      <div
+        className={`flex items-center justify-between gap-2 border-b border-back-5 px-2 py-1 ${fullscreen ? "bg-back-2/90" : "bg-back-2"}`}
+      >
+        <span className="truncate select-text font-mono text-sm px-2">
+          {language || "text"}
+        </span>
+        <motion.div
+          layout="position"
+          layoutId={motionId}
+          className="flex shrink-0 items-center gap-1"
+        >
+          <Tooltip content={copied ? "完了" : "コピー"} placement="bottom">
+            <Button
+              aria-label="Copy code"
+              shape="circle"
+              className="size-7.5"
+              onPress={() => void copy()}
+            >
+              {copied ? <Check size={16} /> : <Copy size={16} />}
+            </Button>
+          </Tooltip>
+          <Tooltip content="保存" placement="bottom">
+            <Button
+              aria-label="Save code"
+              shape="circle"
+              className="size-7.5"
+              onPress={() => void save()}
+            >
+              <Download size={16} />
+            </Button>
+          </Tooltip>
+          <Tooltip content={fullscreen ? "縮小" : "拡大"} placement="bottom">
+            <Button
+              aria-label={fullscreen ? "Close expanded code" : "Expand code"}
+              shape="circle"
+              className="size-7.5"
+              onPress={toggle}
+            >
+              {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </Button>
+          </Tooltip>
+        </motion.div>
+      </div>
+      {error && (
+        <p role="alert" className="px-4 text-sm text-red">
+          {error}
+        </p>
+      )}
+    </>
+  );
+};
+
+const MarkdownPre = ({
+  node: _node,
+  children,
+  ...props
+}: ComponentPropsWithoutRef<"pre"> & { node?: unknown }) => {
+  const { parallaxEnabled } = usePreferences();
+  const dialog = useContext(CodeDialogContext);
+  if (!dialog) throw new Error("Code dialog provider is missing");
+  const { isAnimating } = dialog;
+  const layoutId = useId();
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [index, setIndex] = useState(-1);
+  const codeElement = isValidElement<{
+    className?: string;
+    children?: ReactNode;
+  }>(children)
+    ? children
+    : null;
+  const language = codeElement?.props.className?.match(
+    /(?:^|\s)language-([^\s]+)/,
+  )?.[1];
+  const code = markdownText(codeElement?.props.children ?? children);
+
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    const root = frame?.closest<HTMLElement>(".prose");
+    if (!frame || !root) return;
+    const currentIndex = Array.from(
+      root.querySelectorAll("[data-code-frame]"),
+    ).indexOf(frame);
+    setIndex(currentIndex);
+    if (
+      dialog?.expanded?.root === root &&
+      dialog.expanded.index === currentIndex
+    ) {
+      dialog.setExpanded((current) =>
+        current && (current.code !== code || current.language !== language)
+          ? { ...current, code, language }
+          : current,
+      );
+    }
+  }, [code, language, dialog]);
+
+  const isExpanded =
+    dialog.expanded?.root === frameRef.current?.closest(".prose") &&
+    dialog.expanded?.index === index &&
+    index >= 0;
+  const open = () => {
+    const frame = frameRef.current;
+    const root = frame?.closest<HTMLElement>(".prose");
+    if (!frame || !root) return;
+    const currentIndex = Array.from(
+      root.querySelectorAll("[data-code-frame]"),
+    ).indexOf(frame);
+    dialog.setExpanded({
+      id: layoutId,
+      root,
+      index: currentIndex,
+      code,
+      language,
+    });
+  };
+
+  return (
+    <div ref={frameRef} data-code-frame="">
+      <MorphingDialogFrame
+        id={isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}
+        enabled={parallaxEnabled}
+        className={`overflow-hidden rounded-2xl border border-back-5 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
+      >
+        <motion.div layout={!isAnimating}>
+          <CodeControls
+            code={code}
+            language={language}
+            fullscreen={false}
+            toggle={open}
+            motionId={
+              parallaxEnabled
+                ? `code-controls-${isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}`
+                : undefined
+            }
+          />
+          <pre
+            {...props}
+            className={`${props.className ?? ""} my-0! rounded-none!`}
+          >
+            {children}
+          </pre>
+        </motion.div>
+      </MorphingDialogFrame>
+    </div>
+  );
+};
+
+const CodeDialogProvider = ({
+  children,
+  isAnimating,
+}: {
+  children: ReactNode;
+  isAnimating: boolean;
+}) => {
+  const { parallaxEnabled } = usePreferences();
+  const [expanded, setExpanded] = useState<ExpandedCode | null>(null);
+  const close = () => {
+    const selected = expanded;
+    setExpanded(null);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        selected?.root
+          .querySelectorAll("[data-code-frame]")
+          [selected.index]?.querySelector<HTMLButtonElement>(
+            'button[aria-label="Expand code"]',
+          )
+          ?.focus();
+      });
+    });
+  };
+  return (
+    <MorphingDialog>
+      <CodeDialogContext.Provider
+        value={{ expanded, setExpanded, isAnimating }}
+      >
+        {children}
+        <ModalOverlay
+          isOpen={expanded !== null}
+          isDismissable
+          onOpenChange={(open) => {
+            if (!open) close();
+          }}
+          className="code-dialog-overlay fixed inset-0 z-50"
+        >
+          <div
+            aria-hidden="true"
+            className="code-dialog-backdrop pointer-events-none absolute inset-0 z-0"
+          />
+          <Modal className="relative z-10 size-full outline-none">
+            <Dialog
+              aria-label="Fullscreen Code View"
+              className="size-full outline-none"
+            >
+              {expanded && (
+                <MorphingDialogContent
+                  id={expanded.id}
+                  enabled={parallaxEnabled}
+                  managed
+                  className="prose prose-fluina flex size-full max-w-none flex-col overflow-hidden bg-transparent"
+                >
+                  <motion.div
+                    layout={!isAnimating}
+                    className="flex flex-1 flex-col"
+                  >
+                    <CodeControls
+                      code={expanded.code}
+                      language={expanded.language}
+                      fullscreen
+                      toggle={close}
+                      motionId={
+                        parallaxEnabled
+                          ? `code-controls-${expanded.id}`
+                          : undefined
+                      }
+                    />
+                    <pre className="my-0! flex-1 overflow-auto select-text **:select-text">
+                      <MarkdownCode
+                        className={
+                          expanded.language
+                            ? `language-${expanded.language}`
+                            : undefined
+                        }
+                      >
+                        {expanded.code}
+                      </MarkdownCode>
+                    </pre>
+                  </motion.div>
+                </MorphingDialogContent>
+              )}
+            </Dialog>
+          </Modal>
+        </ModalOverlay>
+      </CodeDialogContext.Provider>
+    </MorphingDialog>
   );
 };
 
@@ -536,7 +865,7 @@ const markdownComponents = {
   strong: "strong",
   sup: "sup",
   sub: "sub",
-  pre: "pre",
+  pre: MarkdownPre,
   code: MarkdownCode,
   table: MarkdownTable,
   thead: "thead",
@@ -772,77 +1101,79 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   }
 
   return (
-    <div className="flex flex-col gap-3 min-w-0 w-full max-w-full prose prose-fluina">
-      {parts.map((part) =>
-        part.type === "media" ? (
-          part.kind === "video" ? (
-            <video
-              key={part.key}
-              controls
-              crossOrigin="anonymous"
-              preload="metadata"
-              aria-label={part.alt}
-              style={
-                motionEnabled && isRevealing
-                  ? {
-                      animation: `sd-fadeIn ${REVEAL_INTERVAL_MS}ms linear both`,
-                    }
-                  : undefined
-              }
-              className="max-h-[70vh] max-w-full border border-back-5"
-            >
-              <source src={part.url} type="video/mp4" />
-              <track
-                kind="captions"
-                src={part.captionsUrl}
-                srcLang="und"
-                label="Visual description"
+    <CodeDialogProvider isAnimating={isAnimating || isRevealing}>
+      <div className="flex flex-col gap-3 min-w-0 w-full max-w-full prose prose-fluina">
+        {parts.map((part) =>
+          part.type === "media" ? (
+            part.kind === "video" ? (
+              <video
+                key={part.key}
+                controls
+                crossOrigin="anonymous"
+                preload="metadata"
+                aria-label={part.alt}
+                style={
+                  motionEnabled && isRevealing
+                    ? {
+                        animation: `sd-fadeIn ${REVEAL_INTERVAL_MS}ms linear both`,
+                      }
+                    : undefined
+                }
+                className="max-h-[70vh] max-w-full border border-back-5"
+              >
+                <source src={part.url} type="video/mp4" />
+                <track
+                  kind="captions"
+                  src={part.captionsUrl}
+                  srcLang="und"
+                  label="Visual description"
+                />
+              </video>
+            ) : (
+              <Image
+                key={part.key}
+                src={part.url}
+                loader={({ src }) => src}
+                alt={part.alt}
+                width={1280}
+                height={720}
+                unoptimized
+                style={
+                  motionEnabled && isRevealing
+                    ? {
+                        animation: `sd-fadeIn ${REVEAL_INTERVAL_MS}ms linear both`,
+                      }
+                    : undefined
+                }
+                className="max-h-[70vh] max-w-full object-contain border border-back-5"
               />
-            </video>
+            )
           ) : (
-            <Image
+            <Streamdown
               key={part.key}
-              src={part.url}
-              loader={({ src }) => src}
-              alt={part.alt}
-              width={1280}
-              height={720}
-              unoptimized
-              style={
+              animated={
                 motionEnabled && isRevealing
                   ? {
-                      animation: `sd-fadeIn ${REVEAL_INTERVAL_MS}ms linear both`,
+                      animation: "fadeIn",
+                      duration: REVEAL_INTERVAL_MS,
+                      easing: "linear",
+                      sep: "word",
+                      stagger: REVEAL_INTERVAL_MS / REVEAL_GRAPHEMES_PER_TICK,
+                      maxBacklogMs: REVEAL_INTERVAL_MS,
                     }
-                  : undefined
+                  : false
               }
-              className="max-h-[70vh] max-w-full object-contain border border-back-5"
-            />
-          )
-        ) : (
-          <Streamdown
-            key={part.key}
-            animated={
-              motionEnabled && isRevealing
-                ? {
-                    animation: "fadeIn",
-                    duration: REVEAL_INTERVAL_MS,
-                    easing: "linear",
-                    sep: "word",
-                    stagger: REVEAL_INTERVAL_MS / REVEAL_GRAPHEMES_PER_TICK,
-                    maxBacklogMs: REVEAL_INTERVAL_MS,
-                  }
-                : false
-            }
-            mode={isAnimating || isRevealing ? "streaming" : "static"}
-            isAnimating={isAnimating || isRevealing}
-            plugins={markdownPlugins}
-            components={markdownComponents}
-          >
-            {part.content}
-          </Streamdown>
-        ),
-      )}
-    </div>
+              mode={isAnimating || isRevealing ? "streaming" : "static"}
+              isAnimating={isAnimating || isRevealing}
+              plugins={markdownPlugins}
+              components={markdownComponents}
+            >
+              {part.content}
+            </Streamdown>
+          ),
+        )}
+      </div>
+    </CodeDialogProvider>
   );
 });
 
@@ -1047,7 +1378,6 @@ export default function Ask() {
       if (isInFlow(el)) used += el.getBoundingClientRect().height;
     }
     if (el) {
-      // The virtualizer's allocated height can lag behind the rendered turn.
       used += Math.max(
         el.getBoundingClientRect().bottom -
           lastTurn.getBoundingClientRect().top,
@@ -1281,7 +1611,6 @@ export default function Ask() {
     [isExpanded],
   );
 
-  // IndexedDBの読み込みと削除、画面への反映を1本の列で直列に実行する
   const archiveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const runArchiveTask = useCallback(<T,>(task: () => Promise<T>) => {
     const result = archiveQueueRef.current.then(task, task);
@@ -1316,14 +1645,12 @@ export default function Ask() {
         ? null
         : new BroadcastChannel(ARCHIVE_CHANNEL_NAME);
 
-    // 削除したターンを画面から外す。先頭側の削除なので、表示位置は末尾基準で維持する
     const reflectDeletion = async (deleted: Set<number>) => {
       setIsPrependingHistory(true);
       setMessages((current) =>
         current.filter((message) => !deleted.has(message.sequence)),
       );
 
-      // 表示中の先頭が消えた場合は、残った最古のターンが新しい先頭になる
       const oldest = await getOldestChatSequence();
       const currentFirst = loadedFirstSequenceRef.current;
       const first =
@@ -1750,7 +2077,6 @@ export default function Ask() {
               if (await saveChatArchiveSummary(nextSummary, summaryEpoch)) {
                 summary = nextSummary;
               } else {
-                // 作成中に期限切れの削除が起きたため、残った会話から要約し直す
                 summaryEpoch = await getChatPurgeEpoch();
                 summary = await getChatArchiveSummary();
               }
@@ -2001,7 +2327,6 @@ export default function Ask() {
 
     setValue("");
     if (editorRef.current) editorRef.current.innerText = "";
-    // モバイルでは送信後にカーソルとキーボードを閉じる
     if (isMobile) editorRef.current?.blur();
     setIsAdjusted(false);
     setIsScrollable(false);
@@ -3065,7 +3390,6 @@ export default function Ask() {
                     className={`flex flex-col gap-4 ${isLastTurn ? "" : "pb-8"}`}
                   >
                     <AnimatePresence mode="popLayout" initial={false}>
-                      {/* Keep the streamed message in the same turn after it is saved. */}
                       {(isLastTurn && visibleStreamingMessage
                         ? [...turn, visibleStreamingMessage]
                         : turn

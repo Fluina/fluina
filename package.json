@@ -22,6 +22,7 @@
     "@vercel/speed-insights": "^2.1.0",
     "class-variance-authority": "^0.7.1",
     "elysia": "^1.4.31",
+    "linguist-languages": "^9.5.0",
     "lucide-react": "^1.70.0",
     "motion": "^14.10.1",
     "next": "^16.4.5",
