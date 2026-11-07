@@ -30,7 +30,7 @@ const buttonVariants = tv({
   },
 });
 
-const getButtonScales = (size: number) => ({
+export const getButtonScales = (size: number) => ({
   hoverScale: Math.min(1.1, 1 + 10 / size),
   pressScale: Math.max(0.9, 1 - 10 / size),
   contentPressScale: Math.max(0.75, 1 - 20 / size),

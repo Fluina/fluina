@@ -1,6 +1,26 @@
 import { expect, type Page, test } from "@playwright/test";
 
+test("aligns attachment file names to the left", async ({ page }) => {
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({
+      name: "example-document.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("example"),
+    });
+
+  await expect(
+    page
+      .getByRole("button", { name: "example-document.txt" })
+      .getByText("example-document", { exact: true }),
+  ).toHaveCSS("text-align", "left");
+});
+
 async function mockHeldAnswer(page: Page) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.addInitScript(() => {
     const originalFetch = window.fetch;
     window.fetch = Object.assign(

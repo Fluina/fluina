@@ -71,44 +71,52 @@
 @utility prose-fluina {
   --tw-prose-body: var(--fore-1);
   --tw-prose-headings: var(--fore-1);
-  --tw-prose-lead: var(--fore-3);
+  --tw-prose-lead: var(--fore-1);
   --tw-prose-links: var(--color-blue);
   --tw-prose-bold: var(--fore-1);
   --tw-prose-counters: var(--fore-5);
-  --tw-prose-bullets: var(--back-7);
-  --tw-prose-hr: var(--back-4);
-  --tw-prose-quotes: var(--fore-2);
-  --tw-prose-quote-borders: var(--back-4);
-  --tw-prose-captions: var(--fore-5);
-  --tw-prose-kbd: var(--fore-1);
-  --tw-prose-kbd-shadows: color-mix(in oklab, var(--fore-1) 10%, transparent);
-  --tw-prose-code: var(--fore-1);
+  --tw-prose-bullets: var(--fore-5);
+  --tw-prose-hr: var(--back-5);
+  --tw-prose-quotes: var(--fore-5);
+  --tw-prose-quote-borders: var(--back-5);
+  --tw-prose-captions: var(--fore-1);
+  --tw-prose-kbd: var(--color-orange);
+  --tw-prose-kbd-shadows: none;
+  --tw-prose-code: var(--color-orange);
   --tw-prose-pre-code: var(--fore-1);
   --tw-prose-pre-bg: var(--back-2);
   --tw-prose-th-borders: var(--back-5);
-  --tw-prose-td-borders: var(--back-4);
-  --tw-prose-invert-body: var(--fore-1);
-  --tw-prose-invert-headings: var(--fore-1);
-  --tw-prose-invert-lead: var(--fore-3);
-  --tw-prose-invert-links: var(--color-blue);
-  --tw-prose-invert-bold: var(--fore-1);
-  --tw-prose-invert-counters: var(--fore-1);
-  --tw-prose-invert-bullets: var(--fore-1);
-  --tw-prose-invert-hr: var(--fore-1);
-  --tw-prose-invert-quotes: var(--fore-2);
-  --tw-prose-invert-quote-borders: var(--fore-1);
-  --tw-prose-invert-captions: var(--fore-5);
-  --tw-prose-invert-kbd: var(--fore-1);
-  --tw-prose-invert-kbd-shadows: color-mix(
-    in oklab,
-    var(--fore-1) 10%,
-    transparent
-  );
-  --tw-prose-invert-code: var(--fore-1);
-  --tw-prose-invert-pre-code: var(--fore-1);
-  --tw-prose-invert-pre-bg: var(--back-2);
-  --tw-prose-invert-th-borders: var(--back-5);
-  --tw-prose-invert-td-borders: var(--back-4);
+  --tw-prose-td-borders: var(--back-5);
+}
+
+.prose :not(pre) > code,
+.prose kbd {
+  background-color: var(--back-2);
+  border-radius: 1rem;
+  font-weight: 400;
+  padding: 0.25rem 0.5rem;
+}
+
+.prose kbd {
+  box-shadow: none;
+  font-family: var(--font-mono);
+}
+
+.prose :not(pre) > code::before,
+.prose :not(pre) > code::after {
+  content: none;
+}
+
+.prose pre {
+  border-radius: 1rem;
+}
+
+.syntax-token {
+  color: var(--shiki-light);
+}
+
+[data-theme="dark"] .syntax-token {
+  color: var(--shiki-dark);
 }
 
 :root {

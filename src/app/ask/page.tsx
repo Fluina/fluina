@@ -33,6 +33,7 @@ import type {
   SyntheticEvent,
 } from "react";
 import {
+  Fragment,
   isValidElement,
   memo,
   useCallback,
@@ -42,10 +43,13 @@ import {
   useRef,
   useState,
 } from "react";
+import type { BundledLanguage, ThemedToken } from "shiki";
 import { Streamdown } from "streamdown";
+import { usePreferences } from "@/app/preferences";
 import Frame_Fluina_small_dark from "@/assets/images/frames/svg/Frame_Fluina_small_dark.svg";
 import Frame_Fluina_small_light from "@/assets/images/frames/svg/Frame_Fluina_small_light.svg";
 import { Button, Menu, ScrollArea, Tooltip } from "@/components/parts";
+import { getButtonScales } from "@/components/parts/button";
 import {
   type ArchivedAttachment,
   type ArchivedMessage,
@@ -216,7 +220,7 @@ const FilePreview = ({
 
   return (
     <div className="p-1 size-full flex flex-col justify-between">
-      <span className="line-clamp-3 p-1 break-all text-ellipsis text-sm">
+      <span className="line-clamp-3 p-1 break-all text-ellipsis text-sm text-left">
         {baseName || name}
       </span>
 
@@ -326,15 +330,350 @@ const MarkdownParagraph = ({
     <p {...props}>{children}</p>
   );
 
-const markdownComponents = { p: MarkdownParagraph };
+const MarkdownTable = ({
+  children,
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<"table"> & { node?: unknown }) => {
+  const { elementRef } = useNativeScroll<HTMLElement>({ axis: "x" });
+
+  return (
+    <div className="relative mx-0.5 max-w-full rounded-2xl border border-back-5 has-[>section:focus-visible]:ring-2 has-[>section:focus-visible]:ring-fore-1 all">
+      <section
+        ref={elementRef}
+        aria-label="表"
+        className="w-full max-w-full rounded-[inherit] outline-none [&_table]:my-0 [&_thead]:bg-back-2 [&_thead_th]:py-2 [&_th]:px-4 [&_th]:align-middle [&_td]:px-4 [&_td]:align-middle"
+      >
+        <table {...props}>{children}</table>
+      </section>
+    </div>
+  );
+};
+
+const MarkdownLink = ({
+  node: _node,
+  href,
+  children,
+  ...props
+}: ComponentPropsWithoutRef<"a"> & { node?: unknown }) => {
+  const { parallaxEnabled } = usePreferences();
+  const linkRef = useRef<HTMLAnchorElement>(null);
+  const isFragment = href?.startsWith("#");
+  const incomplete = href === "streamdown:incomplete-link";
+
+  useLayoutEffect(() => {
+    const link = linkRef.current;
+    if (!link) return;
+    const updateScales = () => {
+      const size = Math.max(link.offsetWidth, link.offsetHeight);
+      if (!size) return;
+      const scales = getButtonScales(size);
+      link.style.setProperty("--button-hover-scale", String(scales.hoverScale));
+      link.style.setProperty("--button-press-scale", String(scales.pressScale));
+      link.style.setProperty(
+        "--button-content-press-scale",
+        String(scales.contentPressScale),
+      );
+    };
+    const observer = new ResizeObserver(updateScales);
+    observer.observe(link);
+    updateScales();
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <a
+      {...props}
+      ref={linkRef}
+      className={`${props.className ?? ""} inline-block max-w-full wrap-anywhere leading-normal mx-2 my-1 outline-none all data-hovered:scale-(--button-hover-scale) data-pressed:scale-(--button-press-scale) data-pressed:[&>*:not(:first-child)]:scale-(--button-content-press-scale) data-focus-visible:scale-(--button-hover-scale) data-focus-visible:ring-2 data-focus-visible:ring-fore-1`}
+      href={incomplete ? undefined : href}
+      target={isFragment ? "_self" : props.target}
+      onClick={(event) => {
+        if (!href || !isFragment) return;
+        const anchor = event.currentTarget;
+        if (
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.shiftKey &&
+          !event.altKey &&
+          (anchor.hasAttribute("data-footnote-ref") ||
+            anchor.hasAttribute("data-footnote-backref"))
+        ) {
+          const id = href.slice(1);
+          const target = Array.from(
+            anchor.closest(".prose")?.querySelectorAll<HTMLElement>("[id]") ??
+              [],
+          ).find((element) => element.id === id);
+          if (target) {
+            event.preventDefault();
+            if (
+              document.getElementById(id) === target &&
+              location.hash !== href
+            ) {
+              const oldURL = location.href;
+              history.pushState(null, "", href);
+              window.dispatchEvent(
+                new HashChangeEvent("hashchange", {
+                  oldURL,
+                  newURL: location.href,
+                }),
+              );
+            }
+            target.tabIndex = -1;
+            target.focus({ preventScroll: true });
+            target.scrollIntoView({
+              block: "nearest",
+              behavior: parallaxEnabled ? "smooth" : "instant",
+            });
+          }
+        }
+      }}
+    >
+      {children}
+    </a>
+  );
+};
+
+const markdownText = (node: ReactNode): string => {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(markdownText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return markdownText(node.props.children);
+  }
+  return "";
+};
+
+const isBundledLanguage = (
+  language: string,
+  languages: Record<BundledLanguage, unknown>,
+): language is BundledLanguage => Object.hasOwn(languages, language);
+
+const MarkdownCode = ({
+  node: _node,
+  children,
+  className,
+  ...props
+}: ComponentPropsWithoutRef<"code"> & { node?: unknown }) => {
+  const language = className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
+  const code = markdownText(children);
+  const [highlighted, setHighlighted] = useState<{
+    code: string;
+    language: string;
+    tokens: ThemedToken[][];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!language) return;
+    let active = true;
+    const highlight = async () => {
+      const shiki = await import("shiki");
+      if (!isBundledLanguage(language, shiki.bundledLanguages)) return;
+      const { tokens } = await shiki.codeToTokens(code, {
+        lang: language,
+        themes: { light: "github-light", dark: "github-dark" },
+        defaultColor: false,
+      });
+      if (active) setHighlighted({ code, language, tokens });
+    };
+    highlight().catch((error: unknown) => {
+      console.error("コードの構文ハイライトに失敗しました。", error);
+    });
+    return () => {
+      active = false;
+    };
+  }, [code, language]);
+
+  const visible =
+    highlighted &&
+    highlighted.language === language &&
+    code.startsWith(highlighted.code)
+      ? highlighted
+      : null;
+
+  return (
+    <code {...props} className={className}>
+      {visible ? (
+        <>
+          {visible.tokens.map((line, lineIndex) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: Highlighted lines are ordered by their source position.
+            <Fragment key={lineIndex}>
+              {lineIndex > 0 && "\n"}
+              {line.map((token) => (
+                <span
+                  key={token.offset}
+                  className="syntax-token"
+                  style={token.htmlStyle}
+                >
+                  {token.content}
+                </span>
+              ))}
+            </Fragment>
+          ))}
+          {code.slice(visible.code.length)}
+        </>
+      ) : (
+        children
+      )}
+    </code>
+  );
+};
+
+const markdownComponents = {
+  p: MarkdownParagraph,
+  a: MarkdownLink,
+  img: "img",
+  h1: "h1",
+  h2: "h2",
+  h3: "h3",
+  h4: "h4",
+  h5: "h5",
+  h6: "h6",
+  ul: "ul",
+  ol: "ol",
+  li: "li",
+  blockquote: "blockquote",
+  hr: "hr",
+  strong: "strong",
+  sup: "sup",
+  sub: "sub",
+  pre: "pre",
+  code: MarkdownCode,
+  table: MarkdownTable,
+  thead: "thead",
+  tbody: "tbody",
+  tr: "tr",
+  th: "th",
+  td: "td",
+} as const;
+const MEDIA_PREFIX = "[[FLUINA_MEDIA:";
+const REVEAL_INTERVAL_MS = 50;
+const REVEAL_GRAPHEMES_PER_TICK = 6;
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+  granularity: "grapheme",
+});
+
+function advanceReply(content: string, position: number, isStreaming: boolean) {
+  let next = position;
+  let remaining = REVEAL_GRAPHEMES_PER_TICK;
+  while (next < content.length && remaining > 0) {
+    const tail = content.slice(next);
+    if (tail.startsWith(MEDIA_PREFIX)) {
+      const end = content.indexOf("]]", next + MEDIA_PREFIX.length);
+      if (end === -1 && isStreaming) break;
+      if (end !== -1) {
+        if (remaining < REVEAL_GRAPHEMES_PER_TICK) break;
+        next = end + 2;
+        break;
+      }
+    } else if (isStreaming && MEDIA_PREFIX.startsWith(tail)) {
+      break;
+    }
+
+    const segment = graphemeSegmenter.segment(tail)[Symbol.iterator]().next();
+    if (segment.done) break;
+    next += segment.value.segment.length;
+    remaining -= 1;
+  }
+  return next;
+}
 
 const AssistantMarkdown = memo(function AssistantMarkdown({
+  messageId,
   content,
   isAnimating,
+  animateNewContent,
+  motionEnabled,
+  revealPosition,
+  onRevealComplete,
 }: {
+  messageId: string;
   content: string;
   isAnimating: boolean;
+  animateNewContent: boolean;
+  motionEnabled: boolean;
+  revealPosition: { current: Map<string, number> };
+  onRevealComplete: (id: string) => void;
 }) {
+  const [revealedLength, setRevealedLength] = useState(() =>
+    animateNewContent && motionEnabled
+      ? (revealPosition.current.get(messageId) ?? 0)
+      : content.length,
+  );
+  const [revealComplete, setRevealComplete] = useState(!animateNewContent);
+  const positionRef = useRef(revealedLength);
+  const latestContent = useRef(content);
+  const latestIsAnimating = useRef(isAnimating);
+  latestContent.current = content;
+  latestIsAnimating.current = isAnimating;
+
+  useEffect(() => {
+    if (!animateNewContent || motionEnabled) return;
+    revealPosition.current.set(messageId, content.length);
+    positionRef.current = content.length;
+    setRevealedLength(content.length);
+  }, [
+    animateNewContent,
+    content.length,
+    messageId,
+    motionEnabled,
+    revealPosition,
+  ]);
+
+  useEffect(() => {
+    if (!animateNewContent || !motionEnabled || revealComplete) return;
+    const timer = setInterval(() => {
+      const next = advanceReply(
+        latestContent.current,
+        positionRef.current,
+        latestIsAnimating.current,
+      );
+      if (next === positionRef.current) return;
+      positionRef.current = next;
+      revealPosition.current.set(messageId, next);
+      setRevealedLength(next);
+    }, REVEAL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [
+    animateNewContent,
+    messageId,
+    motionEnabled,
+    revealComplete,
+    revealPosition,
+  ]);
+
+  useEffect(() => {
+    if (
+      !animateNewContent ||
+      revealComplete ||
+      isAnimating ||
+      (motionEnabled && revealedLength < content.length)
+    ) {
+      return;
+    }
+    const timer = setTimeout(
+      () => {
+        setRevealComplete(true);
+        onRevealComplete(messageId);
+      },
+      motionEnabled ? 100 : 0,
+    );
+    return () => clearTimeout(timer);
+  }, [
+    animateNewContent,
+    content.length,
+    isAnimating,
+    messageId,
+    motionEnabled,
+    onRevealComplete,
+    revealComplete,
+    revealedLength,
+  ]);
+
+  const visibleContent =
+    animateNewContent && motionEnabled
+      ? content.slice(0, revealedLength)
+      : content;
+  const isRevealing = animateNewContent && !revealComplete;
   const mediaPattern = /\[\[FLUINA_MEDIA:([^\]]+)\]\]/g;
   const parts: Array<
     | { type: "text"; key: string; content: string }
@@ -356,13 +695,13 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   > = [];
   let cursor = 0;
 
-  for (const match of content.matchAll(mediaPattern)) {
+  for (const match of visibleContent.matchAll(mediaPattern)) {
     const index = match.index ?? 0;
     if (index > cursor) {
       parts.push({
         type: "text",
         key: `text-${cursor}`,
-        content: content.slice(cursor, index),
+        content: visibleContent.slice(cursor, index),
       });
     }
 
@@ -424,16 +763,16 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
     cursor = index + match[0].length;
   }
 
-  if (cursor < content.length || parts.length === 0) {
+  if (cursor < visibleContent.length || parts.length === 0) {
     parts.push({
       type: "text",
       key: `text-${cursor}`,
-      content: content.slice(cursor),
+      content: visibleContent.slice(cursor),
     });
   }
 
   return (
-    <div className="flex flex-col gap-3 min-w-0 max-w-full prose prose-fluina dark:prose-invert">
+    <div className="flex flex-col gap-3 min-w-0 w-full max-w-full prose prose-fluina">
       {parts.map((part) =>
         part.type === "media" ? (
           part.kind === "video" ? (
@@ -443,6 +782,13 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
               crossOrigin="anonymous"
               preload="metadata"
               aria-label={part.alt}
+              style={
+                motionEnabled && isRevealing
+                  ? {
+                      animation: `sd-fadeIn ${REVEAL_INTERVAL_MS}ms linear both`,
+                    }
+                  : undefined
+              }
               className="max-h-[70vh] max-w-full border border-back-5"
             >
               <source src={part.url} type="video/mp4" />
@@ -462,22 +808,33 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
               width={1280}
               height={720}
               unoptimized
+              style={
+                motionEnabled && isRevealing
+                  ? {
+                      animation: `sd-fadeIn ${REVEAL_INTERVAL_MS}ms linear both`,
+                    }
+                  : undefined
+              }
               className="max-h-[70vh] max-w-full object-contain border border-back-5"
             />
           )
         ) : (
           <Streamdown
             key={part.key}
-            animated={{
-              animation: "slideUp",
-              duration: 280,
-              easing: "cubic-bezier(0.16, 1, 0.3, 1)",
-              sep: "word",
-              stagger: 300,
-              maxBacklogMs: Number.POSITIVE_INFINITY,
-            }}
-            mode={isAnimating ? "streaming" : "static"}
-            isAnimating={isAnimating}
+            animated={
+              motionEnabled && isRevealing
+                ? {
+                    animation: "fadeIn",
+                    duration: REVEAL_INTERVAL_MS,
+                    easing: "linear",
+                    sep: "word",
+                    stagger: REVEAL_INTERVAL_MS / REVEAL_GRAPHEMES_PER_TICK,
+                    maxBacklogMs: REVEAL_INTERVAL_MS,
+                  }
+                : false
+            }
+            mode={isAnimating || isRevealing ? "streaming" : "static"}
+            isAnimating={isAnimating || isRevealing}
             plugins={markdownPlugins}
             components={markdownComponents}
           >
@@ -603,6 +960,7 @@ const PAGE_LOAD_EXTRA_DELAY_MS = 250;
 export default function Ask() {
   const os = useOS();
   const isMobile = useIsMobile();
+  const { parallaxEnabled } = usePreferences();
 
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [value, setValue] = useState("");
@@ -624,6 +982,9 @@ export default function Ask() {
   const [streamingMessage, setStreamingMessage] = useState<Message | null>(
     null,
   );
+  const [revealingMessageId, setRevealingMessageId] = useState<string | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
@@ -640,6 +1001,10 @@ export default function Ask() {
   const pendingLatestTurnScrollRef = useRef<ChatScrollBehavior | null>(null);
   const shouldStickToLatestTurnRef = useRef(true);
   const streamedMessageIdsRef = useRef(new Set<string>());
+  const revealPositionRef = useRef(new Map<string, number>());
+  const finishRevealingMessage = useCallback((id: string) => {
+    setRevealingMessageId((current) => (current === id ? null : current));
+  }, []);
   const pendingCaretRef = useRef<{
     caretTop: number;
     caretRatio: number | null;
@@ -676,13 +1041,20 @@ export default function Ask() {
     }
     const isInFlow = (el: Element) =>
       getComputedStyle(el).position !== "absolute";
-    let used = lastTurn.getBoundingClientRect().height;
-    for (
-      let el = spacer.previousElementSibling;
-      el && !el.contains(lastTurn);
-      el = el.previousElementSibling
-    ) {
+    let used = 0;
+    let el = spacer.previousElementSibling;
+    for (; el && !el.contains(lastTurn); el = el.previousElementSibling) {
       if (isInFlow(el)) used += el.getBoundingClientRect().height;
+    }
+    if (el) {
+      // The virtualizer's allocated height can lag behind the rendered turn.
+      used += Math.max(
+        el.getBoundingClientRect().bottom -
+          lastTurn.getBoundingClientRect().top,
+        0,
+      );
+    } else {
+      used += lastTurn.getBoundingClientRect().height;
     }
     const next = `${Math.max(Math.ceil(viewport.clientHeight - used), 0)}px`;
     if (spacer.style.height !== next) spacer.style.height = next;
@@ -1183,13 +1555,31 @@ export default function Ask() {
       }
     };
     const resizeObserver = new ResizeObserver(stick);
+    const virtualSizeObserver = new MutationObserver(() => {
+      updateTailSpacer();
+      stick();
+    });
     const observeTargets = () => {
       resizeObserver.disconnect();
+      virtualSizeObserver.disconnect();
       resizeObserver.observe(host);
       for (const child of host.querySelectorAll<HTMLElement>(
         "[data-chat-last-turn], [data-chat-tail-spacer]",
       )) {
         resizeObserver.observe(child);
+      }
+      const lastTurn = host.querySelector<HTMLElement>("[data-chat-last-turn]");
+      const spacer = host.querySelector<HTMLElement>("[data-chat-tail-spacer]");
+      let container = spacer?.previousElementSibling;
+      while (container && lastTurn && !container.contains(lastTurn)) {
+        container = container.previousElementSibling;
+      }
+      if (lastTurn && container) {
+        resizeObserver.observe(container);
+        virtualSizeObserver.observe(container, {
+          attributes: true,
+          attributeFilter: ["style"],
+        });
       }
     };
     observeTargets();
@@ -1229,13 +1619,14 @@ export default function Ask() {
 
     return () => {
       resizeObserver.disconnect();
+      virtualSizeObserver.disconnect();
       mutationObserver.disconnect();
       host.removeEventListener("scroll", handleScroll, true);
       for (const type of userEvents) {
         host.removeEventListener(type, stopFollowing, true);
       }
     };
-  }, [isInitialChatPositioned, scrollToLatestTurn]);
+  }, [isInitialChatPositioned, scrollToLatestTurn, updateTailSpacer]);
 
   //  ================================================================
   //    送信
@@ -1258,6 +1649,7 @@ export default function Ask() {
       );
       const assistantMessageId = generateId();
       streamedMessageIdsRef.current.add(assistantMessageId);
+      setRevealingMessageId(assistantMessageId);
       const startedAt = serverNow();
       let reply = "";
       let renderTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1559,8 +1951,10 @@ export default function Ask() {
             await refreshVisibleArchivePage();
           } catch (archiveFailure) {
             console.error("Failed to persist assistant error:", archiveFailure);
+            finishRevealingMessage(assistantMessageId);
           }
         }
+        if (!reply.trim()) finishRevealingMessage(assistantMessageId);
         setStreamingMessage(null);
       } finally {
         clearTimeout(timeoutId);
@@ -1570,7 +1964,7 @@ export default function Ask() {
         setIsLoading(false);
       }
     },
-    [appendQueuedMessage, refreshVisibleArchivePage],
+    [appendQueuedMessage, finishRevealingMessage, refreshVisibleArchivePage],
   );
 
   const handleStop = useCallback(() => {
@@ -2708,7 +3102,7 @@ export default function Ask() {
 
                             {(isEditing || !isUser || msg.content.trim()) && (
                               <div
-                                className={`**:select-text min-w-0 max-w-full ${isUser && "bg-back-2 px-6 py-4 rounded-4xl"}`}
+                                className={`**:select-text min-w-0 max-w-full ${isUser ? "bg-back-2 px-6 py-4 rounded-4xl" : "w-full"}`}
                               >
                                 {isEditing ? (
                                   <motion.div
@@ -2740,12 +3134,17 @@ export default function Ask() {
                                   <p>{msg.content}</p>
                                 ) : msg.content ? (
                                   <AssistantMarkdown
+                                    messageId={msg.id}
                                     content={msg.content}
                                     isAnimating={
-                                      isLoading &&
-                                      (isStreaming ||
-                                        msg.id === messages.at(-1)?.id)
+                                      msg.id === streamingMessage?.id
                                     }
+                                    animateNewContent={streamedMessageIdsRef.current.has(
+                                      msg.id,
+                                    )}
+                                    motionEnabled={parallaxEnabled}
+                                    revealPosition={revealPositionRef}
+                                    onRevealComplete={finishRevealingMessage}
                                   />
                                 ) : isStreaming ? (
                                   loadingMessage
@@ -2887,25 +3286,27 @@ export default function Ask() {
               }}
             >
               <AnimatePresence mode="popLayout" initial={false}>
-                {!isLoading && messages.at(-1)?.role === "assistant" && (
-                  <motion.div
-                    key="assistant-disclaimer"
-                    data-chat-disclaimer=""
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={TRANSITION}
-                    className="py-2"
-                  >
-                    <p className="select-text text-xs text-fore-5 p-2 border border-dashed border-back-5 rounded-lg">
-                      ⚠
-                      回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
-                    </p>
-                    <p className="select-text text-xs text-yellow p-2 border border-dashed border-yellow rounded-lg mt-2">
-                      現在アカウントに未接続であるため、試用版が適用されています。そのため、チャットに対して大幅な制限が発生しています。アカウントに接続すると無料版が適用され、制限が緩和されます。
-                    </p>
-                  </motion.div>
-                )}
+                {!isLoading &&
+                  !revealingMessageId &&
+                  messages.at(-1)?.role === "assistant" && (
+                    <motion.div
+                      key="assistant-disclaimer"
+                      data-chat-disclaimer=""
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={TRANSITION}
+                      className="py-2"
+                    >
+                      <p className="select-text text-xs text-fore-5 p-2 border border-dashed border-back-5 rounded-lg">
+                        ⚠
+                        回答はAIによって書かれているため、間違いを含んでいることがあります。十分に注意した上でご利用ください。
+                      </p>
+                      <p className="select-text text-xs text-yellow p-2 border border-dashed border-yellow rounded-lg mt-2">
+                        現在アカウントに未接続であるため、試用版が適用されています。そのため、チャットに対して大幅な制限が発生しています。アカウントに接続すると無料版が適用され、制限が緩和されます。
+                      </p>
+                    </motion.div>
+                  )}
               </AnimatePresence>
               <div data-chat-tail-spacer aria-hidden="true" />
             </ScrollArea>
