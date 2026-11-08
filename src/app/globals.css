@@ -229,6 +229,10 @@
   animation-name: code-dialog-backdrop-out;
 }
 
+.code-dialog-overlay[data-closing] .code-dialog-backdrop {
+  animation-duration: calc(var(--transition-duration) * 0.5);
+}
+
 @keyframes code-dialog-backdrop-in {
   to {
     opacity: 1;

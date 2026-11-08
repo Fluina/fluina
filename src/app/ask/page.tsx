@@ -769,7 +769,7 @@ const CodeControls = ({
 
   useEffect(() => {
     if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 2000);
+    const timer = setTimeout(() => setCopied(false), 2500);
     return () => clearTimeout(timer);
   }, [copied]);
 
@@ -811,7 +811,29 @@ const CodeControls = ({
               className="size-7.5"
               onPress={() => void copy()}
             >
-              {copied ? <Check size={16} /> : <Copy size={16} />}
+              <AnimatePresence mode="popLayout" initial={false}>
+                {copied ? (
+                  <motion.span
+                    key="check"
+                    initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                    transition={TRANSITION}
+                  >
+                    <Check size={16} />
+                  </motion.span>
+                ) : (
+                  <motion.span
+                    key="copy"
+                    initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                    transition={TRANSITION}
+                  >
+                    <Copy size={16} />
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </Button>
           </Tooltip>
           <Tooltip content="保存" placement="bottom">
@@ -831,7 +853,29 @@ const CodeControls = ({
               className="size-7.5"
               onPress={toggle}
             >
-              {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              <AnimatePresence mode="popLayout" initial={false}>
+                {fullscreen ? (
+                  <motion.span
+                    key="minimize"
+                    initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                    transition={TRANSITION}
+                  >
+                    <Minimize2 size={16} />
+                  </motion.span>
+                ) : (
+                  <motion.span
+                    key="maximize"
+                    initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
+                    transition={TRANSITION}
+                  >
+                    <Maximize2 size={16} />
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </Button>
           </Tooltip>
         </motion.div>
@@ -856,9 +900,13 @@ const MarkdownPre = ({
   const layoutId = useId();
   const frameRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(-1);
+  const isExpanded =
+    dialog.expanded?.root === frameRef.current?.closest(".prose") &&
+    dialog.expanded?.index === index &&
+    index >= 0;
   const { elementRef: codeScrollRef } = useNativeScroll<HTMLPreElement>(
-    { axis: "x", enableEdgeFade: !dialog.expanded },
-    [dialog.expanded?.id],
+    { axis: "x", enableEdgeFade: !isExpanded },
+    [isExpanded],
   );
   const codeElement = isValidElement<{
     className?: string;
@@ -892,10 +940,14 @@ const MarkdownPre = ({
     }
   }, [code, language, dialog]);
 
-  const isExpanded =
-    dialog.expanded?.root === frameRef.current?.closest(".prose") &&
-    dialog.expanded?.index === index &&
-    index >= 0;
+  useLayoutEffect(() => {
+    if (isExpanded) return;
+    const surface = frameRef.current?.firstElementChild;
+    if (surface instanceof HTMLElement) {
+      surface.style.removeProperty("opacity");
+    }
+  }, [isExpanded]);
+
   const open = () => {
     const frame = frameRef.current;
     const root = frame?.closest<HTMLElement>(".prose");
@@ -1046,17 +1098,68 @@ const CodeDialogProvider = ({
       return;
     }
 
+    const options: KeyframeAnimationOptions = {
+      duration: THEME.duration * 500,
+      easing: "ease-out",
+    };
+    const progressElement = document.createElement("span");
+    progressElement.setAttribute("aria-hidden", "true");
+    progressElement.style.cssText =
+      "position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;opacity:0";
+    document.body.append(progressElement);
+    const progressAnimation = progressElement.animate(
+      [{ opacity: 0 }, { opacity: 1 }],
+      options,
+    );
+    originSurface.style.opacity = "1";
+    dialog.style.opacity = "0";
+    let syncFrame = 0;
+    const syncCrossfade = () => {
+      const progress = Number.parseFloat(
+        getComputedStyle(progressElement).opacity,
+      );
+      originSurface.style.opacity = `${1 - progress}`;
+      dialog.style.opacity = `${progress}`;
+      if (progressAnimation.playState !== "finished") {
+        syncFrame = requestAnimationFrame(syncCrossfade);
+      }
+    };
+    syncFrame = requestAnimationFrame(syncCrossfade);
     const animation = dialog.animate(
       [
         { borderRadius: getComputedStyle(originSurface).borderRadius },
         { borderRadius: "0px" },
       ],
-      {
-        duration: THEME.duration * 500,
-        easing: "ease-out",
-      },
+      options,
     );
-    return () => animation.cancel();
+    let completed = false;
+    let finishedAnimations = 0;
+    const finishWhenBothAnimationsEnd = () => {
+      finishedAnimations += 1;
+      if (finishedAnimations !== 2) return;
+      completed = true;
+      cancelAnimationFrame(syncFrame);
+      animation.commitStyles();
+      progressAnimation.commitStyles();
+      progressElement.remove();
+      originSurface.style.removeProperty("opacity");
+      dialog.style.removeProperty("opacity");
+    };
+    animation.onfinish = finishWhenBothAnimationsEnd;
+    progressAnimation.onfinish = () => {
+      syncCrossfade();
+      finishWhenBothAnimationsEnd();
+    };
+    return () => {
+      if (!completed) {
+        animation.cancel();
+        progressAnimation.cancel();
+        cancelAnimationFrame(syncFrame);
+        progressElement.remove();
+        originSurface.style.removeProperty("opacity");
+        dialog.style.removeProperty("opacity");
+      }
+    };
   }, [expandedId, expandedRoot, expandedIndex, isClosing, parallaxEnabled]);
   const close = useCallback(() => {
     if (!expanded || isClosing) return;
@@ -1109,12 +1212,59 @@ const CodeDialogProvider = ({
     const dialog = document.querySelector<HTMLElement>(
       '[aria-label="Fullscreen Code View"] .prose-fluina',
     );
-    if (!dialog) {
+    const originFrame =
+      expandedRoot?.querySelectorAll<HTMLElement>("[data-code-frame]")[
+        expandedIndex ?? -1
+      ];
+    const originSurface = originFrame?.firstElementChild;
+    if (!dialog || !(originSurface instanceof HTMLElement)) {
       console.error("Could not find the code dialog for its close animation.");
       finishCloseRef.current();
       return;
     }
 
+    const duration = THEME.duration * 500;
+    const easing = "ease-out";
+    const options: KeyframeAnimationOptions = { duration, easing };
+    const progressElement = document.createElement("span");
+    progressElement.setAttribute("aria-hidden", "true");
+    progressElement.style.cssText =
+      "position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;opacity:0";
+    document.body.append(progressElement);
+    const progressAnimation = progressElement.animate(
+      [{ opacity: 0 }, { opacity: 1 }],
+      options,
+    );
+    originSurface.style.opacity = "0";
+    dialog.style.opacity = "1";
+    let syncFrame = 0;
+    const syncCrossfade = () => {
+      const progress = Number.parseFloat(
+        getComputedStyle(progressElement).opacity,
+      );
+      originSurface.style.opacity = `${progress}`;
+      dialog.style.opacity = `${1 - progress}`;
+      if (progressAnimation.playState !== "finished") {
+        syncFrame = requestAnimationFrame(syncCrossfade);
+      }
+    };
+    syncFrame = requestAnimationFrame(syncCrossfade);
+    let completed = false;
+    let finishedAnimations = 0;
+    const finishWhenBothAnimationsEnd = () => {
+      finishedAnimations += 1;
+      if (finishedAnimations !== 2) return;
+      completed = true;
+      animation.commitStyles();
+      progressAnimation.commitStyles();
+      cancelAnimationFrame(syncFrame);
+      progressElement.remove();
+      originSurface.style.opacity = "1";
+      dialog.style.opacity = "0";
+      requestAnimationFrame(() => {
+        finishCloseRef.current();
+      });
+    };
     const animation = dialog.animate(
       [
         {
@@ -1132,18 +1282,25 @@ const CodeDialogProvider = ({
           overflow: "hidden",
         },
       ],
-      {
-        duration: THEME.duration * 500,
-        easing: "ease-out",
-      },
+      options,
     );
-    animation.onfinish = () => {
-      animation.commitStyles();
-      finishCloseRef.current();
+    animation.onfinish = finishWhenBothAnimationsEnd;
+    progressAnimation.onfinish = () => {
+      syncCrossfade();
+      finishWhenBothAnimationsEnd();
     };
 
-    return () => animation.cancel();
-  }, [closingTarget, isClosing]);
+    return () => {
+      if (!completed) {
+        animation.cancel();
+        progressAnimation.cancel();
+        cancelAnimationFrame(syncFrame);
+        progressElement.remove();
+        originSurface.style.removeProperty("opacity");
+        dialog.style.removeProperty("opacity");
+      }
+    };
+  }, [closingTarget, expandedRoot, expandedIndex, isClosing]);
   return (
     <MorphingDialog
       transition={{ duration: THEME.duration * 0.5, ease: THEME.ease }}

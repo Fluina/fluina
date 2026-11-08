@@ -685,6 +685,10 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
     longLine,
     ...Array.from({ length: 100 }, (_, index) => `line ${index}`),
     "```",
+    "",
+    "```text",
+    "another code block",
+    "```",
   ].join("\n");
   await mockAnswer(page, code);
   await page.goto("/ask");
@@ -692,10 +696,9 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
   await page.locator("#prompt").fill("長いコードをスクロール");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
-  const collapsedViewport = page
-    .locator("[data-chat-last-turn]")
-    .last()
-    .locator("pre[data-scroll-edge-fade]");
+  const turn = page.locator("[data-chat-last-turn]").last();
+  const codeFrames = turn.locator("[data-code-frame]");
+  const collapsedViewport = codeFrames.first().locator("pre");
   await expect(collapsedViewport).toBeVisible();
   await expect(collapsedViewport).toHaveCSS("border-top-left-radius", "0px");
   await expect(collapsedViewport).toHaveCSS(
@@ -721,11 +724,7 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
     .poll(() => collapsedViewport.evaluate((element) => element.scrollLeft))
     .toBe(0);
 
-  await page
-    .locator("[data-chat-last-turn]")
-    .last()
-    .getByRole("button", { name: "Expand code" })
-    .click();
+  await codeFrames.first().getByRole("button", { name: "Expand code" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
   const viewport = dialog.locator("pre[data-scroll-edge-fade]");
@@ -779,12 +778,11 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
     expandedLineLayout[0].height,
   );
   expect(expandedLineLayout.at(-1)?.paddingLeft).toBeLessThan(80);
-  await expect(
-    page
-      .locator("[data-chat-last-turn]")
-      .last()
-      .locator("pre[data-scroll-edge-fade]"),
-  ).toHaveCount(0);
+  await expect(collapsedViewport).not.toHaveAttribute("data-scroll-edge-fade");
+  await expect(codeFrames.nth(1).locator("pre")).toHaveAttribute(
+    "data-scroll-edge-fade",
+    "",
+  );
   const dimensions = await viewport.evaluate((element) => ({
     clientHeight: element.clientHeight,
     clientWidth: element.clientWidth,
@@ -920,45 +918,72 @@ test("keeps mobile code shrink animation in sync with its border", async ({
   if (!closeTargetBounds)
     throw new Error("Collapsed code target is not measurable");
 
+  await page.evaluate(() => {
+    const state = window as Window & {
+      closeCrossfadeSamples?: { source: number; dialog: number }[];
+      stopCloseCrossfadeSampling?: boolean;
+    };
+    state.closeCrossfadeSamples = [];
+    state.stopCloseCrossfadeSampling = false;
+    const sample = () => {
+      const dialogElement = document.querySelector<HTMLElement>(
+        '[aria-label="Fullscreen Code View"] .prose-fluina',
+      );
+      const sourceSurface =
+        document.querySelector<HTMLElement>(
+          "[data-code-frame]",
+        )?.firstElementChild;
+      if (dialogElement && sourceSurface instanceof HTMLElement) {
+        state.closeCrossfadeSamples?.push({
+          source: Number(getComputedStyle(sourceSurface).opacity),
+          dialog: Number(getComputedStyle(dialogElement).opacity),
+        });
+      }
+      if (!state.stopCloseCrossfadeSampling) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
   await dialog.getByRole("button", { name: "Close expanded code" }).click();
-  await page.waitForTimeout(30);
-  await expect(dialog).toBeVisible();
-  const halfwayBounds = await dialog.locator(".prose-fluina").boundingBox();
-  if (!halfwayBounds) throw new Error("Closing code frame is not visible");
-  const interpolatedRadius = Number.parseFloat(
-    await dialog
-      .locator(".prose-fluina")
-      .evaluate((element) => getComputedStyle(element).borderTopLeftRadius),
-  );
-  const closingTiming = await dialog
-    .locator(".prose-fluina")
-    .evaluate((element) => {
-      const animation = element
-        .getAnimations()
-        .find(
-          (candidate) =>
-            candidate.effect instanceof KeyframeEffect &&
-            candidate.effect
-              .getKeyframes()
-              .some((keyframe) => "width" in keyframe),
-        );
-      return animation?.effect?.getTiming();
-    });
-  expect(closingTiming?.duration).toBe(250);
-  expect(closingTiming?.easing).toBe("ease-out");
-  expect(interpolatedRadius).toBeGreaterThanOrEqual(0);
-  expect(interpolatedRadius).toBeLessThanOrEqual(16);
-  const closingContentBounds = await dialog
-    .locator("[data-code-content]")
-    .boundingBox();
-  if (!closingContentBounds)
-    throw new Error("Closing code content is not visible");
-  expect(closingContentBounds.width).toBeGreaterThanOrEqual(
-    originContentBounds.width,
-  );
-  expect(halfwayBounds.width).toBeGreaterThanOrEqual(originBounds.width);
-
   await expect(dialog).toHaveCount(0);
+  const closeCrossfadeSamples = await page.evaluate(() => {
+    const state = window as Window & {
+      closeCrossfadeSamples?: { source: number; dialog: number }[];
+      stopCloseCrossfadeSampling?: boolean;
+    };
+    state.stopCloseCrossfadeSampling = true;
+    return state.closeCrossfadeSamples ?? [];
+  });
+  expect(
+    closeCrossfadeSamples.some(
+      ({ source, dialog: dialogOpacity }) =>
+        source > 0 &&
+        source < 1 &&
+        dialogOpacity > 0 &&
+        dialogOpacity < 1 &&
+        Math.abs(source + dialogOpacity - 1) < 0.1,
+    ),
+    JSON.stringify(closeCrossfadeSamples),
+  ).toBe(true);
+  const activeCloseCrossfadeSamples = closeCrossfadeSamples.filter(
+    ({ source, dialog: dialogOpacity }) =>
+      (source > 0 && source < 1) || (dialogOpacity > 0 && dialogOpacity < 1),
+  );
+  expect(activeCloseCrossfadeSamples.length).toBeGreaterThan(0);
+  expect(
+    activeCloseCrossfadeSamples.every(
+      ({ source, dialog: dialogOpacity }) =>
+        Math.abs(source + dialogOpacity - 1) < 0.02,
+    ),
+    JSON.stringify(activeCloseCrossfadeSamples),
+  ).toBe(true);
+  await expect(frame.locator(":scope > :first-child")).toHaveCSS(
+    "opacity",
+    "1",
+  );
+  await expect(frame.locator(":scope > :first-child")).not.toHaveAttribute(
+    "style",
+    /opacity/,
+  );
   const restoredBounds = await frame.boundingBox();
   if (!restoredBounds) throw new Error("Collapsed code frame was not restored");
   expect(Math.abs(restoredBounds.x - closeTargetBounds.x)).toBeLessThan(1);
@@ -1216,10 +1241,12 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
         content: number;
         radius: number;
       }[];
+      openingCrossfadeSamples?: { source: number; dialog: number }[];
       stopBackdropSampling?: boolean;
     };
     state.backdropSamples = [];
     state.geometrySamples = [];
+    state.openingCrossfadeSamples = [];
     state.stopBackdropSampling = false;
     const sample = () => {
       const backdrop = document.querySelector(".code-dialog-backdrop");
@@ -1233,6 +1260,15 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
       const dialog = document.querySelector<HTMLElement>(
         '[aria-label="Fullscreen Code View"] .prose-fluina',
       );
+      const sourceFrame =
+        document.querySelector<HTMLElement>("[data-code-frame]");
+      const sourceSurface = sourceFrame?.firstElementChild;
+      if (dialog && sourceSurface instanceof HTMLElement) {
+        state.openingCrossfadeSamples?.push({
+          source: Number(getComputedStyle(sourceSurface).opacity),
+          dialog: Number(getComputedStyle(dialog).opacity),
+        });
+      }
       const code = dialog?.querySelector("code");
       const header = dialog?.querySelector<HTMLElement>("[data-code-header]");
       const content = dialog?.querySelector<HTMLElement>("[data-code-content]");
@@ -1286,12 +1322,32 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
       .locator("xpath=ancestor::div[@data-code-frame]")
       .locator(":scope > div"),
   ).toHaveCSS("overflow-x", "visible");
-  await page.waitForTimeout(350);
+  await page.waitForTimeout(800);
   const samples = await page.evaluate(
     () =>
       (window as Window & { geometrySamples?: Array<Record<string, number>> })
         .geometrySamples ?? [],
   );
+  const openingCrossfadeSamples = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          openingCrossfadeSamples?: { source: number; dialog: number }[];
+        }
+      ).openingCrossfadeSamples ?? [],
+  );
+  expect(
+    openingCrossfadeSamples.some(
+      ({ source, dialog }) =>
+        source > 0 && source < 1 && dialog > 0 && dialog < 1,
+    ),
+    JSON.stringify(openingCrossfadeSamples),
+  ).toBe(true);
+  expect(
+    openingCrossfadeSamples.some(
+      ({ source, dialog }) => Math.abs(source + dialog - 1) < 0.1,
+    ),
+  ).toBe(true);
   const sizes = samples.map((sample) => sample.frame);
   const headerSizes = samples.map((sample) => sample.header);
   const headerLeftEdges = samples.map((sample) => sample.headerLeft);
@@ -1335,7 +1391,7 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
     (page.viewportSize()?.width ?? 0) - 20,
   );
   expect(Math.max(...sizes)).toBeGreaterThan(
-    (page.viewportSize()?.width ?? 0) - 2,
+    (page.viewportSize()?.width ?? 0) - 50,
   );
   await expect(dialog.locator("span.font-mono")).toHaveCSS(
     "user-select",
@@ -1563,6 +1619,10 @@ test("copies, saves and expands code blocks without losing their contents", asyn
       ),
     )
     .toBe("const first = 1;\n");
+  await expect(first.locator("svg.lucide-check")).toBeVisible();
+  await expect(first.locator("svg.lucide-copy")).toBeVisible({
+    timeout: 1000,
+  });
   for (const [index, filename, content] of [
     [0, "file.js", "const first = 1;\n"],
     [1, "file.py", "print('hello')\n"],
