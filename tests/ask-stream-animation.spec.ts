@@ -384,9 +384,16 @@ test("renders and preserves a streamed code block with code controls", async ({
   ).toBe("none");
   await expect(pre).toHaveCSS("border-bottom-left-radius", "16px");
   await expect(pre).toHaveCSS("border-bottom-right-radius", "16px");
-  await expect(pre.locator("../..")).toHaveCSS("border-radius", "16px");
+  await expect(pre.locator("../..")).toHaveCSS(
+    "border-bottom-left-radius",
+    "16px",
+  );
+  await expect(pre.locator("../..")).toHaveCSS(
+    "border-bottom-right-radius",
+    "16px",
+  );
   await expect(turn.getByRole("button", { name: "Save code" })).toBeEnabled();
-  const header = pre.locator("..").locator("div").first();
+  const header = turn.locator("[data-code-header]");
   await expect(header).toHaveCSS("border-bottom-width", "1px");
   const clippedFrame = pre.locator("xpath=ancestor::div[@data-code-frame]");
   await expect(clippedFrame.locator(":scope > div > div")).toHaveCSS(
@@ -394,7 +401,11 @@ test("renders and preserves a streamed code block with code controls", async ({
     "hidden",
   );
   await expect(clippedFrame.locator(":scope > div > div")).toHaveCSS(
-    "border-radius",
+    "border-bottom-left-radius",
+    "16px",
+  );
+  await expect(clippedFrame.locator(":scope > div > div")).toHaveCSS(
+    "border-bottom-right-radius",
     "16px",
   );
   const styling = await pre.evaluate((element) => {
@@ -427,6 +438,76 @@ test("renders and preserves a streamed code block with code controls", async ({
     .poll(() => code.locator(".syntax-token").count(), { timeout: 30000 })
     .toBeGreaterThan(1);
   await expect(turn.getByRole("button", { name: "Copy code" })).toHaveCount(1);
+});
+
+test("does not animate streamed code layout while its size changes", async ({
+  page,
+}) => {
+  await mockAnswer(page, "```js\nconst answer =", true);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コード");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const turn = page.locator("[data-chat-last-turn]").last();
+  const code = turn.locator("pre code");
+  await expect(code).toContainText("const answer =");
+  await page.evaluate(() => {
+    const state = window as Window & {
+      codeLayoutSamples?: { frame: string; content: string; header: string }[];
+      stopCodeLayoutSampling?: boolean;
+    };
+    state.codeLayoutSamples = [];
+    state.stopCodeLayoutSampling = false;
+    const sample = () => {
+      const frame = document.querySelector<HTMLElement>(
+        "[data-code-frame] > div",
+      );
+      const content = document.querySelector<HTMLElement>(
+        "[data-code-frame] [data-code-content]",
+      );
+      const header = document.querySelector<HTMLElement>(
+        "[data-code-frame] [data-code-header]",
+      );
+      if (frame && content && header) {
+        state.codeLayoutSamples?.push({
+          frame: getComputedStyle(frame).transform,
+          content: getComputedStyle(content).transform,
+          header: getComputedStyle(header).transform,
+        });
+      }
+      if (!state.stopCodeLayoutSampling) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+
+  for (const chunk of [" 42;\n", "const next = [\n", "  1,\n  2,\n];\n"]) {
+    await page.evaluate((nextChunk) => {
+      (
+        window as Window & {
+          appendTestAnswer?: (value: string) => void;
+        }
+      ).appendTestAnswer?.(nextChunk);
+    }, chunk);
+    await expect(code).toContainText(chunk.trim());
+    await page.waitForTimeout(100);
+  }
+  const samples = await page.evaluate(() => {
+    const state = window as Window & {
+      codeLayoutSamples?: { frame: string; content: string; header: string }[];
+      stopCodeLayoutSampling?: boolean;
+    };
+    state.stopCodeLayoutSampling = true;
+    return state.codeLayoutSamples ?? [];
+  });
+  expect(samples.length).toBeGreaterThan(10);
+  expect(
+    samples.every(
+      ({ frame, content, header }) =>
+        frame === "none" && content === "none" && header === "none",
+    ),
+    JSON.stringify(samples),
+  ).toBe(true);
 });
 
 test("highlights each completed streamed code block before the reply finishes", async ({
@@ -723,12 +804,21 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
   await expect
     .poll(() => collapsedViewport.evaluate((element) => element.scrollLeft))
     .toBe(0);
+  await collapsedViewport.evaluate((element) => {
+    element.scrollLeft = 30;
+  });
+  await expect
+    .poll(() => collapsedViewport.evaluate((element) => element.scrollLeft))
+    .toBe(30);
 
   await codeFrames.first().getByRole("button", { name: "Expand code" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
   const viewport = dialog.locator("pre[data-scroll-edge-fade]");
   await expect(viewport).toBeVisible();
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBe(30);
   await expect(dialog.locator(".bg-back-2").first()).toHaveCSS(
     "border-top-left-radius",
     "0px",
@@ -808,12 +898,25 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
       viewport.evaluate((element) => element.scrollLeft + element.clientWidth),
     )
     .toBeGreaterThanOrEqual(dimensions.scrollWidth - 1);
+  await viewport.evaluate((element) => {
+    element.scrollLeft = 80;
+  });
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollLeft))
+    .toBe(80);
   await dialog.getByRole("button", { name: "Close expanded code" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.locator("body")).not.toHaveAttribute(
     "data-code-dialog-open",
   );
   await expect(collapsedViewport).toHaveAttribute("data-scroll-edge-fade", "");
+  const expectedRestoredScrollLeft = await collapsedViewport.evaluate(
+    (element) => Math.min(80, element.scrollWidth - element.clientWidth),
+  );
+  expect(expectedRestoredScrollLeft).toBeGreaterThan(0);
+  await expect
+    .poll(() => collapsedViewport.evaluate((element) => element.scrollLeft))
+    .toBe(expectedRestoredScrollLeft);
   const edgeOverlayBounds = await collapsedViewport.evaluate((element) => {
     const overlay = element.nextElementSibling;
     if (!(overlay instanceof HTMLElement)) {
@@ -933,7 +1036,10 @@ test("keeps mobile code shrink animation in sync with its border", async ({
         document.querySelector<HTMLElement>(
           "[data-code-frame]",
         )?.firstElementChild;
-      if (dialogElement && sourceSurface instanceof HTMLElement) {
+      const isClosing = document.querySelector(
+        ".code-dialog-overlay[data-closing]",
+      );
+      if (isClosing && dialogElement && sourceSurface instanceof HTMLElement) {
         state.closeCrossfadeSamples?.push({
           source: Number(getComputedStyle(sourceSurface).opacity),
           dialog: Number(getComputedStyle(dialogElement).opacity),
@@ -979,10 +1085,6 @@ test("keeps mobile code shrink animation in sync with its border", async ({
   await expect(frame.locator(":scope > :first-child")).toHaveCSS(
     "opacity",
     "1",
-  );
-  await expect(frame.locator(":scope > :first-child")).not.toHaveAttribute(
-    "style",
-    /opacity/,
   );
   const restoredBounds = await frame.boundingBox();
   if (!restoredBounds) throw new Error("Collapsed code frame was not restored");
@@ -1121,8 +1223,78 @@ test("supports mobile drag-to-close from the code header", async ({ page }) => {
     );
   expect(downwardAlpha).toBeGreaterThanOrEqual(0);
   expect(downwardAlpha).toBeLessThan(50);
+  await page.evaluate(() => {
+    const state = window as Window & {
+      closingSurfaceSamples?: {
+        top: number;
+        dialogOpacity: number;
+        sourceOpacity: number;
+      }[];
+      stopClosingSurfaceSampling?: boolean;
+    };
+    state.closingSurfaceSamples = [];
+    state.stopClosingSurfaceSampling = false;
+    const sample = () => {
+      const surface = document.querySelector<HTMLElement>(
+        '[aria-label="Fullscreen Code View"] .prose-fluina > div',
+      );
+      if (surface?.closest(".code-dialog-overlay[data-closing]")) {
+        const dialog = surface.closest<HTMLElement>(
+          '[aria-label="Fullscreen Code View"] .prose-fluina',
+        );
+        if (dialog) {
+          state.closingSurfaceSamples?.push({
+            top: surface.getBoundingClientRect().top,
+            dialogOpacity: Number(getComputedStyle(dialog).opacity),
+            sourceOpacity: Number(
+              getComputedStyle(
+                document.querySelector("[data-code-frame] > div") ??
+                  document.body,
+              ).opacity,
+            ),
+          });
+        }
+      }
+      if (!state.stopClosingSurfaceSampling) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
   await page.mouse.up();
   await expect(dialog).toHaveCount(0);
+  const closingSurfaceSamples = await page.evaluate(() => {
+    const state = window as Window & {
+      closingSurfaceSamples?: {
+        top: number;
+        dialogOpacity: number;
+        sourceOpacity: number;
+      }[];
+      stopClosingSurfaceSampling?: boolean;
+    };
+    state.stopClosingSurfaceSampling = true;
+    return state.closingSurfaceSamples ?? [];
+  });
+  expect(closingSurfaceSamples.length).toBeGreaterThan(2);
+  await expect(turn.locator("[data-code-frame] > div").first()).toBeVisible();
+  const visibleCloseSamples = closingSurfaceSamples.filter(
+    ({ dialogOpacity }) => dialogOpacity > 0.05,
+  );
+  expect(visibleCloseSamples.length).toBeGreaterThan(0);
+  expect(
+    visibleCloseSamples.some(
+      ({ dialogOpacity, sourceOpacity }) =>
+        dialogOpacity < 0.25 && sourceOpacity > 0.75,
+    ),
+  ).toBe(true);
+  expect(
+    Math.max(
+      ...visibleCloseSamples
+        .slice(1)
+        .map((sample, index) =>
+          Math.abs(sample.top - visibleCloseSamples[index].top),
+        ),
+    ),
+    JSON.stringify(visibleCloseSamples),
+  ).toBeLessThan(80);
 });
 
 test("fades the mobile menu backdrop as the sheet is dragged down", async ({
@@ -1562,19 +1734,19 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
   expect(
     Math.max(...closingTextSizes) - Math.min(...closingTextSizes),
   ).toBeLessThan(1);
-  const closingEnd = closeWidths.at(-1);
-  expect(closingEnd).toBeDefined();
+  const closedSourceBounds = await sourceFrame.boundingBox();
+  expect(closedSourceBounds).not.toBeNull();
   expect(
-    Math.abs((closingEnd?.left ?? 0) - (originBounds?.x ?? 0)),
+    Math.abs((closedSourceBounds?.x ?? 0) - (originBounds?.x ?? 0)),
   ).toBeLessThan(3);
   expect(
-    Math.abs((closingEnd?.top ?? 0) - (originBounds?.y ?? 0)),
+    Math.abs((closedSourceBounds?.y ?? 0) - (originBounds?.y ?? 0)),
   ).toBeLessThan(3);
   expect(
-    Math.abs((closingEnd?.frame ?? 0) - (originBounds?.width ?? 0)),
+    Math.abs((closedSourceBounds?.width ?? 0) - (originBounds?.width ?? 0)),
   ).toBeLessThan(3);
   expect(
-    Math.abs((closingEnd?.height ?? 0) - (originBounds?.height ?? 0)),
+    Math.abs((closedSourceBounds?.height ?? 0) - (originBounds?.height ?? 0)),
   ).toBeLessThan(3);
   await expect(expand).toBeFocused();
   await page.evaluate(() => {

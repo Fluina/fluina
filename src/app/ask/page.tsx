@@ -55,6 +55,7 @@ import {
   useState,
 } from "react";
 import { Dialog, Modal, ModalOverlay } from "react-aria-components";
+import { flushSync } from "react-dom";
 import type { BundledLanguage, ThemedToken } from "shiki";
 import { Streamdown } from "streamdown";
 import { usePreferences } from "@/app/preferences";
@@ -717,7 +718,14 @@ type ExpandedCode = {
   index: number;
   code: string;
   language?: string;
-  origin: { left: number; top: number; width: number; height: number };
+  origin: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    scrollLeft: number;
+    scrollTop: number;
+  };
 };
 
 const CodeDialogContext = createContext<{
@@ -898,6 +906,8 @@ const MarkdownPre = ({
   const dialog = useContext(CodeDialogContext);
   if (!dialog) throw new Error("Code dialog provider is missing");
   const layoutId = useId();
+  const sharedLayoutEnabled =
+    parallaxEnabled && !dialog.isClosing && !dialog.isAnimating;
   const frameRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(-1);
   const isExpanded =
@@ -956,6 +966,7 @@ const MarkdownPre = ({
       root.querySelectorAll("[data-code-frame]"),
     ).indexOf(frame);
     const bounds = frame.getBoundingClientRect();
+    const sourceCode = frame.querySelector("pre");
     dialog.setExpanded({
       id: layoutId,
       root,
@@ -967,6 +978,8 @@ const MarkdownPre = ({
         top: bounds.top,
         width: bounds.width,
         height: bounds.height,
+        scrollLeft: sourceCode?.scrollLeft ?? 0,
+        scrollTop: sourceCode?.scrollTop ?? 0,
       },
     });
   };
@@ -975,28 +988,22 @@ const MarkdownPre = ({
     <div ref={frameRef} data-code-frame="">
       <MorphingDialogFrame
         id={isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}
-        enabled={parallaxEnabled}
+        enabled={sharedLayoutEnabled}
         className={`overflow-visible rounded-2xl border border-back-5 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
       >
-        <motion.div layout="position" className="overflow-hidden rounded-b-2xl">
+        <div className="overflow-hidden rounded-b-2xl">
           <CodeControls
             code={code}
             language={language}
             fullscreen={false}
             toggle={open}
             motionId={
-              parallaxEnabled && !dialog.isClosing
+              sharedLayoutEnabled
                 ? `code-controls-${isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}`
                 : undefined
             }
           />
-          <motion.div
-            layout
-            layoutId={
-              parallaxEnabled && !dialog.isClosing
-                ? `code-content-${layoutId}`
-                : undefined
-            }
+          <div
             data-code-content=""
             className="relative min-w-0 max-w-full overflow-hidden rounded-b-2xl"
           >
@@ -1009,8 +1016,8 @@ const MarkdownPre = ({
                 ? cloneElement(codeElement, { lineNumbers: true })
                 : children}
             </pre>
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       </MorphingDialogFrame>
     </div>
   );
@@ -1031,6 +1038,7 @@ const CodeDialogProvider = ({
   const [isClosing, setIsClosing] = useState(false);
   const [backdropOpacity, setBackdropOpacity] = useState(0.5);
   const dragControls = useDragControls();
+  const expandedSurfaceRef = useRef<HTMLDivElement>(null);
   const { elementRef: expandedCodeRef } = useNativeScroll<HTMLPreElement>(
     { axis: "both" },
     [expanded?.id],
@@ -1043,7 +1051,24 @@ const CodeDialogProvider = ({
     startWidth: number;
     startHeight: number;
     borderRadius: string;
+    surfaceStartTranslate: string;
+    surfaceEndTranslate: string;
+    startTransform: string;
   } | null>(null);
+  const expandedScrollLeft = expanded?.origin.scrollLeft;
+  const expandedScrollTop = expanded?.origin.scrollTop;
+  useLayoutEffect(() => {
+    const expandedCode = expandedCodeRef.current;
+    if (
+      !expandedCode ||
+      expandedScrollLeft === undefined ||
+      expandedScrollTop === undefined
+    ) {
+      return;
+    }
+    expandedCode.scrollLeft = expandedScrollLeft;
+    expandedCode.scrollTop = expandedScrollTop;
+  }, [expandedCodeRef, expandedScrollLeft, expandedScrollTop]);
   const expandedCodeId = expanded?.id;
   useEffect(() => {
     if (!expandedCodeId) return;
@@ -1056,11 +1081,24 @@ const CodeDialogProvider = ({
   const finishClose = useCallback(() => {
     if (!expanded) return;
     const selected = expanded;
+    const scrollLeft =
+      expandedCodeRef.current?.scrollLeft ?? selected.origin.scrollLeft;
+    const scrollTop =
+      expandedCodeRef.current?.scrollTop ?? selected.origin.scrollTop;
     setExpanded(null);
     setIsClosing(false);
     setClosingTarget(null);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        const originFrame =
+          selected.root.querySelectorAll<HTMLElement>("[data-code-frame]")[
+            selected.index
+          ];
+        const originCode = originFrame?.querySelector("pre");
+        if (originCode) {
+          originCode.scrollLeft = scrollLeft;
+          originCode.scrollTop = scrollTop;
+        }
         selected?.root
           .querySelectorAll("[data-code-frame]")
           [selected.index]?.querySelector<HTMLButtonElement>(
@@ -1069,7 +1107,7 @@ const CodeDialogProvider = ({
           ?.focus({ preventScroll: true });
       });
     });
-  }, [expanded]);
+  }, [expanded, expandedCodeRef]);
   const finishCloseRef = useRef(finishClose);
   finishCloseRef.current = finishClose;
   const expandedId = expanded?.id;
@@ -1187,25 +1225,62 @@ const CodeDialogProvider = ({
       finishClose();
       return;
     }
+    const startTransform = getComputedStyle(dialog).transform;
+    const expandedSurface = expandedSurfaceRef.current;
+    const surfaceTransform = expandedSurface
+      ? getComputedStyle(expandedSurface).transform
+      : "none";
     const bounds = dialog.getBoundingClientRect();
-    const originBounds = originFrame.getBoundingClientRect();
+    const surfaceBounds = expandedSurface?.getBoundingClientRect() ?? bounds;
+    const inlineTransform = dialog.style.getPropertyValue("transform");
+    const inlineTransformPriority =
+      dialog.style.getPropertyPriority("transform");
+    dialog.style.setProperty("transform", "none", "important");
+    const layoutBounds = dialog.getBoundingClientRect();
+    if (inlineTransform) {
+      dialog.style.setProperty(
+        "transform",
+        inlineTransform,
+        inlineTransformPriority,
+      );
+    } else {
+      dialog.style.removeProperty("transform");
+    }
     const originSurface = originFrame.firstElementChild;
+    const originCode = originFrame.querySelector("pre");
     if (!(originSurface instanceof HTMLElement)) {
       console.error("Could not find the original code surface to close to.");
       finishClose();
       return;
     }
+    const expandedCode = expandedCodeRef.current;
+    if (originCode && expandedCode) {
+      originCode.scrollLeft = expandedCode.scrollLeft;
+      originCode.scrollTop = expandedCode.scrollTop;
+    }
+    const originBounds = originSurface.getBoundingClientRect();
+    const x = originBounds.left - layoutBounds.left;
+    const y = originBounds.top - layoutBounds.top;
+    const surfaceMatrix =
+      surfaceTransform === "none"
+        ? new DOMMatrixReadOnly()
+        : new DOMMatrixReadOnly(surfaceTransform);
+    const surfaceOffsetX = surfaceBounds.left - bounds.left - surfaceMatrix.m41;
+    const surfaceOffsetY = surfaceBounds.top - bounds.top - surfaceMatrix.m42;
     setClosingTarget({
-      x: originBounds.left - bounds.left,
-      y: originBounds.top - bounds.top,
+      x,
+      y,
       width: originBounds.width,
       height: originBounds.height,
-      startWidth: bounds.width,
-      startHeight: bounds.height,
+      startWidth: layoutBounds.width,
+      startHeight: layoutBounds.height,
       borderRadius: getComputedStyle(originSurface).borderRadius,
+      surfaceStartTranslate: `${surfaceMatrix.m41}px ${surfaceMatrix.m42}px`,
+      surfaceEndTranslate: `${-surfaceOffsetX}px ${-surfaceOffsetY}px`,
+      startTransform,
     });
     setIsClosing(true);
-  }, [expanded, finishClose, isClosing, parallaxEnabled]);
+  }, [expanded, expandedCodeRef, finishClose, isClosing, parallaxEnabled]);
 
   useLayoutEffect(() => {
     if (!isClosing || !closingTarget) return;
@@ -1217,15 +1292,21 @@ const CodeDialogProvider = ({
         expandedIndex ?? -1
       ];
     const originSurface = originFrame?.firstElementChild;
+    const expandedSurface = expandedSurfaceRef.current;
     if (!dialog || !(originSurface instanceof HTMLElement)) {
       console.error("Could not find the code dialog for its close animation.");
-      finishCloseRef.current();
+      flushSync(() => finishCloseRef.current());
       return;
     }
 
     const duration = THEME.duration * 500;
     const easing = "ease-out";
     const options: KeyframeAnimationOptions = { duration, easing };
+    const surfaceInlineTransform =
+      expandedSurface?.style.getPropertyValue("transform") ?? "";
+    const surfaceInlineTransformPriority =
+      expandedSurface?.style.getPropertyPriority("transform") ?? "";
+    expandedSurface?.style.setProperty("transform", "none", "important");
     const progressElement = document.createElement("span");
     progressElement.setAttribute("aria-hidden", "true");
     progressElement.style.cssText =
@@ -1251,24 +1332,36 @@ const CodeDialogProvider = ({
     syncFrame = requestAnimationFrame(syncCrossfade);
     let completed = false;
     let finishedAnimations = 0;
+    let surfaceAnimation: Animation | undefined;
     const finishWhenBothAnimationsEnd = () => {
       finishedAnimations += 1;
-      if (finishedAnimations !== 2) return;
+      if (finishedAnimations !== (surfaceAnimation ? 3 : 2)) return;
       completed = true;
       animation.commitStyles();
+      surfaceAnimation?.commitStyles();
       progressAnimation.commitStyles();
       cancelAnimationFrame(syncFrame);
       progressElement.remove();
+      if (expandedSurface) {
+        const surfaceBounds = expandedSurface.getBoundingClientRect();
+        const targetBounds = originSurface.getBoundingClientRect();
+        const dialogTransform = new DOMMatrixReadOnly(
+          getComputedStyle(dialog).transform,
+        );
+        dialog.style.setProperty(
+          "transform",
+          `translate(${dialogTransform.m41 + targetBounds.left - surfaceBounds.left}px, ${dialogTransform.m42 + targetBounds.top - surfaceBounds.top}px)`,
+          "important",
+        );
+      }
       originSurface.style.opacity = "1";
       dialog.style.opacity = "0";
-      requestAnimationFrame(() => {
-        finishCloseRef.current();
-      });
+      flushSync(() => finishCloseRef.current());
     };
     const animation = dialog.animate(
       [
         {
-          transform: "translate(0px, 0px)",
+          transform: closingTarget.startTransform,
           width: `${closingTarget.startWidth}px`,
           height: `${closingTarget.startHeight}px`,
           borderRadius: getComputedStyle(dialog).borderRadius,
@@ -1284,6 +1377,16 @@ const CodeDialogProvider = ({
       ],
       options,
     );
+    if (expandedSurface) {
+      surfaceAnimation = expandedSurface.animate(
+        [
+          { translate: closingTarget.surfaceStartTranslate },
+          { translate: closingTarget.surfaceEndTranslate },
+        ],
+        options,
+      );
+      surfaceAnimation.onfinish = finishWhenBothAnimationsEnd;
+    }
     animation.onfinish = finishWhenBothAnimationsEnd;
     progressAnimation.onfinish = () => {
       syncCrossfade();
@@ -1293,9 +1396,21 @@ const CodeDialogProvider = ({
     return () => {
       if (!completed) {
         animation.cancel();
+        surfaceAnimation?.cancel();
         progressAnimation.cancel();
         cancelAnimationFrame(syncFrame);
         progressElement.remove();
+        if (expandedSurface) {
+          if (surfaceInlineTransform) {
+            expandedSurface.style.setProperty(
+              "transform",
+              surfaceInlineTransform,
+              surfaceInlineTransformPriority,
+            );
+          } else {
+            expandedSurface.style.removeProperty("transform");
+          }
+        }
         originSurface.style.removeProperty("opacity");
         dialog.style.removeProperty("opacity");
       }
@@ -1341,13 +1456,16 @@ const CodeDialogProvider = ({
               {expanded && (
                 <MorphingDialogContent
                   id={expanded.id}
-                  enabled={parallaxEnabled && !isClosing}
+                  enabled={parallaxEnabled && !isClosing && !isAnimating}
                   managed
                   className="prose prose-fluina flex size-full max-w-none flex-col overflow-visible rounded-none border border-back-5 bg-transparent"
                 >
                   <motion.div
-                    layout="position"
-                    drag={isMobile ? "y" : false}
+                    ref={expandedSurfaceRef}
+                    drag={isMobile && !isClosing ? "y" : false}
+                    dragMomentum={false}
+                    animate={isClosing ? { y: 0 } : undefined}
+                    transition={isClosing ? { duration: 0 } : undefined}
                     dragControls={dragControls}
                     dragListener={false}
                     dragConstraints={{ top: 0, bottom: 0 }}
@@ -1373,21 +1491,17 @@ const CodeDialogProvider = ({
                       language={expanded.language}
                       fullscreen
                       toggle={close}
-                      dragHandle={isMobile}
-                      dragControls={isMobile ? dragControls : undefined}
+                      dragHandle={isMobile && !isClosing}
+                      dragControls={
+                        isMobile && !isClosing ? dragControls : undefined
+                      }
                       motionId={
-                        parallaxEnabled && !isClosing
+                        parallaxEnabled && !isClosing && !isAnimating
                           ? `code-controls-${expanded.id}`
                           : undefined
                       }
                     />
-                    <motion.div
-                      layout
-                      layoutId={
-                        parallaxEnabled && !isClosing
-                          ? `code-content-${expanded.id}`
-                          : undefined
-                      }
+                    <div
                       data-code-content=""
                       className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-back-1"
                     >
@@ -1407,7 +1521,7 @@ const CodeDialogProvider = ({
                           {expanded.code}
                         </MarkdownCode>
                       </pre>
-                    </motion.div>
+                    </div>
                   </motion.div>
                 </MorphingDialogContent>
               )}
