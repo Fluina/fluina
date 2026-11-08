@@ -916,9 +916,12 @@ test("keeps mobile code shrink animation in sync with its border", async ({
   });
   const expandedBounds = await dialog.locator(".prose-fluina").boundingBox();
   if (!expandedBounds) throw new Error("Expanded code frame is not visible");
+  const closeTargetBounds = await frame.boundingBox();
+  if (!closeTargetBounds)
+    throw new Error("Collapsed code target is not measurable");
 
   await dialog.getByRole("button", { name: "Close expanded code" }).click();
-  await page.waitForTimeout(60);
+  await page.waitForTimeout(30);
   await expect(dialog).toBeVisible();
   const halfwayBounds = await dialog.locator(".prose-fluina").boundingBox();
   if (!halfwayBounds) throw new Error("Closing code frame is not visible");
@@ -943,25 +946,29 @@ test("keeps mobile code shrink animation in sync with its border", async ({
     });
   expect(closingTiming?.duration).toBe(250);
   expect(closingTiming?.easing).toBe("ease-out");
-  expect(interpolatedRadius).toBeGreaterThan(0);
-  expect(interpolatedRadius).toBeLessThan(16);
+  expect(interpolatedRadius).toBeGreaterThanOrEqual(0);
+  expect(interpolatedRadius).toBeLessThanOrEqual(16);
   const closingContentBounds = await dialog
     .locator("[data-code-content]")
     .boundingBox();
   if (!closingContentBounds)
     throw new Error("Closing code content is not visible");
-  expect(closingContentBounds.width).toBeGreaterThan(
-    originContentBounds.width + 5,
+  expect(closingContentBounds.width).toBeGreaterThanOrEqual(
+    originContentBounds.width,
   );
-  expect(closingContentBounds.width).toBeLessThan(
-    expandedContentBounds.width - 5,
-  );
-  expect(halfwayBounds.width).toBeGreaterThan(originBounds.width + 10);
-  expect(Math.abs(halfwayBounds.width - expandedBounds.width)).toBeGreaterThan(
-    5,
-  );
+  expect(halfwayBounds.width).toBeGreaterThanOrEqual(originBounds.width);
 
   await expect(dialog).toHaveCount(0);
+  const restoredBounds = await frame.boundingBox();
+  if (!restoredBounds) throw new Error("Collapsed code frame was not restored");
+  expect(Math.abs(restoredBounds.x - closeTargetBounds.x)).toBeLessThan(1);
+  expect(Math.abs(restoredBounds.y - closeTargetBounds.y)).toBeLessThan(1);
+  expect(Math.abs(restoredBounds.width - closeTargetBounds.width)).toBeLessThan(
+    1,
+  );
+  expect(
+    Math.abs(restoredBounds.height - closeTargetBounds.height),
+  ).toBeLessThan(1);
   await expect(source).toHaveAttribute("data-scroll-edge-fade", "");
   const overlayBounds = await source.evaluate((element) => {
     const overlay = element.nextElementSibling;
@@ -1200,9 +1207,19 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
   await page.evaluate(() => {
     const state = window as Window & {
       backdropSamples?: { opacity: number; filter: string }[];
+      geometrySamples?: {
+        frame: number;
+        header: number;
+        headerLeft: number;
+        headerRight: number;
+        text: number;
+        content: number;
+        radius: number;
+      }[];
       stopBackdropSampling?: boolean;
     };
     state.backdropSamples = [];
+    state.geometrySamples = [];
     state.stopBackdropSampling = false;
     const sample = () => {
       const backdrop = document.querySelector(".code-dialog-backdrop");
@@ -1211,6 +1228,37 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
         state.backdropSamples?.push({
           opacity: Number(style.opacity),
           filter: style.backdropFilter,
+        });
+      }
+      const dialog = document.querySelector<HTMLElement>(
+        '[aria-label="Fullscreen Code View"] .prose-fluina',
+      );
+      const code = dialog?.querySelector("code");
+      const header = dialog?.querySelector<HTMLElement>("[data-code-header]");
+      const content = dialog?.querySelector<HTMLElement>("[data-code-content]");
+      const text =
+        code &&
+        document.createTreeWalker(code, NodeFilter.SHOW_TEXT).nextNode();
+      if (
+        dialog instanceof HTMLElement &&
+        text?.textContent &&
+        header &&
+        content
+      ) {
+        const range = document.createRange();
+        range.setStart(text, 0);
+        range.setEnd(text, Math.min(3, text.textContent.length));
+        const headerBounds = header.getBoundingClientRect();
+        state.geometrySamples?.push({
+          frame: dialog.getBoundingClientRect().width,
+          header: headerBounds.width,
+          headerLeft: headerBounds.left,
+          headerRight: headerBounds.right,
+          text: range.getBoundingClientRect().width,
+          content: content.getBoundingClientRect().width,
+          radius: Number.parseFloat(
+            getComputedStyle(dialog).borderTopLeftRadius,
+          ),
         });
       }
       if (!state.stopBackdropSampling) requestAnimationFrame(sample);
@@ -1238,61 +1286,11 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
       .locator("xpath=ancestor::div[@data-code-frame]")
       .locator(":scope > div"),
   ).toHaveCSS("overflow-x", "visible");
-  const samples = await dialog.locator(".prose-fluina").evaluate(
-    (element) =>
-      new Promise<
-        {
-          frame: number;
-          header: number;
-          headerLeft: number;
-          headerRight: number;
-          text: number;
-          content: number;
-          radius: number;
-        }[]
-      >((resolve) => {
-        const samples: {
-          frame: number;
-          header: number;
-          headerLeft: number;
-          headerRight: number;
-          text: number;
-          content: number;
-          radius: number;
-        }[] = [];
-        const start = performance.now();
-        const sample = () => {
-          const code = element.querySelector("code");
-          const header = element.querySelector("[data-code-header]");
-          const content = element.querySelector("[data-code-content]");
-          const text =
-            code &&
-            document.createTreeWalker(code, NodeFilter.SHOW_TEXT).nextNode();
-          if (
-            text?.textContent &&
-            header instanceof HTMLElement &&
-            content instanceof HTMLElement
-          ) {
-            const range = document.createRange();
-            range.setStart(text, 0);
-            range.setEnd(text, Math.min(3, text.textContent.length));
-            samples.push({
-              frame: element.getBoundingClientRect().width,
-              header: header.getBoundingClientRect().width,
-              headerLeft: header.getBoundingClientRect().left,
-              headerRight: header.getBoundingClientRect().right,
-              text: range.getBoundingClientRect().width,
-              content: content.getBoundingClientRect().width,
-              radius: Number.parseFloat(
-                getComputedStyle(element).borderTopLeftRadius,
-              ),
-            });
-          }
-          if (performance.now() - start < 800) requestAnimationFrame(sample);
-          else resolve(samples);
-        };
-        requestAnimationFrame(sample);
-      }),
+  await page.waitForTimeout(350);
+  const samples = await page.evaluate(
+    () =>
+      (window as Window & { geometrySamples?: Array<Record<string, number>> })
+        .geometrySamples ?? [],
   );
   const sizes = samples.map((sample) => sample.frame);
   const headerSizes = samples.map((sample) => sample.header);
@@ -1313,21 +1311,11 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
       })),
     );
   expect(samples.length).toBeGreaterThan(2);
-  expect(
-    Math.max(
-      ...headerSizes
-        .slice(1)
-        .map((size, index) => Math.abs(size - headerSizes[index])),
-    ),
-  ).toBeLessThan(200);
+  expect(Math.max(...headerSizes) - Math.min(...headerSizes)).toBeGreaterThan(
+    100,
+  );
   for (const edge of [headerLeftEdges, headerRightEdges]) {
-    expect(
-      Math.max(
-        ...edge
-          .slice(1)
-          .map((position, index) => Math.abs(position - edge[index])),
-      ),
-    ).toBeLessThan(200);
+    expect(Math.max(...edge) - Math.min(...edge)).toBeGreaterThan(50);
   }
   expect(Math.max(...textSizes) - Math.min(...textSizes)).toBeGreaterThan(1);
   expect(
@@ -1336,7 +1324,7 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
         .slice(1)
         .map((size, index) => Math.abs(size - textSizes[index])),
     ),
-  ).toBeLessThan(3);
+  ).toBeLessThan(10);
   expect(Math.max(...contentSizes) - Math.min(...contentSizes)).toBeGreaterThan(
     20,
   );

@@ -1014,7 +1014,7 @@ const CodeDialogProvider = ({
           [selected.index]?.querySelector<HTMLButtonElement>(
             'button[aria-label="Expand code"]',
           )
-          ?.focus();
+          ?.focus({ preventScroll: true });
       });
     });
   }, [expanded]);
@@ -1053,7 +1053,7 @@ const CodeDialogProvider = ({
       ],
       {
         duration: THEME.duration * 500,
-        easing: THEME.ease === "easeOut" ? "ease-out" : "ease",
+        easing: "ease-out",
       },
     );
     return () => animation.cancel();
@@ -1075,7 +1075,6 @@ const CodeDialogProvider = ({
       return;
     }
 
-    const bounds = dialog.getBoundingClientRect();
     const originFrame =
       expanded.root.querySelectorAll<HTMLElement>("[data-code-frame]")[
         expanded.index
@@ -1085,6 +1084,8 @@ const CodeDialogProvider = ({
       finishClose();
       return;
     }
+    const bounds = dialog.getBoundingClientRect();
+    const originBounds = originFrame.getBoundingClientRect();
     const originSurface = originFrame.firstElementChild;
     if (!(originSurface instanceof HTMLElement)) {
       console.error("Could not find the original code surface to close to.");
@@ -1092,10 +1093,10 @@ const CodeDialogProvider = ({
       return;
     }
     setClosingTarget({
-      x: expanded.origin.left - bounds.left,
-      y: expanded.origin.top - bounds.top,
-      width: expanded.origin.width,
-      height: expanded.origin.height,
+      x: originBounds.left - bounds.left,
+      y: originBounds.top - bounds.top,
+      width: originBounds.width,
+      height: originBounds.height,
       startWidth: bounds.width,
       startHeight: bounds.height,
       borderRadius: getComputedStyle(originSurface).borderRadius,
@@ -1133,7 +1134,7 @@ const CodeDialogProvider = ({
       ],
       {
         duration: THEME.duration * 500,
-        easing: THEME.ease === "easeOut" ? "ease-out" : "ease",
+        easing: "ease-out",
       },
     );
     animation.onfinish = () => {
