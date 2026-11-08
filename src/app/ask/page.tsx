@@ -775,8 +775,15 @@ const CodeControls = ({
 
   return (
     <>
-      <div
-        className={`flex items-center justify-between gap-2 border-b border-back-5 ${fullscreen ? "rounded-t-none" : "rounded-t-2xl"} px-2 py-1 bg-back-2 ${dragHandle ? "touch-none cursor-grab active:cursor-grabbing" : ""}`}
+      <motion.div
+        layout={Boolean(motionId)}
+        layoutId={motionId ? `${motionId}-header` : undefined}
+        data-code-header=""
+        style={{
+          borderTopLeftRadius: fullscreen ? 0 : 16,
+          borderTopRightRadius: fullscreen ? 0 : 16,
+        }}
+        className={`flex items-center justify-between gap-2 border-b border-back-5 px-2 py-1 bg-back-2 ${dragHandle ? "touch-none cursor-grab active:cursor-grabbing" : ""}`}
         onPointerDown={(event) => {
           if (!dragHandle) return;
           if (
@@ -828,7 +835,7 @@ const CodeControls = ({
             </Button>
           </Tooltip>
         </motion.div>
-      </div>
+      </motion.div>
       {error && (
         <p role="alert" className="px-4 text-sm text-red">
           {error}
@@ -886,7 +893,6 @@ const MarkdownPre = ({
   }, [code, language, dialog]);
 
   const isExpanded =
-    !dialog.isClosing &&
     dialog.expanded?.root === frameRef.current?.closest(".prose") &&
     dialog.expanded?.index === index &&
     index >= 0;
@@ -927,12 +933,21 @@ const MarkdownPre = ({
             fullscreen={false}
             toggle={open}
             motionId={
-              parallaxEnabled
+              parallaxEnabled && !dialog.isClosing
                 ? `code-controls-${isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}`
                 : undefined
             }
           />
-          <div className="relative min-w-0 max-w-full overflow-hidden rounded-b-2xl">
+          <motion.div
+            layout
+            layoutId={
+              parallaxEnabled && !dialog.isClosing
+                ? `code-content-${layoutId}`
+                : undefined
+            }
+            data-code-content=""
+            className="relative min-w-0 max-w-full overflow-hidden rounded-b-2xl"
+          >
             <pre
               {...props}
               ref={codeScrollRef}
@@ -942,7 +957,7 @@ const MarkdownPre = ({
                 ? cloneElement(codeElement, { lineNumbers: true })
                 : children}
             </pre>
-          </div>
+          </motion.div>
         </motion.div>
       </MorphingDialogFrame>
     </div>
@@ -975,6 +990,7 @@ const CodeDialogProvider = ({
     height: number;
     startWidth: number;
     startHeight: number;
+    borderRadius: string;
   } | null>(null);
   const expandedCodeId = expanded?.id;
   useEffect(() => {
@@ -1004,6 +1020,44 @@ const CodeDialogProvider = ({
   }, [expanded]);
   const finishCloseRef = useRef(finishClose);
   finishCloseRef.current = finishClose;
+  const expandedId = expanded?.id;
+  const expandedRoot = expanded?.root;
+  const expandedIndex = expanded?.index;
+  useLayoutEffect(() => {
+    if (
+      !expandedId ||
+      !expandedRoot ||
+      expandedIndex === undefined ||
+      isClosing ||
+      !parallaxEnabled
+    ) {
+      return;
+    }
+    const dialog = document.querySelector<HTMLElement>(
+      '[aria-label="Fullscreen Code View"] .prose-fluina',
+    );
+    const originFrame =
+      expandedRoot.querySelectorAll<HTMLElement>("[data-code-frame]")[
+        expandedIndex
+      ];
+    const originSurface = originFrame?.firstElementChild;
+    if (!dialog || !(originSurface instanceof HTMLElement)) {
+      console.error("Could not measure the code block for its open animation.");
+      return;
+    }
+
+    const animation = dialog.animate(
+      [
+        { borderRadius: getComputedStyle(originSurface).borderRadius },
+        { borderRadius: "0px" },
+      ],
+      {
+        duration: THEME.duration * 500,
+        easing: THEME.ease === "easeOut" ? "ease-out" : "ease",
+      },
+    );
+    return () => animation.cancel();
+  }, [expandedId, expandedRoot, expandedIndex, isClosing, parallaxEnabled]);
   const close = useCallback(() => {
     if (!expanded || isClosing) return;
     if (!parallaxEnabled) {
@@ -1022,6 +1076,21 @@ const CodeDialogProvider = ({
     }
 
     const bounds = dialog.getBoundingClientRect();
+    const originFrame =
+      expanded.root.querySelectorAll<HTMLElement>("[data-code-frame]")[
+        expanded.index
+      ];
+    if (!originFrame) {
+      console.error("Could not find the original code frame to close to.");
+      finishClose();
+      return;
+    }
+    const originSurface = originFrame.firstElementChild;
+    if (!(originSurface instanceof HTMLElement)) {
+      console.error("Could not find the original code surface to close to.");
+      finishClose();
+      return;
+    }
     setClosingTarget({
       x: expanded.origin.left - bounds.left,
       y: expanded.origin.top - bounds.top,
@@ -1029,6 +1098,7 @@ const CodeDialogProvider = ({
       height: expanded.origin.height,
       startWidth: bounds.width,
       startHeight: bounds.height,
+      borderRadius: getComputedStyle(originSurface).borderRadius,
     });
     setIsClosing(true);
   }, [expanded, finishClose, isClosing, parallaxEnabled]);
@@ -1050,19 +1120,20 @@ const CodeDialogProvider = ({
           transform: "translate(0px, 0px)",
           width: `${closingTarget.startWidth}px`,
           height: `${closingTarget.startHeight}px`,
+          borderRadius: getComputedStyle(dialog).borderRadius,
+          overflow: "hidden",
         },
         {
           transform: `translate(${closingTarget.x}px, ${closingTarget.y}px)`,
           width: `${closingTarget.width}px`,
           height: `${closingTarget.height}px`,
+          borderRadius: closingTarget.borderRadius,
+          overflow: "hidden",
         },
       ],
       {
-        duration: THEME.duration * 1000,
-        easing: THEME.ease.replace(
-          /[A-Z]/g,
-          (letter) => `-${letter.toLowerCase()}`,
-        ),
+        duration: THEME.duration * 500,
+        easing: THEME.ease === "easeOut" ? "ease-out" : "ease",
       },
     );
     animation.onfinish = () => {
@@ -1073,7 +1144,9 @@ const CodeDialogProvider = ({
     return () => animation.cancel();
   }, [closingTarget, isClosing]);
   return (
-    <MorphingDialog>
+    <MorphingDialog
+      transition={{ duration: THEME.duration * 0.5, ease: THEME.ease }}
+    >
       <CodeDialogContext.Provider
         value={{
           expanded,
@@ -1112,7 +1185,7 @@ const CodeDialogProvider = ({
                   id={expanded.id}
                   enabled={parallaxEnabled && !isClosing}
                   managed
-                  className="prose prose-fluina flex size-full max-w-none flex-col overflow-visible bg-transparent"
+                  className="prose prose-fluina flex size-full max-w-none flex-col overflow-visible rounded-none border border-back-5 bg-transparent"
                 >
                   <motion.div
                     layout="position"
@@ -1145,12 +1218,21 @@ const CodeDialogProvider = ({
                       dragHandle={isMobile}
                       dragControls={isMobile ? dragControls : undefined}
                       motionId={
-                        parallaxEnabled
+                        parallaxEnabled && !isClosing
                           ? `code-controls-${expanded.id}`
                           : undefined
                       }
                     />
-                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-back-1">
+                    <motion.div
+                      layout
+                      layoutId={
+                        parallaxEnabled && !isClosing
+                          ? `code-content-${expanded.id}`
+                          : undefined
+                      }
+                      data-code-content=""
+                      className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-back-1"
+                    >
                       <pre
                         ref={expandedCodeRef}
                         onPointerDown={(event) => event.stopPropagation()}
@@ -1167,7 +1249,7 @@ const CodeDialogProvider = ({
                           {expanded.code}
                         </MarkdownCode>
                       </pre>
-                    </div>
+                    </motion.div>
                   </motion.div>
                 </MorphingDialogContent>
               )}

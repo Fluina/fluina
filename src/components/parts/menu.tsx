@@ -175,13 +175,11 @@ function Content<T extends object>({
               y: "100%",
               height: "auto",
               opacity: 0,
-              filter: "blur(0.1rem)",
             }}
             animate={{
               y: isOpen ? 0 : "100%",
               height: isExpanded && isOpen ? "100dvh" : "auto",
               opacity: isOpen ? 1 : 0,
-              filter: isOpen ? "blur(0rem)" : "blur(0.1rem)",
             }}
             transition={TRANSITION}
             drag="y"
@@ -266,14 +264,12 @@ function Content<T extends object>({
       )}
     >
       {() => {
-        const hidden = { opacity: 0, scale: 0.9, filter: "blur(0.1rem)" };
+        const hidden = { opacity: 0, scale: 0.9 };
 
         return (
           <motion.div
             initial={hidden}
-            animate={
-              isOpen ? { opacity: 1, scale: 1, filter: "blur(0)" } : hidden
-            }
+            animate={isOpen ? { opacity: 1, scale: 1 } : hidden}
             transition={TRANSITION}
             style={{ transformOrigin: "bottom left" }}
             className="min-w-56 max-w-80 rounded-4xl border border-back-5 bg-back-1 p-2 shadow-lg outline-none"

@@ -333,12 +333,16 @@ function setupFadeInteraction(host: HTMLElement, viewport: HTMLElement) {
 function setupEdgeFade(host: HTMLElement, axis: ScrollAxis) {
   host.setAttribute("data-scroll-edge-fade", "");
   const edgeOverlay = document.createElement("div");
-  edgeOverlay.className = "scroll-edge-blur";
+  const followsCodeContent =
+    host.parentElement?.hasAttribute("data-code-content");
+  edgeOverlay.className = followsCodeContent
+    ? "scroll-edge-blur code-content-edge-blur"
+    : "scroll-edge-blur";
   edgeOverlay.setAttribute("aria-hidden", "true");
   host.after(edgeOverlay);
 
   const update = () => {
-    syncEdgeOverlayRect(host, edgeOverlay);
+    if (!followsCodeContent) syncEdgeOverlayRect(host, edgeOverlay);
     updateScrollFadeVariables(host, host, axis);
   };
   const resizeObserver = new ResizeObserver(update);

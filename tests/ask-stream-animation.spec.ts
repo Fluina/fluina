@@ -836,6 +836,24 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
   expect(edgeOverlayBounds.overlayBottom).toBeLessThanOrEqual(
     edgeOverlayBounds.codeBottom + 1,
   );
+  const headerOverlayOverlap = await collapsedViewport.evaluate((element) => {
+    const overlay = element.nextElementSibling;
+    const header = element
+      .closest("[data-code-frame]")
+      ?.querySelector("[data-code-header]");
+    if (!(overlay instanceof HTMLElement) || !(header instanceof HTMLElement)) {
+      throw new Error("Code header or edge overlay is missing");
+    }
+    const overlayBounds = overlay.getBoundingClientRect();
+    const headerBounds = header.getBoundingClientRect();
+    return (
+      overlayBounds.left < headerBounds.right &&
+      overlayBounds.right > headerBounds.left &&
+      overlayBounds.top < headerBounds.bottom &&
+      overlayBounds.bottom > headerBounds.top
+    );
+  });
+  expect(headerOverlayOverlap).toBe(false);
   const restoredWidth = await collapsedViewport.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,
@@ -871,11 +889,15 @@ test("keeps mobile code shrink animation in sync with its border", async ({
     .locator("[data-chat-last-turn]")
     .last()
     .locator("[data-code-frame]");
+  const sourceContent = frame.locator("[data-code-content]");
   const source = frame.locator("pre");
   const codeRegion = source.locator("xpath=..");
   const codeHeader = frame.locator(".bg-back-2").first();
   const originBounds = await frame.boundingBox();
+  const originContentBounds = await sourceContent.boundingBox();
   if (!originBounds) throw new Error("Collapsed code frame is not visible");
+  if (!originContentBounds)
+    throw new Error("Collapsed code content is not visible");
   await expect(codeHeader).toHaveCSS("border-top-left-radius", "16px");
   await expect(codeRegion).toHaveCSS("border-top-left-radius", "0px");
   await expect(source).toHaveCSS("border-top-left-radius", "0px");
@@ -884,6 +906,11 @@ test("keeps mobile code shrink animation in sync with its border", async ({
   const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
   const expandedCode = dialog.locator("pre");
   await expect(expandedCode).toBeVisible();
+  const expandedContent = dialog.locator("[data-code-content]");
+  await page.waitForTimeout(600);
+  const expandedContentBounds = await expandedContent.boundingBox();
+  if (!expandedContentBounds)
+    throw new Error("Expanded code content is not visible");
   await expandedCode.evaluate((element) => {
     element.scrollLeft = element.scrollWidth;
   });
@@ -891,10 +918,44 @@ test("keeps mobile code shrink animation in sync with its border", async ({
   if (!expandedBounds) throw new Error("Expanded code frame is not visible");
 
   await dialog.getByRole("button", { name: "Close expanded code" }).click();
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(60);
   await expect(dialog).toBeVisible();
   const halfwayBounds = await dialog.locator(".prose-fluina").boundingBox();
   if (!halfwayBounds) throw new Error("Closing code frame is not visible");
+  const interpolatedRadius = Number.parseFloat(
+    await dialog
+      .locator(".prose-fluina")
+      .evaluate((element) => getComputedStyle(element).borderTopLeftRadius),
+  );
+  const closingTiming = await dialog
+    .locator(".prose-fluina")
+    .evaluate((element) => {
+      const animation = element
+        .getAnimations()
+        .find(
+          (candidate) =>
+            candidate.effect instanceof KeyframeEffect &&
+            candidate.effect
+              .getKeyframes()
+              .some((keyframe) => "width" in keyframe),
+        );
+      return animation?.effect?.getTiming();
+    });
+  expect(closingTiming?.duration).toBe(250);
+  expect(closingTiming?.easing).toBe("ease-out");
+  expect(interpolatedRadius).toBeGreaterThan(0);
+  expect(interpolatedRadius).toBeLessThan(16);
+  const closingContentBounds = await dialog
+    .locator("[data-code-content]")
+    .boundingBox();
+  if (!closingContentBounds)
+    throw new Error("Closing code content is not visible");
+  expect(closingContentBounds.width).toBeGreaterThan(
+    originContentBounds.width + 5,
+  );
+  expect(closingContentBounds.width).toBeLessThan(
+    expandedContentBounds.width - 5,
+  );
   expect(halfwayBounds.width).toBeGreaterThan(originBounds.width + 10);
   expect(Math.abs(halfwayBounds.width - expandedBounds.width)).toBeGreaterThan(
     5,
@@ -1003,6 +1064,7 @@ test("supports mobile drag-to-close from the code header", async ({ page }) => {
   expect(dragTransform).not.toBe("none");
   await page.mouse.up();
   await expect(dialog).toBeVisible();
+  await page.waitForTimeout(500);
 
   const updatedHeaderBounds = await header.boundingBox();
   if (!updatedHeaderBounds) throw new Error("Code header is not visible");
@@ -1016,6 +1078,17 @@ test("supports mobile drag-to-close from the code header", async ({ page }) => {
     updatedHeaderBounds.y + updatedHeaderBounds.height / 2 + 140,
     { steps: 10 },
   );
+  const downwardAlpha = await page
+    .locator(".code-dialog-backdrop")
+    .evaluate((element) =>
+      Number.parseFloat(
+        getComputedStyle(element).getPropertyValue(
+          "--code-dialog-backdrop-alpha",
+        ),
+      ),
+    );
+  expect(downwardAlpha).toBeGreaterThanOrEqual(0);
+  expect(downwardAlpha).toBeLessThan(50);
   await page.mouse.up();
   await expect(dialog).toHaveCount(0);
 });
@@ -1040,6 +1113,10 @@ test("fades the mobile menu backdrop as the sheet is dragged down", async ({
 
   const menu = page.getByRole("menu");
   await expect(menu).toBeVisible();
+  const sheet = page.locator(".rounded-t-4xl").last();
+  await expect
+    .poll(() => sheet.evaluate((element) => getComputedStyle(element).filter))
+    .toBe("none");
   const backdrop = page.locator(".absolute.inset-0.bg-back-0").last();
   const handle = page.getByRole("button", { name: "Switch menu height" });
   const bounds = await handle.boundingBox();
@@ -1163,21 +1240,52 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
   ).toHaveCSS("overflow-x", "visible");
   const samples = await dialog.locator(".prose-fluina").evaluate(
     (element) =>
-      new Promise<{ frame: number; text: number }[]>((resolve) => {
-        const samples: { frame: number; text: number }[] = [];
+      new Promise<
+        {
+          frame: number;
+          header: number;
+          headerLeft: number;
+          headerRight: number;
+          text: number;
+          content: number;
+          radius: number;
+        }[]
+      >((resolve) => {
+        const samples: {
+          frame: number;
+          header: number;
+          headerLeft: number;
+          headerRight: number;
+          text: number;
+          content: number;
+          radius: number;
+        }[] = [];
         const start = performance.now();
         const sample = () => {
           const code = element.querySelector("code");
+          const header = element.querySelector("[data-code-header]");
+          const content = element.querySelector("[data-code-content]");
           const text =
             code &&
             document.createTreeWalker(code, NodeFilter.SHOW_TEXT).nextNode();
-          if (text?.textContent) {
+          if (
+            text?.textContent &&
+            header instanceof HTMLElement &&
+            content instanceof HTMLElement
+          ) {
             const range = document.createRange();
             range.setStart(text, 0);
             range.setEnd(text, Math.min(3, text.textContent.length));
             samples.push({
               frame: element.getBoundingClientRect().width,
+              header: header.getBoundingClientRect().width,
+              headerLeft: header.getBoundingClientRect().left,
+              headerRight: header.getBoundingClientRect().right,
               text: range.getBoundingClientRect().width,
+              content: content.getBoundingClientRect().width,
+              radius: Number.parseFloat(
+                getComputedStyle(element).borderTopLeftRadius,
+              ),
             });
           }
           if (performance.now() - start < 800) requestAnimationFrame(sample);
@@ -1187,9 +1295,54 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
       }),
   );
   const sizes = samples.map((sample) => sample.frame);
+  const headerSizes = samples.map((sample) => sample.header);
+  const headerLeftEdges = samples.map((sample) => sample.headerLeft);
+  const headerRightEdges = samples.map((sample) => sample.headerRight);
   const textSizes = samples.map((sample) => sample.text);
+  const contentSizes = samples.map((sample) => sample.content);
+  const radii = samples.map((sample) => sample.radius);
+  const radiusAnimations = await dialog
+    .locator(".prose-fluina")
+    .evaluate((element) =>
+      element.getAnimations().map((animation) => ({
+        currentTime: animation.currentTime,
+        keyframes:
+          animation.effect instanceof KeyframeEffect
+            ? animation.effect.getKeyframes()
+            : [],
+      })),
+    );
   expect(samples.length).toBeGreaterThan(2);
-  expect(Math.max(...textSizes) - Math.min(...textSizes)).toBeLessThan(1);
+  expect(
+    Math.max(
+      ...headerSizes
+        .slice(1)
+        .map((size, index) => Math.abs(size - headerSizes[index])),
+    ),
+  ).toBeLessThan(200);
+  for (const edge of [headerLeftEdges, headerRightEdges]) {
+    expect(
+      Math.max(
+        ...edge
+          .slice(1)
+          .map((position, index) => Math.abs(position - edge[index])),
+      ),
+    ).toBeLessThan(200);
+  }
+  expect(Math.max(...textSizes) - Math.min(...textSizes)).toBeGreaterThan(1);
+  expect(
+    Math.max(
+      ...textSizes
+        .slice(1)
+        .map((size, index) => Math.abs(size - textSizes[index])),
+    ),
+  ).toBeLessThan(3);
+  expect(Math.max(...contentSizes) - Math.min(...contentSizes)).toBeGreaterThan(
+    20,
+  );
+  expect(Math.max(...radii), JSON.stringify(radiusAnimations)).toBeGreaterThan(
+    0,
+  );
   expect(Math.min(...sizes)).toBeLessThan(
     (page.viewportSize()?.width ?? 0) - 20,
   );
