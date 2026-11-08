@@ -1023,7 +1023,14 @@ test("keeps mobile code shrink animation in sync with its border", async ({
 
   await page.evaluate(() => {
     const state = window as Window & {
-      closeCrossfadeSamples?: { source: number; dialog: number }[];
+      closeCrossfadeSamples?: {
+        source: number;
+        dialog: number;
+        sourceWidth: number;
+        sourceHeight: number;
+        dialogWidth: number;
+        dialogHeight: number;
+      }[];
       stopCloseCrossfadeSampling?: boolean;
     };
     state.closeCrossfadeSamples = [];
@@ -1040,9 +1047,15 @@ test("keeps mobile code shrink animation in sync with its border", async ({
         ".code-dialog-overlay[data-closing]",
       );
       if (isClosing && dialogElement && sourceSurface instanceof HTMLElement) {
+        const sourceBounds = sourceSurface.getBoundingClientRect();
+        const dialogBounds = dialogElement.getBoundingClientRect();
         state.closeCrossfadeSamples?.push({
           source: Number(getComputedStyle(sourceSurface).opacity),
           dialog: Number(getComputedStyle(dialogElement).opacity),
+          sourceWidth: sourceBounds.width,
+          sourceHeight: sourceBounds.height,
+          dialogWidth: dialogBounds.width,
+          dialogHeight: dialogBounds.height,
         });
       }
       if (!state.stopCloseCrossfadeSampling) requestAnimationFrame(sample);
@@ -1053,7 +1066,14 @@ test("keeps mobile code shrink animation in sync with its border", async ({
   await expect(dialog).toHaveCount(0);
   const closeCrossfadeSamples = await page.evaluate(() => {
     const state = window as Window & {
-      closeCrossfadeSamples?: { source: number; dialog: number }[];
+      closeCrossfadeSamples?: {
+        source: number;
+        dialog: number;
+        sourceWidth: number;
+        sourceHeight: number;
+        dialogWidth: number;
+        dialogHeight: number;
+      }[];
       stopCloseCrossfadeSampling?: boolean;
     };
     state.stopCloseCrossfadeSampling = true;
@@ -1082,6 +1102,13 @@ test("keeps mobile code shrink animation in sync with its border", async ({
     ),
     JSON.stringify(activeCloseCrossfadeSamples),
   ).toBe(true);
+  for (const heightKey of ["sourceHeight", "dialogHeight"] as const) {
+    const heights = closeCrossfadeSamples.map((sample) => sample[heightKey]);
+    expect(
+      Math.max(...heights) - Math.min(...heights),
+      JSON.stringify(closeCrossfadeSamples),
+    ).toBeGreaterThan(20);
+  }
   await expect(frame.locator(":scope > :first-child")).toHaveCSS(
     "opacity",
     "1",
@@ -1656,6 +1683,8 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
         frame: number;
         height: number;
         text: number;
+        sourceWidth: number;
+        sourceHeight: number;
       }[];
       stopCodeCloseSampling?: boolean;
     };
@@ -1665,7 +1694,10 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
       const content = document.querySelector<HTMLElement>(
         '[aria-label="Fullscreen Code View"] .prose-fluina',
       );
-      if (content) {
+      const sourceSurface = document.querySelector<HTMLElement>(
+        "[data-code-frame] > div",
+      );
+      if (content && sourceSurface) {
         const code = content.querySelector("code");
         const text =
           code &&
@@ -1683,6 +1715,8 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
           frame: content.getBoundingClientRect().width,
           height: content.getBoundingClientRect().height,
           text: textWidth,
+          sourceWidth: sourceSurface.getBoundingClientRect().width,
+          sourceHeight: sourceSurface.getBoundingClientRect().height,
         });
       }
       if (!state.stopCodeCloseSampling) requestAnimationFrame(sample);
@@ -1716,6 +1750,8 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
         frame: number;
         height: number;
         text: number;
+        sourceWidth: number;
+        sourceHeight: number;
       }[];
       stopCodeCloseSampling?: boolean;
     };
@@ -1729,6 +1765,14 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
     .filter((size) => size > 0);
   expect(
     Math.max(...closingFrameSizes) - Math.min(...closingFrameSizes),
+  ).toBeGreaterThan(20);
+  const closingSourceWidths = closeWidths.map((sample) => sample.sourceWidth);
+  const closingSourceHeights = closeWidths.map((sample) => sample.sourceHeight);
+  expect(
+    Math.max(...closingSourceWidths) - Math.min(...closingSourceWidths),
+  ).toBeGreaterThan(20);
+  expect(
+    Math.max(...closingSourceHeights) - Math.min(...closingSourceHeights),
   ).toBeGreaterThan(20);
   expect(closingTextSizes.length).toBeGreaterThan(2);
   expect(

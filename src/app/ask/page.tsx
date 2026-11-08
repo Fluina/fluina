@@ -1003,7 +1003,10 @@ const MarkdownPre = ({
                 : undefined
             }
           />
-          <div
+          <motion.div
+            layoutId={
+              sharedLayoutEnabled ? `code-content-${layoutId}` : undefined
+            }
             data-code-content=""
             className="relative min-w-0 max-w-full overflow-hidden rounded-b-2xl"
           >
@@ -1016,7 +1019,7 @@ const MarkdownPre = ({
                 ? cloneElement(codeElement, { lineNumbers: true })
                 : children}
             </pre>
-          </div>
+          </motion.div>
         </div>
       </MorphingDialogFrame>
     </div>
@@ -1053,6 +1056,7 @@ const CodeDialogProvider = ({
     borderRadius: string;
     surfaceStartTranslate: string;
     surfaceEndTranslate: string;
+    sourceStartTransform: string;
     startTransform: string;
   } | null>(null);
   const expandedScrollLeft = expanded?.origin.scrollLeft;
@@ -1258,7 +1262,7 @@ const CodeDialogProvider = ({
       originCode.scrollLeft = expandedCode.scrollLeft;
       originCode.scrollTop = expandedCode.scrollTop;
     }
-    const originBounds = originSurface.getBoundingClientRect();
+    const originBounds = originFrame.getBoundingClientRect();
     const x = originBounds.left - layoutBounds.left;
     const y = originBounds.top - layoutBounds.top;
     const surfaceMatrix =
@@ -1267,6 +1271,8 @@ const CodeDialogProvider = ({
         : new DOMMatrixReadOnly(surfaceTransform);
     const surfaceOffsetX = surfaceBounds.left - bounds.left - surfaceMatrix.m41;
     const surfaceOffsetY = surfaceBounds.top - bounds.top - surfaceMatrix.m42;
+    const sourceScaleX = bounds.width / originBounds.width;
+    const sourceScaleY = bounds.height / originBounds.height;
     setClosingTarget({
       x,
       y,
@@ -1277,6 +1283,7 @@ const CodeDialogProvider = ({
       borderRadius: getComputedStyle(originSurface).borderRadius,
       surfaceStartTranslate: `${surfaceMatrix.m41}px ${surfaceMatrix.m42}px`,
       surfaceEndTranslate: `${-surfaceOffsetX}px ${-surfaceOffsetY}px`,
+      sourceStartTransform: `translate(${bounds.left - originBounds.left}px, ${bounds.top - originBounds.top}px) scale(${sourceScaleX}, ${sourceScaleY})`,
       startTransform,
     });
     setIsClosing(true);
@@ -1333,13 +1340,15 @@ const CodeDialogProvider = ({
     let completed = false;
     let finishedAnimations = 0;
     let surfaceAnimation: Animation | undefined;
+    let sourceAnimation: Animation | undefined;
     const finishWhenBothAnimationsEnd = () => {
       finishedAnimations += 1;
-      if (finishedAnimations !== (surfaceAnimation ? 3 : 2)) return;
+      if (finishedAnimations !== (surfaceAnimation ? 4 : 3)) return;
       completed = true;
       animation.commitStyles();
       surfaceAnimation?.commitStyles();
       progressAnimation.commitStyles();
+      sourceAnimation?.cancel();
       cancelAnimationFrame(syncFrame);
       progressElement.remove();
       if (expandedSurface) {
@@ -1387,6 +1396,20 @@ const CodeDialogProvider = ({
       );
       surfaceAnimation.onfinish = finishWhenBothAnimationsEnd;
     }
+    sourceAnimation = originSurface.animate(
+      [
+        {
+          transform: closingTarget.sourceStartTransform,
+          transformOrigin: "top left",
+        },
+        {
+          transform: "translate(0px, 0px) scale(1, 1)",
+          transformOrigin: "top left",
+        },
+      ],
+      options,
+    );
+    sourceAnimation.onfinish = finishWhenBothAnimationsEnd;
     animation.onfinish = finishWhenBothAnimationsEnd;
     progressAnimation.onfinish = () => {
       syncCrossfade();
@@ -1397,6 +1420,7 @@ const CodeDialogProvider = ({
       if (!completed) {
         animation.cancel();
         surfaceAnimation?.cancel();
+        sourceAnimation?.cancel();
         progressAnimation.cancel();
         cancelAnimationFrame(syncFrame);
         progressElement.remove();
@@ -1501,7 +1525,12 @@ const CodeDialogProvider = ({
                           : undefined
                       }
                     />
-                    <div
+                    <motion.div
+                      layoutId={
+                        parallaxEnabled && !isClosing && !isAnimating
+                          ? `code-content-${expanded.id}`
+                          : undefined
+                      }
                       data-code-content=""
                       className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-back-1"
                     >
@@ -1521,7 +1550,7 @@ const CodeDialogProvider = ({
                           {expanded.code}
                         </MarkdownCode>
                       </pre>
-                    </div>
+                    </motion.div>
                   </motion.div>
                 </MorphingDialogContent>
               )}
