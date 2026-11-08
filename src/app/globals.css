@@ -131,6 +131,17 @@
   white-space: pre;
 }
 
+.code-line-break {
+  box-sizing: border-box;
+  display: inline-block;
+  width: 1ch;
+  height: 1lh;
+  overflow: hidden;
+  vertical-align: top;
+  white-space: pre;
+  user-select: text;
+}
+
 .code-line::before {
   position: absolute;
   left: 0;
@@ -204,15 +215,9 @@
 
 .code-dialog-backdrop {
   --code-dialog-backdrop-alpha: 50%;
-  --code-dialog-backdrop-filter: blur(0);
   animation: code-dialog-backdrop-in var(--transition-duration) ease-out both;
   background-color: rgb(0 0 0 / var(--code-dialog-backdrop-alpha));
-  backdrop-filter: blur(0);
   opacity: 0;
-}
-
-[data-transparency="on"] .code-dialog-backdrop {
-  --code-dialog-backdrop-filter: blur(1rem);
 }
 
 .code-dialog-overlay[data-exiting] .code-dialog-backdrop,
@@ -222,19 +227,16 @@
 
 @keyframes code-dialog-backdrop-in {
   to {
-    backdrop-filter: var(--code-dialog-backdrop-filter);
     opacity: 1;
   }
 }
 
 @keyframes code-dialog-backdrop-out {
   from {
-    backdrop-filter: var(--code-dialog-backdrop-filter);
     opacity: 1;
   }
 
   to {
-    backdrop-filter: blur(0);
     opacity: 0;
   }
 }

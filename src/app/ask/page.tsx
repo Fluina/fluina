@@ -481,6 +481,106 @@ const markdownText = (node: ReactNode): string => {
   return "";
 };
 
+const isEditableBlock = (node: Node): node is HTMLElement =>
+  node instanceof HTMLElement && ["DIV", "P"].includes(node.tagName);
+
+const getEditableInlineText = (node: Node): string => {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (node instanceof HTMLBRElement) return "\n";
+  if (isEditableBlock(node)) return getEditableBlockText(node);
+  return Array.from(node.childNodes, getEditableInlineText).join("");
+};
+
+const getEditableBlockText = (block: HTMLElement): string => {
+  if (
+    block.childNodes.length === 1 &&
+    block.firstChild instanceof HTMLBRElement
+  ) {
+    return "";
+  }
+
+  const parts: string[] = [];
+  let inlineText = "";
+  for (const child of block.childNodes) {
+    if (isEditableBlock(child)) {
+      if (inlineText) parts.push(inlineText);
+      parts.push(getEditableBlockText(child));
+      inlineText = "";
+    } else {
+      inlineText += getEditableInlineText(child);
+    }
+  }
+  if (inlineText) parts.push(inlineText);
+  return parts.join("\n").replace(/\n$/, "");
+};
+
+const getEditableText = (element: HTMLElement) => {
+  const lines: string[] = [];
+  let inlineText = "";
+  const flushInlineText = () => {
+    if (!inlineText) return;
+    lines.push(...inlineText.split("\n"));
+    inlineText = "";
+  };
+
+  for (const child of element.childNodes) {
+    if (isEditableBlock(child)) {
+      flushInlineText();
+      lines.push(getEditableBlockText(child));
+    } else {
+      inlineText += getEditableInlineText(child);
+    }
+  }
+  flushInlineText();
+  return lines.join("\n");
+};
+
+const getCodeBlockKey = (language: string, code: string) =>
+  JSON.stringify([language, code]);
+
+const getCompletedCodeBlocks = (markdown: string) => {
+  const completed = new Set<string>();
+  const lines = markdown.split("\n");
+  let fence: { character: string; length: number; language: string } | null =
+    null;
+  let codeLines: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, "");
+    if (!fence) {
+      const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+      if (!opening) continue;
+      const info = opening[2].trim();
+      fence = {
+        character: opening[1][0],
+        length: opening[1].length,
+        language: info.split(/\s+/, 1)[0] ?? "",
+      };
+      codeLines = [];
+      continue;
+    }
+
+    const closing = line.match(/^ {0,3}(`+|~+)[ \t]*$/);
+    if (
+      closing &&
+      closing[1][0] === fence.character &&
+      closing[1].length >= fence.length
+    ) {
+      const code = codeLines.length > 0 ? `${codeLines.join("\n")}\n` : "";
+      if (fence.language) {
+        completed.add(getCodeBlockKey(fence.language, code));
+      }
+      fence = null;
+      codeLines = [];
+      continue;
+    }
+
+    codeLines.push(line);
+  }
+
+  return completed;
+};
+
 const isBundledLanguage = (
   language: string,
   languages: Record<BundledLanguage, unknown>,
@@ -500,6 +600,10 @@ const MarkdownCode = ({
   const isAnimating = dialog?.isAnimating ?? false;
   const language = className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
   const code = markdownText(children);
+  const isComplete =
+    !!language &&
+    (dialog?.completedCodeBlocks.has(getCodeBlockKey(language, code)) ?? false);
+  const canHighlight = !isAnimating || isComplete;
   const [highlighted, setHighlighted] = useState<{
     code: string;
     language: string;
@@ -507,7 +611,7 @@ const MarkdownCode = ({
   } | null>(null);
 
   useEffect(() => {
-    if (!language || isAnimating) return;
+    if (!language || !canHighlight) return;
     let active = true;
     const highlight = async () => {
       const shiki = await import("shiki");
@@ -525,10 +629,10 @@ const MarkdownCode = ({
     return () => {
       active = false;
     };
-  }, [code, isAnimating, language]);
+  }, [canHighlight, code, language]);
 
   const visible =
-    !isAnimating &&
+    canHighlight &&
     highlighted &&
     highlighted.language === language &&
     code.startsWith(highlighted.code)
@@ -576,6 +680,9 @@ const MarkdownCode = ({
                   </span>
                 ))}
                 {line.slice(tokenLength)}
+                {lineIndex < codeLines.length - 1 && (
+                  <span className="code-line-break">{"\n"}</span>
+                )}
               </span>
             </Fragment>
           );
@@ -617,6 +724,7 @@ type ExpandedCode = {
 const CodeDialogContext = createContext<{
   expanded: ExpandedCode | null;
   setExpanded: React.Dispatch<React.SetStateAction<ExpandedCode | null>>;
+  completedCodeBlocks: ReadonlySet<string>;
   isAnimating: boolean;
   isClosing: boolean;
 } | null>(null);
@@ -810,7 +918,7 @@ const MarkdownPre = ({
     <div ref={frameRef} data-code-frame="">
       <MorphingDialogFrame
         id={isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}
-        enabled={false}
+        enabled={parallaxEnabled}
         className={`overflow-visible rounded-2xl border border-back-5 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
       >
         <motion.div layout="position" className="overflow-hidden rounded-2xl">
@@ -842,9 +950,11 @@ const MarkdownPre = ({
 
 const CodeDialogProvider = ({
   children,
+  completedCodeBlocks,
   isAnimating,
 }: {
   children: ReactNode;
+  completedCodeBlocks: ReadonlySet<string>;
   isAnimating: boolean;
 }) => {
   const { parallaxEnabled } = usePreferences();
@@ -857,10 +967,15 @@ const CodeDialogProvider = ({
     { axis: "both" },
     [expanded?.id],
   );
+  const [closingTarget, setClosingTarget] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
   const expandedCodeId = expanded?.id;
-  const expandedRef = useRef(expanded);
-  expandedRef.current = expanded;
-  const animationRef = useRef<Animation | null>(null);
   useEffect(() => {
     if (!expandedCodeId) return;
     document.body.dataset.codeDialogOpen = "";
@@ -874,6 +989,7 @@ const CodeDialogProvider = ({
     const selected = expanded;
     setExpanded(null);
     setIsClosing(false);
+    setClosingTarget(null);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         selected?.root
@@ -893,76 +1009,78 @@ const CodeDialogProvider = ({
       finishClose();
       return;
     }
-    setIsClosing(true);
-  }, [expanded, finishClose, isClosing, parallaxEnabled]);
-
-  useLayoutEffect(() => {
-    const selected = expandedRef.current;
-    if (!expandedCodeId || !selected || !parallaxEnabled) return;
     const dialog = document.querySelector<HTMLElement>(
       '[aria-label="Fullscreen Code View"] .prose-fluina',
     );
     if (!dialog) {
-      console.error("Could not find the code dialog for its morph animation.");
-      if (isClosing) finishCloseRef.current();
+      console.error(
+        "Could not measure the code block for its close animation.",
+      );
+      finishClose();
       return;
     }
 
     const bounds = dialog.getBoundingClientRect();
-    const target = {
-      x: selected.origin.left - bounds.left,
-      y: selected.origin.top - bounds.top,
-      width: selected.origin.width,
-      height: selected.origin.height,
-    };
-    const fullscreen = { width: bounds.width, height: bounds.height };
-    const from = isClosing
-      ? {
-          transform: "translate(0px, 0px)",
-          width: `${fullscreen.width}px`,
-          height: `${fullscreen.height}px`,
-        }
-      : {
-          transform: `translate(${target.x}px, ${target.y}px)`,
-          width: `${target.width}px`,
-          height: `${target.height}px`,
-        };
-    const to = isClosing
-      ? {
-          transform: `translate(${target.x}px, ${target.y}px)`,
-          width: `${target.width}px`,
-          height: `${target.height}px`,
-        }
-      : {
-          transform: "translate(0px, 0px)",
-          width: `${fullscreen.width}px`,
-          height: `${fullscreen.height}px`,
-        };
-    const animation = dialog.animate([from, to], {
-      duration: THEME.duration === 0 ? 0 : CODE_MORPH_DURATION_MS,
-      easing: THEME.ease.replace(
-        /[A-Z]/g,
-        (letter) => `-${letter.toLowerCase()}`,
-      ),
+    setClosingTarget({
+      x: expanded.origin.left - bounds.left,
+      y: expanded.origin.top - bounds.top,
+      width: expanded.origin.width,
+      height: expanded.origin.height,
+      startWidth: bounds.width,
+      startHeight: bounds.height,
     });
-    animationRef.current = animation;
+    setIsClosing(true);
+  }, [expanded, finishClose, isClosing, parallaxEnabled]);
+
+  useLayoutEffect(() => {
+    if (!isClosing || !closingTarget) return;
+    const dialog = document.querySelector<HTMLElement>(
+      '[aria-label="Fullscreen Code View"] .prose-fluina',
+    );
+    if (!dialog) {
+      console.error("Could not find the code dialog for its close animation.");
+      finishCloseRef.current();
+      return;
+    }
+
+    const animation = dialog.animate(
+      [
+        {
+          transform: "translate(0px, 0px)",
+          width: `${closingTarget.startWidth}px`,
+          height: `${closingTarget.startHeight}px`,
+        },
+        {
+          transform: `translate(${closingTarget.x}px, ${closingTarget.y}px)`,
+          width: `${closingTarget.width}px`,
+          height: `${closingTarget.height}px`,
+        },
+      ],
+      {
+        duration: THEME.duration === 0 ? 0 : CODE_MORPH_DURATION_MS,
+        easing: THEME.ease.replace(
+          /[A-Z]/g,
+          (letter) => `-${letter.toLowerCase()}`,
+        ),
+      },
+    );
     animation.onfinish = () => {
-      if (animationRef.current === animation) animationRef.current = null;
-      if (isClosing) {
-        animation.commitStyles();
-        finishCloseRef.current();
-      }
+      animation.commitStyles();
+      finishCloseRef.current();
     };
 
-    return () => {
-      if (animationRef.current === animation) animationRef.current = null;
-      animation.cancel();
-    };
-  }, [expandedCodeId, isClosing, parallaxEnabled]);
+    return () => animation.cancel();
+  }, [closingTarget, isClosing]);
   return (
     <MorphingDialog>
       <CodeDialogContext.Provider
-        value={{ expanded, setExpanded, isAnimating, isClosing }}
+        value={{
+          expanded,
+          setExpanded,
+          completedCodeBlocks,
+          isAnimating,
+          isClosing,
+        }}
       >
         {children}
         <ModalOverlay
@@ -991,7 +1109,7 @@ const CodeDialogProvider = ({
               {expanded && (
                 <MorphingDialogContent
                   id={expanded.id}
-                  enabled={false}
+                  enabled={parallaxEnabled && !isClosing}
                   managed
                   className="prose prose-fluina flex size-full max-w-none flex-col overflow-visible bg-transparent"
                 >
@@ -1117,7 +1235,7 @@ function advanceReply(content: string, position: number, isStreaming: boolean) {
   return next;
 }
 
-const AssistantMarkdown = memo(function AssistantMarkdown({
+const ChatMarkdown = memo(function ChatMarkdown({
   messageId,
   content,
   isAnimating,
@@ -1214,6 +1332,10 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
       ? content.slice(0, revealedLength)
       : content;
   const isRevealing = animateNewContent && !revealComplete;
+  const completedCodeBlocks = useMemo(
+    () => getCompletedCodeBlocks(content),
+    [content],
+  );
   const mediaPattern = /\[\[FLUINA_MEDIA:([^\]]+)\]\]/g;
   const parts: Array<
     | { type: "text"; key: string; content: string }
@@ -1312,7 +1434,10 @@ const AssistantMarkdown = memo(function AssistantMarkdown({
   }
 
   return (
-    <CodeDialogProvider isAnimating={isAnimating || isRevealing}>
+    <CodeDialogProvider
+      completedCodeBlocks={completedCodeBlocks}
+      isAnimating={isAnimating || isRevealing}
+    >
       <div className="flex flex-col gap-3 min-w-0 w-full max-w-full prose prose-fluina">
         {parts.map((part) =>
           part.type === "media" ? (
@@ -2528,7 +2653,9 @@ export default function Ask() {
 
   const handleSubmit = async (e?: SyntheticEvent<HTMLFormElement>) => {
     if (e) e.preventDefault();
-    const userPrompt = (editorRef.current?.innerText || value).trim();
+    const userPrompt = (
+      editorRef.current ? getEditableText(editorRef.current) : value
+    ).trim();
     if (
       (!userPrompt && files.length === 0) ||
       isLoading ||
@@ -3679,7 +3806,7 @@ export default function Ask() {
                                     ref={editingRef}
                                     onInput={(e) => {
                                       setEditingValue(
-                                        e.currentTarget.innerText ?? "",
+                                        getEditableText(e.currentTarget),
                                       );
                                     }}
                                     onKeyDown={(e) => {
@@ -3698,21 +3825,23 @@ export default function Ask() {
                                     spellCheck={false}
                                     aria-multiline="true"
                                     id="reprompt"
-                                    className="outline-none"
+                                    className="outline-none whitespace-pre-wrap"
                                   />
-                                ) : isUser ? (
-                                  <p>{msg.content}</p>
                                 ) : msg.content ? (
-                                  <AssistantMarkdown
+                                  <ChatMarkdown
                                     messageId={msg.id}
                                     content={msg.content}
                                     isAnimating={
+                                      isAssistant &&
                                       msg.id === streamingMessage?.id
                                     }
-                                    animateNewContent={streamedMessageIdsRef.current.has(
-                                      msg.id,
-                                    )}
-                                    motionEnabled={parallaxEnabled}
+                                    animateNewContent={
+                                      isAssistant &&
+                                      streamedMessageIdsRef.current.has(msg.id)
+                                    }
+                                    motionEnabled={
+                                      isAssistant && parallaxEnabled
+                                    }
                                     revealPosition={revealPositionRef}
                                     onRevealComplete={finishRevealingMessage}
                                   />
@@ -4209,7 +4338,7 @@ export default function Ask() {
                 <motion.div
                   ref={editorRef}
                   onInput={(e) => {
-                    const rawText = e.currentTarget.innerText;
+                    const rawText = getEditableText(e.currentTarget);
                     setValue(rawText.trim() ? rawText : "");
                   }}
                   onKeyDown={handleTextareaKeyDown}
@@ -4228,7 +4357,7 @@ export default function Ask() {
                   spellCheck={false}
                   aria-multiline="true"
                   id="prompt"
-                  className="block outline-none overflow-y-clip resize-none w-full min-w-0 wrap-anywhere"
+                  className="block outline-none overflow-y-clip resize-none w-full min-w-0 wrap-anywhere whitespace-pre-wrap"
                 />
               </motion.div>
             </motion.div>

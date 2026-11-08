@@ -429,6 +429,188 @@ test("renders and preserves a streamed code block with code controls", async ({
   await expect(turn.getByRole("button", { name: "Copy code" })).toHaveCount(1);
 });
 
+test("highlights each completed streamed code block before the reply finishes", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockAnswer(
+    page,
+    "```js\nconst first = 1;\n```\n\n```js\nconst second =",
+    true,
+  );
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("複数のコードブロック");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const codes = page.locator("[data-chat-last-turn] pre code");
+  await expect(codes).toHaveCount(2);
+  await expect
+    .poll(() => codes.nth(0).locator(".syntax-token").count(), {
+      timeout: 30000,
+    })
+    .toBeGreaterThan(1);
+  await expect(codes.nth(1).locator(".syntax-token")).toHaveCount(0);
+  await expect(page.locator("[data-chat-disclaimer]")).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const stream = window as Window & {
+      appendTestAnswer?: (chunk: string) => void;
+      finishTestAnswer?: () => void;
+    };
+    stream.appendTestAnswer?.("\n```");
+    stream.finishTestAnswer?.();
+  });
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  await expect
+    .poll(() => codes.nth(1).locator(".syntax-token").count(), {
+      timeout: 30000,
+    })
+    .toBeGreaterThan(1);
+});
+
+test("allows selecting code together with line breaks", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockAnswer(page, "```js\nfirstLine();\nsecondLine();\n```");
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("改行選択");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const code = page.locator("[data-chat-last-turn] pre code");
+  await expect
+    .poll(() => code.locator(".syntax-token").count(), { timeout: 30000 })
+    .toBeGreaterThan(0);
+  const bounds = await code.evaluate((element) => {
+    const lines = element.querySelectorAll(".code-line");
+    const firstLine = lines[0];
+    const lastLine = lines[1];
+    if (!firstLine || !lastLine) throw new Error("Code lines not rendered");
+    const firstText = document
+      .createTreeWalker(firstLine, NodeFilter.SHOW_TEXT)
+      .nextNode();
+    const lastWalker = document.createTreeWalker(
+      lastLine,
+      NodeFilter.SHOW_TEXT,
+    );
+    let lastText = lastWalker.nextNode();
+    while (lastWalker.nextNode()) lastText = lastWalker.currentNode;
+    if (!firstText?.textContent || !lastText?.textContent) {
+      throw new Error("Selectable code text not found");
+    }
+    const firstRange = document.createRange();
+    firstRange.setStart(firstText, 0);
+    firstRange.setEnd(firstText, 1);
+    const firstRect = firstRange.getBoundingClientRect();
+    const lastRange = document.createRange();
+    lastRange.setStart(lastText, lastText.textContent.length - 1);
+    lastRange.setEnd(lastText, lastText.textContent.length);
+    const lastRect = lastRange.getBoundingClientRect();
+    return {
+      start: { x: firstRect.x, y: firstRect.y + firstRect.height / 2 },
+      end: {
+        x: lastRect.x + lastRect.width,
+        y: lastRect.y + lastRect.height / 2,
+      },
+    };
+  });
+  await page.mouse.move(bounds.start.x, bounds.start.y);
+  await page.mouse.down();
+  await page.mouse.move(bounds.end.x, bounds.end.y, { steps: 10 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
+    "firstLine();\nsecondLine();",
+  );
+});
+
+test("preserves empty lines when copying a code block", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as Window & { copiedCode?: string }).copiedCode = text;
+        },
+      },
+    });
+  });
+  await mockAnswer(page, "```js\nfirstLine();\n\nsecondLine();\n```");
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("空行選択");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const code = page.locator("[data-chat-last-turn] pre code");
+  await expect(code).toHaveText("firstLine();\n\nsecondLine();\n");
+  await page
+    .locator("[data-chat-last-turn]")
+    .getByRole("button", { name: "Copy code" })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { copiedCode?: string }).copiedCode,
+      ),
+    )
+    .toBe("firstLine();\n\nsecondLine();\n");
+});
+
+test("renders multiline user messages with the same Markdown and code controls", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as Window & { copiedCode?: string }).copiedCode = text;
+        },
+      },
+    });
+  });
+  await mockAnswer(page, "回答");
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+
+  const prompt = [
+    "# User title",
+    "",
+    "Text **bold**",
+    "",
+    "```js",
+    "firstLine();",
+    "",
+    "secondLine();",
+    "```",
+  ].join("\n");
+  await page.locator("#prompt").fill(prompt);
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const userMessage = page
+    .locator("[data-chat-message-id]")
+    .filter({ has: page.getByRole("heading", { name: "User title" }) });
+  await expect(
+    userMessage.getByRole("heading", { name: "User title" }),
+  ).toBeVisible();
+  await expect(userMessage.getByText("Text bold")).toBeVisible();
+  await expect(userMessage.locator("strong")).toHaveText("bold");
+  const code = userMessage.locator("pre code");
+  await expect(code).toHaveText("firstLine();\n\nsecondLine();\n");
+  await expect(
+    userMessage.getByRole("button", { name: "Copy code" }),
+  ).toBeVisible();
+  await userMessage.getByRole("button", { name: "Copy code" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as Window & { copiedCode?: string }).copiedCode,
+      ),
+    )
+    .toBe("firstLine();\n\nsecondLine();\n");
+});
+
 test("keeps code text at a stable size while a streamed code block grows", async ({
   page,
 }) => {
@@ -798,7 +980,7 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
   expect(originBounds).not.toBeNull();
   await page.evaluate(() => {
     const state = window as Window & {
-      backdropSamples?: { opacity: number; blur: number }[];
+      backdropSamples?: { opacity: number; filter: string }[];
       stopBackdropSampling?: boolean;
     };
     state.backdropSamples = [];
@@ -809,9 +991,7 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
         const style = getComputedStyle(backdrop);
         state.backdropSamples?.push({
           opacity: Number(style.opacity),
-          blur: Number(
-            style.backdropFilter.match(/blur\(([\d.]+)px\)/)?.[1] ?? 0,
-          ),
+          filter: style.backdropFilter,
         });
       }
       if (!state.stopBackdropSampling) requestAnimationFrame(sample);
@@ -826,6 +1006,10 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
   });
   const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
   await expect(dialog).toBeVisible();
+  await expect(page.locator(".code-dialog-backdrop")).toHaveCSS(
+    "backdrop-filter",
+    "none",
+  );
   await expect(dialog.locator(".prose-fluina")).toHaveCSS(
     "overflow-x",
     "visible",
@@ -891,18 +1075,17 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
     () =>
       (
         window as Window & {
-          backdropSamples?: { opacity: number; blur: number }[];
+          backdropSamples?: { opacity: number; filter: string }[];
         }
       ).backdropSamples ?? [],
   );
   const opacitySamples = backdropSamples.map((sample) => sample.opacity);
-  const blurSamples = backdropSamples.map((sample) => sample.blur);
   expect(backdropSamples.length).toBeGreaterThan(2);
   expect(
     Math.max(...opacitySamples) - Math.min(...opacitySamples),
   ).toBeGreaterThan(0.1);
-  expect(Math.max(...blurSamples) - Math.min(...blurSamples)).toBeGreaterThan(
-    1,
+  expect(backdropSamples.every((sample) => sample.filter === "none")).toBe(
+    true,
   );
   await expect
     .poll(() =>
@@ -953,7 +1136,7 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
 
   await page.evaluate(() => {
     const state = window as Window & {
-      backdropSamples?: { opacity: number; blur: number }[];
+      backdropSamples?: { opacity: number; filter: string }[];
     };
     state.backdropSamples = [];
   });
@@ -1005,7 +1188,7 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
     () =>
       (
         window as Window & {
-          backdropSamples?: { opacity: number; blur: number }[];
+          backdropSamples?: { opacity: number; filter: string }[];
         }
       ).backdropSamples ?? [],
   );
@@ -1014,10 +1197,9 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
     Math.max(...closeBackdropSamples.map((sample) => sample.opacity)) -
       Math.min(...closeBackdropSamples.map((sample) => sample.opacity)),
   ).toBeGreaterThan(0.1);
-  expect(
-    Math.max(...closeBackdropSamples.map((sample) => sample.blur)) -
-      Math.min(...closeBackdropSamples.map((sample) => sample.blur)),
-  ).toBeGreaterThan(1);
+  expect(closeBackdropSamples.every((sample) => sample.filter === "none")).toBe(
+    true,
+  );
   const closeWidths = await page.evaluate(() => {
     const state = window as Window & {
       codeCloseSamples?: {
