@@ -203,9 +203,10 @@
 }
 
 .code-dialog-backdrop {
+  --code-dialog-backdrop-alpha: 50%;
   --code-dialog-backdrop-filter: blur(0);
   animation: code-dialog-backdrop-in var(--transition-duration) ease-out both;
-  background-color: rgb(0 0 0 / 50%);
+  background-color: rgb(0 0 0 / var(--code-dialog-backdrop-alpha));
   backdrop-filter: blur(0);
   opacity: 0;
 }

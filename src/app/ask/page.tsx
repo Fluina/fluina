@@ -26,7 +26,12 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
+import {
+  AnimatePresence,
+  LayoutGroup,
+  motion,
+  useDragControls,
+} from "motion/react";
 import Image from "next/image";
 import type {
   ComponentPropsWithoutRef,
@@ -83,7 +88,7 @@ import {
   syncServerClock,
 } from "@/lib/chat-archive";
 import { saveCodeFile } from "@/lib/code-file";
-import { THEME, TRANSITION } from "@/lib/motion";
+import { getDragOpacity, THEME, TRANSITION } from "@/lib/motion";
 import { useIsMobile, useOS } from "@/lib/os";
 import { useNativeScroll } from "@/lib/scrollbar";
 
@@ -622,6 +627,7 @@ const CodeControls = ({
   fullscreen,
   toggle,
   dragHandle,
+  dragControls,
   motionId,
 }: {
   code: string;
@@ -629,6 +635,7 @@ const CodeControls = ({
   fullscreen: boolean;
   toggle: () => void;
   dragHandle?: boolean;
+  dragControls?: ReturnType<typeof useDragControls>;
   motionId?: string;
 }) => {
   const [copied, setCopied] = useState(false);
@@ -670,7 +677,9 @@ const CodeControls = ({
             event.target.closest("button")
           ) {
             event.stopPropagation();
+            return;
           }
+          dragControls?.start(event.nativeEvent);
         }}
       >
         <span className="truncate font-mono select-none! text-sm px-2">
@@ -842,6 +851,8 @@ const CodeDialogProvider = ({
   const isMobile = useIsMobile();
   const [expanded, setExpanded] = useState<ExpandedCode | null>(null);
   const [isClosing, setIsClosing] = useState(false);
+  const [backdropOpacity, setBackdropOpacity] = useState(0.5);
+  const dragControls = useDragControls();
   const { elementRef: expandedCodeRef } = useNativeScroll<HTMLPreElement>(
     { axis: "both" },
     [expanded?.id],
@@ -853,6 +864,7 @@ const CodeDialogProvider = ({
   useEffect(() => {
     if (!expandedCodeId) return;
     document.body.dataset.codeDialogOpen = "";
+    setBackdropOpacity(0.5);
     return () => {
       delete document.body.dataset.codeDialogOpen;
     };
@@ -965,6 +977,11 @@ const CodeDialogProvider = ({
           <div
             aria-hidden="true"
             className="code-dialog-backdrop pointer-events-none absolute inset-0 z-0"
+            style={
+              {
+                "--code-dialog-backdrop-alpha": `${backdropOpacity * 100}%`,
+              } as CSSProperties
+            }
           />
           <Modal className="relative z-10 size-full outline-none">
             <Dialog
@@ -981,15 +998,23 @@ const CodeDialogProvider = ({
                   <motion.div
                     layout="position"
                     drag={isMobile ? "y" : false}
+                    dragControls={dragControls}
+                    dragListener={false}
                     dragConstraints={{ top: 0, bottom: 0 }}
                     dragElastic={{ top: 0.05, bottom: 0.8 }}
+                    onDrag={(_, { offset }) => {
+                      setBackdropOpacity(
+                        getDragOpacity(offset.y, window.innerHeight),
+                      );
+                    }}
                     onDragEnd={(_, { offset, velocity }) => {
                       if (
                         offset.y > CODE_DISMISS_DISTANCE ||
                         velocity.y > CODE_DISMISS_VELOCITY
                       ) {
+                        setBackdropOpacity(0);
                         close();
-                      }
+                      } else setBackdropOpacity(0.5);
                     }}
                     className="flex min-h-0 min-w-0 flex-1 flex-col"
                   >
@@ -999,6 +1024,7 @@ const CodeDialogProvider = ({
                       fullscreen
                       toggle={close}
                       dragHandle={isMobile}
+                      dragControls={isMobile ? dragControls : undefined}
                       motionId={
                         parallaxEnabled
                           ? `code-controls-${expanded.id}`
@@ -1008,7 +1034,7 @@ const CodeDialogProvider = ({
                     <pre
                       ref={expandedCodeRef}
                       onPointerDown={(event) => event.stopPropagation()}
-                      className="my-0! min-h-0 flex-1 select-text [--scroll-fade-size:2.5rem] **:select-text"
+                      className="my-0! min-h-0 flex-1 select-text pb-[env(safe-area-inset-bottom,1rem)] [--scroll-fade-size:2.5rem] **:select-text"
                     >
                       <MarkdownCode
                         lineNumbers

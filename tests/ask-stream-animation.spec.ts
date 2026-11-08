@@ -635,19 +635,107 @@ test("supports mobile drag-to-close from the code header", async ({ page }) => {
   await expect(dialog).toBeVisible();
   const header = dialog.locator(".bg-back-2").first();
   await expect(header).toHaveClass(/touch-none/);
+  const codeViewport = dialog.locator("pre");
+  await expect(codeViewport).toHaveAttribute(
+    "class",
+    expect.stringContaining("pb-[env(safe-area-inset-bottom,1rem)]"),
+  );
+  const codeBounds = await codeViewport.boundingBox();
+  if (!codeBounds) throw new Error("Expanded code is not visible");
+  await page.mouse.move(
+    codeBounds.x + 40,
+    codeBounds.y + codeBounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    codeBounds.x + 40,
+    codeBounds.y + codeBounds.height / 2 + 140,
+    { steps: 10 },
+  );
+  await page.mouse.up();
+  await expect(dialog).toBeVisible();
+
   const bounds = await header.boundingBox();
   if (!bounds) throw new Error("Code header is not visible");
   await page.mouse.move(bounds.x + 40, bounds.y + bounds.height / 2);
   await page.mouse.down();
-  await page.mouse.move(bounds.x + 40, bounds.y + bounds.height / 2 + 140, {
+  await page.mouse.move(bounds.x + 40, bounds.y + bounds.height / 2 - 260, {
     steps: 10,
   });
+  const backdropAlpha = await page
+    .locator(".code-dialog-backdrop")
+    .evaluate((element) =>
+      Number.parseFloat(
+        getComputedStyle(element).getPropertyValue(
+          "--code-dialog-backdrop-alpha",
+        ),
+      ),
+    );
+  expect(backdropAlpha).toBeGreaterThan(50);
+  expect(backdropAlpha).toBeLessThanOrEqual(100);
   const dragTransform = await dialog
     .locator(".prose-fluina > div")
     .evaluate((element) => getComputedStyle(element).transform);
   expect(dragTransform).not.toBe("none");
   await page.mouse.up();
+  await expect(dialog).toBeVisible();
+
+  const updatedHeaderBounds = await header.boundingBox();
+  if (!updatedHeaderBounds) throw new Error("Code header is not visible");
+  await page.mouse.move(
+    updatedHeaderBounds.x + 40,
+    updatedHeaderBounds.y + updatedHeaderBounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    updatedHeaderBounds.x + 40,
+    updatedHeaderBounds.y + updatedHeaderBounds.height / 2 + 140,
+    { steps: 10 },
+  );
+  await page.mouse.up();
   await expect(dialog).toHaveCount(0);
+});
+
+test("fades the mobile menu backdrop as the sheet is dragged down", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+    });
+    Object.defineProperty(navigator, "maxTouchPoints", {
+      configurable: true,
+      value: 5,
+    });
+  });
+  await page.goto("/ask");
+  await page.getByRole("button", { name: "Attatch" }).click();
+
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  const backdrop = page.locator(".absolute.inset-0.bg-back-0").last();
+  const handle = page.getByRole("button", { name: "Switch menu height" });
+  const bounds = await handle.boundingBox();
+  if (!bounds) throw new Error("Mobile menu handle is not visible");
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2 + 60,
+    { steps: 5 },
+  );
+  const opacity = Number.parseFloat(
+    await backdrop.evaluate((element) => getComputedStyle(element).opacity),
+  );
+  expect(opacity).toBeGreaterThanOrEqual(0);
+  expect(opacity).toBeLessThan(0.5);
+  await page.mouse.up();
 });
 
 test("reports clipboard failures without claiming a successful copy", async ({

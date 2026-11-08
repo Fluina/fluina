@@ -29,7 +29,7 @@ import {
 } from "react-aria-components";
 import { tv } from "tailwind-variants";
 import { cn } from "@/lib/cn";
-import { TRANSITION } from "@/lib/motion";
+import { getDragOpacity, TRANSITION } from "@/lib/motion";
 import { useIsMobile } from "@/lib/os";
 
 const TRANSITION_LOCK_MS = () => TRANSITION.duration * 1000 + 50;
@@ -97,6 +97,7 @@ function Content<T extends object>({
   >(isOpen ? "open" : "closed");
   const [isDragging, setIsDragging] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [backdropOpacity, setBackdropOpacity] = useState(0.5);
   const isMobile = useIsMobile();
 
   if (prevOpen !== isOpen) {
@@ -119,6 +120,7 @@ function Content<T extends object>({
 
   useEffect(() => {
     if (!isOpen) return;
+    setBackdropOpacity(0.5);
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       const active = document.activeElement;
@@ -155,9 +157,12 @@ function Content<T extends object>({
         <motion.div
           aria-hidden="true"
           initial={{ opacity: 0 }}
-          animate={{ opacity: isOpen ? 1 : 0 }}
-          transition={TRANSITION}
-          className="pointer-events-none absolute inset-0 bg-back-0/50"
+          animate={{ opacity: isOpen ? backdropOpacity : 0 }}
+          transition={{
+            duration: isDragging ? 0 : TRANSITION.duration,
+            ease: TRANSITION.ease,
+          }}
+          className="pointer-events-none absolute inset-0 bg-back-0"
         />
         <AriaModal
           className={cn(
@@ -183,6 +188,9 @@ function Content<T extends object>({
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0.05, bottom: 0.8 }}
             onDragStart={() => setIsDragging(true)}
+            onDrag={(_, { offset }) => {
+              setBackdropOpacity(getDragOpacity(offset.y, window.innerHeight));
+            }}
             onDragEnd={(_, { offset: dragOffset, velocity }) => {
               setTimeout(() => setIsDragging(false), 0);
               const draggedDown =
@@ -193,10 +201,16 @@ function Content<T extends object>({
                 velocity.y < -DISMISS_VELOCITY;
               if (draggedUp) {
                 setIsExpanded(true);
+                setBackdropOpacity(1);
               } else if (draggedDown) {
-                if (isExpanded) setIsExpanded(false);
-                else state?.close();
-              }
+                if (isExpanded) {
+                  setIsExpanded(false);
+                  setBackdropOpacity(0.5);
+                } else {
+                  setBackdropOpacity(0);
+                  state?.close();
+                }
+              } else setBackdropOpacity(isExpanded ? 1 : 0.5);
             }}
             className={cn(
               "relative flex max-h-dvh w-full flex-col rounded-t-4xl border-t border-x border-back-5 bg-back-1 shadow-lg outline-none",
