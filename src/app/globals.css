@@ -108,7 +108,7 @@
 }
 
 .prose pre {
-  border-radius: 1rem;
+  border-radius: 0 0 1rem 1rem;
 }
 
 .syntax-token {
@@ -543,10 +543,6 @@
       transparent calc(var(--scroll-fade-right) * var(--scroll-fade-size))
     );
   -webkit-mask-composite: source-over;
-}
-
-body[data-code-dialog-open] .scroll-edge-blur {
-  opacity: 0;
 }
 
 .code-dialog-overlay .scroll-edge-blur {

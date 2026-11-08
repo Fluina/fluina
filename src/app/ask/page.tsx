@@ -105,7 +105,6 @@ const PLACEHOLDERS = [
 
 const CODE_DISMISS_DISTANCE = 100;
 const CODE_DISMISS_VELOCITY = 500;
-const CODE_MORPH_DURATION_MS = 250;
 
 interface ImageCaptureConstructor {
   new (
@@ -777,7 +776,7 @@ const CodeControls = ({
   return (
     <>
       <div
-        className={`flex items-center justify-between gap-2 border-b border-back-5 px-2 py-1 bg-back-2 ${dragHandle ? "touch-none cursor-grab active:cursor-grabbing" : ""}`}
+        className={`flex items-center justify-between gap-2 border-b border-back-5 ${fullscreen ? "rounded-t-none" : "rounded-t-2xl"} px-2 py-1 bg-back-2 ${dragHandle ? "touch-none cursor-grab active:cursor-grabbing" : ""}`}
         onPointerDown={(event) => {
           if (!dragHandle) return;
           if (
@@ -921,7 +920,7 @@ const MarkdownPre = ({
         enabled={parallaxEnabled}
         className={`overflow-visible rounded-2xl border border-back-5 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
       >
-        <motion.div layout="position" className="overflow-hidden rounded-2xl">
+        <motion.div layout="position" className="overflow-hidden rounded-b-2xl">
           <CodeControls
             code={code}
             language={language}
@@ -933,15 +932,17 @@ const MarkdownPre = ({
                 : undefined
             }
           />
-          <pre
-            {...props}
-            ref={codeScrollRef}
-            className={`${props.className ?? ""} my-0! rounded-t-none! rounded-b-2xl! [--scroll-fade-size:2.5rem]`}
-          >
-            {codeElement
-              ? cloneElement(codeElement, { lineNumbers: true })
-              : children}
-          </pre>
+          <div className="relative min-w-0 max-w-full overflow-hidden rounded-b-2xl">
+            <pre
+              {...props}
+              ref={codeScrollRef}
+              className={`${props.className ?? ""} my-0! [--scroll-fade-size:2.5rem]`}
+            >
+              {codeElement
+                ? cloneElement(codeElement, { lineNumbers: true })
+                : children}
+            </pre>
+          </div>
         </motion.div>
       </MorphingDialogFrame>
     </div>
@@ -1057,7 +1058,7 @@ const CodeDialogProvider = ({
         },
       ],
       {
-        duration: THEME.duration === 0 ? 0 : CODE_MORPH_DURATION_MS,
+        duration: THEME.duration * 1000,
         easing: THEME.ease.replace(
           /[A-Z]/g,
           (letter) => `-${letter.toLowerCase()}`,
@@ -1149,22 +1150,24 @@ const CodeDialogProvider = ({
                           : undefined
                       }
                     />
-                    <pre
-                      ref={expandedCodeRef}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      className="my-0! min-h-0 flex-1 select-text pb-[env(safe-area-inset-bottom,1rem)] [--scroll-fade-size:2.5rem] **:select-text"
-                    >
-                      <MarkdownCode
-                        lineNumbers
-                        className={
-                          expanded.language
-                            ? `language-${expanded.language}`
-                            : undefined
-                        }
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-back-1">
+                      <pre
+                        ref={expandedCodeRef}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        className="my-0! min-h-0 flex-1 select-text bg-back-1 pb-[env(safe-area-inset-bottom,1rem)] [--scroll-fade-size:2.5rem] **:select-text"
                       >
-                        {expanded.code}
-                      </MarkdownCode>
-                    </pre>
+                        <MarkdownCode
+                          lineNumbers
+                          className={
+                            expanded.language
+                              ? `language-${expanded.language}`
+                              : undefined
+                          }
+                        >
+                          {expanded.code}
+                        </MarkdownCode>
+                      </pre>
+                    </div>
                   </motion.div>
                 </MorphingDialogContent>
               )}

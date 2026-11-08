@@ -666,6 +666,18 @@ test("keeps code text at a stable size while a streamed code block grows", async
 test("supports horizontal and vertical edge scrolling in expanded code", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+    });
+    Object.defineProperty(navigator, "maxTouchPoints", {
+      configurable: true,
+      value: 5,
+    });
+  });
   await page.emulateMedia({ reducedMotion: "reduce" });
   const longLine = `const value = ${"W".repeat(240)}`;
   const code = [
@@ -685,6 +697,11 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
     .last()
     .locator("pre[data-scroll-edge-fade]");
   await expect(collapsedViewport).toBeVisible();
+  await expect(collapsedViewport).toHaveCSS("border-top-left-radius", "0px");
+  await expect(collapsedViewport).toHaveCSS(
+    "border-bottom-left-radius",
+    "16px",
+  );
   const collapsedWidth = await collapsedViewport.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,
@@ -713,10 +730,35 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
   const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
   const viewport = dialog.locator("pre[data-scroll-edge-fade]");
   await expect(viewport).toBeVisible();
+  await expect(dialog.locator(".bg-back-2").first()).toHaveCSS(
+    "border-top-left-radius",
+    "0px",
+  );
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) => {
+        const backing = element.parentElement;
+        if (!backing) throw new Error("Code viewport backing is missing");
+        return (
+          getComputedStyle(element).backgroundColor ===
+          getComputedStyle(backing).backgroundColor
+        );
+      }),
+    )
+    .toBe(true);
   await expect(page.locator("body")).toHaveAttribute(
     "data-code-dialog-open",
     "",
   );
+  await expect
+    .poll(() =>
+      page
+        .locator("main .scroll-edge-blur")
+        .evaluateAll((overlays) =>
+          overlays.some((overlay) => getComputedStyle(overlay).opacity === "1"),
+        ),
+    )
+    .toBe(true);
   await expect(viewport.locator("code .code-line")).toHaveCount(102);
   const expandedLineLayout = await viewport
     .locator(".code-line")
@@ -774,12 +816,112 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
     "data-code-dialog-open",
   );
   await expect(collapsedViewport).toHaveAttribute("data-scroll-edge-fade", "");
+  const edgeOverlayBounds = await collapsedViewport.evaluate((element) => {
+    const overlay = element.nextElementSibling;
+    if (!(overlay instanceof HTMLElement)) {
+      throw new Error("Code edge overlay not found");
+    }
+    const codeRect = element.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    return {
+      codeTop: codeRect.top,
+      overlayTop: overlayRect.top,
+      codeBottom: codeRect.bottom,
+      overlayBottom: overlayRect.bottom,
+    };
+  });
+  expect(edgeOverlayBounds.overlayTop).toBeGreaterThanOrEqual(
+    edgeOverlayBounds.codeTop - 1,
+  );
+  expect(edgeOverlayBounds.overlayBottom).toBeLessThanOrEqual(
+    edgeOverlayBounds.codeBottom + 1,
+  );
   const restoredWidth = await collapsedViewport.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,
   }));
   expect(restoredWidth.scrollWidth).toBeGreaterThan(restoredWidth.clientWidth);
   await expect(collapsedViewport).toHaveCSS("--scroll-fade-right", "1");
+});
+
+test("keeps mobile code shrink animation in sync with its border", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+    });
+    Object.defineProperty(navigator, "maxTouchPoints", {
+      configurable: true,
+      value: 5,
+    });
+  });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await mockAnswer(page, `\`\`\`text\n${"W".repeat(160)}\n\`\`\``);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コードを縮小");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+
+  const frame = page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .locator("[data-code-frame]");
+  const source = frame.locator("pre");
+  const codeRegion = source.locator("xpath=..");
+  const codeHeader = frame.locator(".bg-back-2").first();
+  const originBounds = await frame.boundingBox();
+  if (!originBounds) throw new Error("Collapsed code frame is not visible");
+  await expect(codeHeader).toHaveCSS("border-top-left-radius", "16px");
+  await expect(codeRegion).toHaveCSS("border-top-left-radius", "0px");
+  await expect(source).toHaveCSS("border-top-left-radius", "0px");
+
+  await frame.getByRole("button", { name: "Expand code" }).click();
+  const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
+  const expandedCode = dialog.locator("pre");
+  await expect(expandedCode).toBeVisible();
+  await expandedCode.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth;
+  });
+  const expandedBounds = await dialog.locator(".prose-fluina").boundingBox();
+  if (!expandedBounds) throw new Error("Expanded code frame is not visible");
+
+  await dialog.getByRole("button", { name: "Close expanded code" }).click();
+  await page.waitForTimeout(250);
+  await expect(dialog).toBeVisible();
+  const halfwayBounds = await dialog.locator(".prose-fluina").boundingBox();
+  if (!halfwayBounds) throw new Error("Closing code frame is not visible");
+  expect(halfwayBounds.width).toBeGreaterThan(originBounds.width + 10);
+  expect(Math.abs(halfwayBounds.width - expandedBounds.width)).toBeGreaterThan(
+    5,
+  );
+
+  await expect(dialog).toHaveCount(0);
+  await expect(source).toHaveAttribute("data-scroll-edge-fade", "");
+  const overlayBounds = await source.evaluate((element) => {
+    const overlay = element.nextElementSibling;
+    if (!(overlay instanceof HTMLElement)) {
+      throw new Error("Code edge overlay not found");
+    }
+    const codeRect = element.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    return {
+      codeTop: codeRect.top,
+      overlayTop: overlayRect.top,
+      codeBottom: codeRect.bottom,
+      overlayBottom: overlayRect.bottom,
+    };
+  });
+  expect(overlayBounds.overlayTop).toBeGreaterThanOrEqual(
+    overlayBounds.codeTop - 1,
+  );
+  expect(overlayBounds.overlayBottom).toBeLessThanOrEqual(
+    overlayBounds.codeBottom + 1,
+  );
 });
 
 test("supports mobile drag-to-close from the code header", async ({ page }) => {
@@ -1019,34 +1161,31 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
       .locator("xpath=ancestor::div[@data-code-frame]")
       .locator(":scope > div"),
   ).toHaveCSS("overflow-x", "visible");
-  const samples = await dialog
-    .locator("pre")
-    .locator("../..")
-    .evaluate(
-      (element) =>
-        new Promise<{ frame: number; text: number }[]>((resolve) => {
-          const samples: { frame: number; text: number }[] = [];
-          const start = performance.now();
-          const sample = () => {
-            const code = element.querySelector("code");
-            const text =
-              code &&
-              document.createTreeWalker(code, NodeFilter.SHOW_TEXT).nextNode();
-            if (text?.textContent) {
-              const range = document.createRange();
-              range.setStart(text, 0);
-              range.setEnd(text, Math.min(3, text.textContent.length));
-              samples.push({
-                frame: element.getBoundingClientRect().width,
-                text: range.getBoundingClientRect().width,
-              });
-            }
-            if (performance.now() - start < 800) requestAnimationFrame(sample);
-            else resolve(samples);
-          };
-          requestAnimationFrame(sample);
-        }),
-    );
+  const samples = await dialog.locator(".prose-fluina").evaluate(
+    (element) =>
+      new Promise<{ frame: number; text: number }[]>((resolve) => {
+        const samples: { frame: number; text: number }[] = [];
+        const start = performance.now();
+        const sample = () => {
+          const code = element.querySelector("code");
+          const text =
+            code &&
+            document.createTreeWalker(code, NodeFilter.SHOW_TEXT).nextNode();
+          if (text?.textContent) {
+            const range = document.createRange();
+            range.setStart(text, 0);
+            range.setEnd(text, Math.min(3, text.textContent.length));
+            samples.push({
+              frame: element.getBoundingClientRect().width,
+              text: range.getBoundingClientRect().width,
+            });
+          }
+          if (performance.now() - start < 800) requestAnimationFrame(sample);
+          else resolve(samples);
+        };
+        requestAnimationFrame(sample);
+      }),
+  );
   const sizes = samples.map((sample) => sample.frame);
   const textSizes = samples.map((sample) => sample.text);
   expect(samples.length).toBeGreaterThan(2);
