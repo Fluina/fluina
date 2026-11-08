@@ -349,6 +349,39 @@ test("renders and preserves a streamed code block with code controls", async ({
   await expect(turn.locator('[data-streamdown="code-block"]')).toHaveCount(0);
   const pre = turn.locator("pre");
   await expect(pre).toHaveCSS("overflow-x", "auto");
+  await expect(pre.locator("code")).toHaveAttribute(
+    "data-code-line-numbers",
+    "",
+  );
+  await expect(pre.locator(".code-line")).toHaveCount(2);
+  await expect(pre.locator(".code-line").first()).toHaveAttribute(
+    "data-line-number",
+    "1",
+  );
+  const lineLayout = await pre.locator(".code-line").evaluateAll((elements) =>
+    elements.map((line) => {
+      const bounds = line.getBoundingClientRect();
+      return {
+        left: bounds.left,
+        top: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+        paddingLeft: getComputedStyle(line).paddingLeft,
+      };
+    }),
+  );
+  expect(new Set(lineLayout.map((line) => line.width)).size).toBe(1);
+  expect(lineLayout[1].top - lineLayout[0].top).toBe(lineLayout[0].height);
+  expect(lineLayout[1].height).toBe(lineLayout[0].height);
+  expect(Number.parseFloat(lineLayout[0].paddingLeft)).toBeLessThan(80);
+  expect(
+    await pre
+      .locator(".code-line")
+      .first()
+      .evaluate((line) => {
+        return getComputedStyle(line, "::before").userSelect;
+      }),
+  ).toBe("none");
   await expect(pre).toHaveCSS("border-bottom-left-radius", "16px");
   await expect(pre).toHaveCSS("border-bottom-right-radius", "16px");
   await expect(pre.locator("../..")).toHaveCSS("border-radius", "16px");
@@ -498,6 +531,36 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
   const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
   const viewport = dialog.locator("pre[data-scroll-edge-fade]");
   await expect(viewport).toBeVisible();
+  await expect(page.locator("body")).toHaveAttribute(
+    "data-code-dialog-open",
+    "",
+  );
+  await expect(viewport.locator("code .code-line")).toHaveCount(102);
+  const expandedLineLayout = await viewport
+    .locator(".code-line")
+    .evaluateAll((lines) =>
+      lines.map((line) => {
+        const bounds = line.getBoundingClientRect();
+        return {
+          left: bounds.left,
+          top: bounds.top,
+          width: bounds.width,
+          height: bounds.height,
+          paddingLeft: Number.parseFloat(getComputedStyle(line).paddingLeft),
+        };
+      }),
+    );
+  expect(new Set(expandedLineLayout.map((line) => line.width)).size).toBe(1);
+  expect(expandedLineLayout[1].top - expandedLineLayout[0].top).toBe(
+    expandedLineLayout[0].height,
+  );
+  expect(expandedLineLayout.at(-1)?.paddingLeft).toBeLessThan(80);
+  await expect(
+    page
+      .locator("[data-chat-last-turn]")
+      .last()
+      .locator("pre[data-scroll-edge-fade]"),
+  ).toHaveCount(0);
   const dimensions = await viewport.evaluate((element) => ({
     clientHeight: element.clientHeight,
     clientWidth: element.clientWidth,
@@ -525,6 +588,9 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
     .toBeGreaterThanOrEqual(dimensions.scrollWidth - 1);
   await dialog.getByRole("button", { name: "Close expanded code" }).click();
   await expect(dialog).toHaveCount(0);
+  await expect(page.locator("body")).not.toHaveAttribute(
+    "data-code-dialog-open",
+  );
   await expect(collapsedViewport).toHaveAttribute("data-scroll-edge-fade", "");
   const restoredWidth = await collapsedViewport.evaluate((element) => ({
     clientWidth: element.clientWidth,
@@ -532,6 +598,56 @@ test("supports horizontal and vertical edge scrolling in expanded code", async (
   }));
   expect(restoredWidth.scrollWidth).toBeGreaterThan(restoredWidth.clientWidth);
   await expect(collapsedViewport).toHaveCSS("--scroll-fade-right", "1");
+});
+
+test("supports mobile drag-to-close from the code header", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+    });
+    Object.defineProperty(navigator, "maxTouchPoints", {
+      configurable: true,
+      value: 5,
+    });
+  });
+  await mockAnswer(
+    page,
+    `\`\`\`python\n${Array.from({ length: 6 }, (_, index) => `print(${index})`).join("\n")}\n\`\`\``,
+  );
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コードをモバイルで開く");
+  await page.getByRole("button", { name: "Send" }).evaluate((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error("Send control is not a button");
+    }
+    button.click();
+  });
+  const turn = page.locator("[data-chat-last-turn]").last();
+  const sourceCode = turn.locator("pre code");
+  await expect(sourceCode.locator(".code-line")).toHaveCount(7);
+  await turn.getByRole("button", { name: "Expand code" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
+  await expect(dialog).toBeVisible();
+  const header = dialog.locator(".bg-back-2").first();
+  await expect(header).toHaveClass(/touch-none/);
+  const bounds = await header.boundingBox();
+  if (!bounds) throw new Error("Code header is not visible");
+  await page.mouse.move(bounds.x + 40, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + 40, bounds.y + bounds.height / 2 + 140, {
+    steps: 10,
+  });
+  const dragTransform = await dialog
+    .locator(".prose-fluina > div")
+    .evaluate((element) => getComputedStyle(element).transform);
+  expect(dragTransform).not.toBe("none");
+  await page.mouse.up();
+  await expect(dialog).toHaveCount(0);
 });
 
 test("reports clipboard failures without claiming a successful copy", async ({
@@ -669,9 +785,9 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
   expect(Math.max(...sizes)).toBeGreaterThan(
     (page.viewportSize()?.width ?? 0) - 2,
   );
-  await expect(dialog.locator("span.select-text")).toHaveCSS(
+  await expect(dialog.locator("span.font-mono")).toHaveCSS(
     "user-select",
-    "text",
+    "none",
   );
   await expect(dialog.locator("pre code")).toHaveCSS("user-select", "text");
   await dialog.getByRole("button", { name: "Copy code" }).click();

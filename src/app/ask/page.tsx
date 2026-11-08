@@ -30,10 +30,12 @@ import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import Image from "next/image";
 import type {
   ComponentPropsWithoutRef,
+  CSSProperties,
   ReactNode,
   SyntheticEvent,
 } from "react";
 import {
+  cloneElement,
   createContext,
   Fragment,
   isValidElement,
@@ -95,6 +97,10 @@ const PLACEHOLDERS = [
   "コピペで註記！",
   "今日も、おつかれ様。",
 ];
+
+const CODE_DISMISS_DISTANCE = 100;
+const CODE_DISMISS_VELOCITY = 500;
+const CODE_MORPH_DURATION_MS = 250;
 
 interface ImageCaptureConstructor {
   new (
@@ -479,8 +485,12 @@ const MarkdownCode = ({
   node: _node,
   children,
   className,
+  lineNumbers = false,
   ...props
-}: ComponentPropsWithoutRef<"code"> & { node?: unknown }) => {
+}: ComponentPropsWithoutRef<"code"> & {
+  node?: unknown;
+  lineNumbers?: boolean;
+}) => {
   const dialog = useContext(CodeDialogContext);
   const isAnimating = dialog?.isAnimating ?? false;
   const language = className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
@@ -526,10 +536,46 @@ const MarkdownCode = ({
       tokens.reduce((length, token) => length + token.content.length, 0) + 1;
     return { offset, tokens };
   });
+  const codeLines = code.split("\n");
+  const lineNumberStyle:
+    | (CSSProperties & { "--code-line-number-width": string })
+    | undefined = lineNumbers
+    ? { "--code-line-number-width": `${String(codeLines.length).length}ch` }
+    : undefined;
 
   return (
-    <code {...props} className={className}>
-      {visible ? (
+    <code
+      {...props}
+      className={className}
+      data-code-line-numbers={lineNumbers ? "" : undefined}
+      style={lineNumberStyle}
+    >
+      {lineNumbers ? (
+        codeLines.map((line, lineIndex) => {
+          const tokens = lines?.[lineIndex]?.tokens;
+          const tokenLength =
+            tokens?.reduce(
+              (length, token) => length + token.content.length,
+              0,
+            ) ?? 0;
+          return (
+            <Fragment key={`${lineIndex}:${line}`}>
+              <span className="code-line" data-line-number={lineIndex + 1}>
+                {tokens?.map((token) => (
+                  <span
+                    key={token.offset}
+                    className="syntax-token"
+                    style={token.htmlStyle}
+                  >
+                    {token.content}
+                  </span>
+                ))}
+                {line.slice(tokenLength)}
+              </span>
+            </Fragment>
+          );
+        })
+      ) : visible ? (
         <>
           {lines?.map((line, lineIndex) => (
             <Fragment key={line.offset}>
@@ -575,12 +621,14 @@ const CodeControls = ({
   language,
   fullscreen,
   toggle,
+  dragHandle,
   motionId,
 }: {
   code: string;
   language?: string;
   fullscreen: boolean;
   toggle: () => void;
+  dragHandle?: boolean;
   motionId?: string;
 }) => {
   const [copied, setCopied] = useState(false);
@@ -613,8 +661,19 @@ const CodeControls = ({
 
   return (
     <>
-      <div className="flex items-center justify-between gap-2 border-b border-back-5 px-2 py-1 bg-back-2">
-        <span className="truncate select-text font-mono text-sm px-2">
+      <div
+        className={`flex items-center justify-between gap-2 border-b border-back-5 px-2 py-1 bg-back-2 ${dragHandle ? "touch-none cursor-grab active:cursor-grabbing" : ""}`}
+        onPointerDown={(event) => {
+          if (!dragHandle) return;
+          if (
+            event.target instanceof Element &&
+            event.target.closest("button")
+          ) {
+            event.stopPropagation();
+          }
+        }}
+      >
+        <span className="truncate font-mono select-none! text-sm px-2">
           {language || "text"}
         </span>
         <motion.div
@@ -674,12 +733,14 @@ const MarkdownPre = ({
   const layoutId = useId();
   const frameRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(-1);
-  const { elementRef: codeScrollRef } = useNativeScroll<HTMLPreElement>({
-    axis: "x",
-  });
+  const { elementRef: codeScrollRef } = useNativeScroll<HTMLPreElement>(
+    { axis: "x", enableEdgeFade: !dialog.expanded },
+    [dialog.expanded?.id],
+  );
   const codeElement = isValidElement<{
     className?: string;
     children?: ReactNode;
+    lineNumbers?: boolean;
   }>(children)
     ? children
     : null;
@@ -740,7 +801,7 @@ const MarkdownPre = ({
     <div ref={frameRef} data-code-frame="">
       <MorphingDialogFrame
         id={isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}
-        enabled={parallaxEnabled}
+        enabled={false}
         className={`overflow-visible rounded-2xl border border-back-5 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
       >
         <motion.div layout="position" className="overflow-hidden rounded-2xl">
@@ -760,7 +821,9 @@ const MarkdownPre = ({
             ref={codeScrollRef}
             className={`${props.className ?? ""} my-0! rounded-t-none! rounded-b-2xl! [--scroll-fade-size:2.5rem]`}
           >
-            {children}
+            {codeElement
+              ? cloneElement(codeElement, { lineNumbers: true })
+              : children}
           </pre>
         </motion.div>
       </MorphingDialogFrame>
@@ -776,26 +839,29 @@ const CodeDialogProvider = ({
   isAnimating: boolean;
 }) => {
   const { parallaxEnabled } = usePreferences();
+  const isMobile = useIsMobile();
   const [expanded, setExpanded] = useState<ExpandedCode | null>(null);
   const [isClosing, setIsClosing] = useState(false);
   const { elementRef: expandedCodeRef } = useNativeScroll<HTMLPreElement>(
     { axis: "both" },
     [expanded?.id],
   );
-  const [closingTarget, setClosingTarget] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    startWidth: number;
-    startHeight: number;
-  } | null>(null);
+  const expandedCodeId = expanded?.id;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  const animationRef = useRef<Animation | null>(null);
+  useEffect(() => {
+    if (!expandedCodeId) return;
+    document.body.dataset.codeDialogOpen = "";
+    return () => {
+      delete document.body.dataset.codeDialogOpen;
+    };
+  }, [expandedCodeId]);
   const finishClose = useCallback(() => {
     if (!expanded) return;
     const selected = expanded;
     setExpanded(null);
     setIsClosing(false);
-    setClosingTarget(null);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         selected?.root
@@ -815,66 +881,72 @@ const CodeDialogProvider = ({
       finishClose();
       return;
     }
-    const dialog = document.querySelector<HTMLElement>(
-      '[aria-label="Fullscreen Code View"] .prose-fluina',
-    );
-    if (!dialog) {
-      console.error(
-        "Could not measure the code block for its close animation.",
-      );
-      finishClose();
-      return;
-    }
-
-    const dialogBounds = dialog.getBoundingClientRect();
-    setClosingTarget({
-      x: expanded.origin.left - dialogBounds.left,
-      y: expanded.origin.top - dialogBounds.top,
-      width: expanded.origin.width,
-      height: expanded.origin.height,
-      startWidth: dialogBounds.width,
-      startHeight: dialogBounds.height,
-    });
     setIsClosing(true);
   }, [expanded, finishClose, isClosing, parallaxEnabled]);
 
   useLayoutEffect(() => {
-    if (!isClosing || !closingTarget) return;
-
+    const selected = expandedRef.current;
+    if (!expandedCodeId || !selected || !parallaxEnabled) return;
     const dialog = document.querySelector<HTMLElement>(
       '[aria-label="Fullscreen Code View"] .prose-fluina',
     );
     if (!dialog) {
-      console.error("Could not find the code dialog for its close animation.");
-      finishCloseRef.current();
+      console.error("Could not find the code dialog for its morph animation.");
+      if (isClosing) finishCloseRef.current();
       return;
     }
 
-    const animation = dialog.animate(
-      [
-        {
+    const bounds = dialog.getBoundingClientRect();
+    const target = {
+      x: selected.origin.left - bounds.left,
+      y: selected.origin.top - bounds.top,
+      width: selected.origin.width,
+      height: selected.origin.height,
+    };
+    const fullscreen = { width: bounds.width, height: bounds.height };
+    const from = isClosing
+      ? {
           transform: "translate(0px, 0px)",
-          width: `${closingTarget.startWidth}px`,
-          height: `${closingTarget.startHeight}px`,
-        },
-        {
-          transform: `translate(${closingTarget.x}px, ${closingTarget.y}px)`,
-          width: `${closingTarget.width}px`,
-          height: `${closingTarget.height}px`,
-        },
-      ],
-      {
-        duration: TRANSITION.duration * 1000,
-        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
-      },
-    );
+          width: `${fullscreen.width}px`,
+          height: `${fullscreen.height}px`,
+        }
+      : {
+          transform: `translate(${target.x}px, ${target.y}px)`,
+          width: `${target.width}px`,
+          height: `${target.height}px`,
+        };
+    const to = isClosing
+      ? {
+          transform: `translate(${target.x}px, ${target.y}px)`,
+          width: `${target.width}px`,
+          height: `${target.height}px`,
+        }
+      : {
+          transform: "translate(0px, 0px)",
+          width: `${fullscreen.width}px`,
+          height: `${fullscreen.height}px`,
+        };
+    const animation = dialog.animate([from, to], {
+      duration: THEME.duration === 0 ? 0 : CODE_MORPH_DURATION_MS,
+      easing: THEME.ease.replace(
+        /[A-Z]/g,
+        (letter) => `-${letter.toLowerCase()}`,
+      ),
+    });
+    animationRef.current = animation;
     animation.onfinish = () => {
-      animation.commitStyles();
-      finishCloseRef.current();
+      if (animationRef.current === animation) animationRef.current = null;
+      if (isClosing) {
+        animation.commitStyles();
+        finishCloseRef.current();
+      }
     };
 
-    return () => animation.cancel();
-  }, [closingTarget, isClosing]);
+    return () => {
+      if (animationRef.current === animation) animationRef.current = null;
+      animation.cancel();
+    };
+  }, [expandedCodeId, isClosing, parallaxEnabled]);
   return (
     <MorphingDialog>
       <CodeDialogContext.Provider
@@ -902,12 +974,23 @@ const CodeDialogProvider = ({
               {expanded && (
                 <MorphingDialogContent
                   id={expanded.id}
-                  enabled={parallaxEnabled && !isClosing}
+                  enabled={false}
                   managed
                   className="prose prose-fluina flex size-full max-w-none flex-col overflow-visible bg-transparent"
                 >
                   <motion.div
                     layout="position"
+                    drag={isMobile ? "y" : false}
+                    dragConstraints={{ top: 0, bottom: 0 }}
+                    dragElastic={{ top: 0.05, bottom: 0.8 }}
+                    onDragEnd={(_, { offset, velocity }) => {
+                      if (
+                        offset.y > CODE_DISMISS_DISTANCE ||
+                        velocity.y > CODE_DISMISS_VELOCITY
+                      ) {
+                        close();
+                      }
+                    }}
                     className="flex min-h-0 min-w-0 flex-1 flex-col"
                   >
                     <CodeControls
@@ -915,6 +998,7 @@ const CodeDialogProvider = ({
                       language={expanded.language}
                       fullscreen
                       toggle={close}
+                      dragHandle={isMobile}
                       motionId={
                         parallaxEnabled
                           ? `code-controls-${expanded.id}`
@@ -923,9 +1007,11 @@ const CodeDialogProvider = ({
                     />
                     <pre
                       ref={expandedCodeRef}
+                      onPointerDown={(event) => event.stopPropagation()}
                       className="my-0! min-h-0 flex-1 select-text [--scroll-fade-size:2.5rem] **:select-text"
                     >
                       <MarkdownCode
+                        lineNumbers
                         className={
                           expanded.language
                             ? `language-${expanded.language}`
