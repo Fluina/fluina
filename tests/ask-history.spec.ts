@@ -483,3 +483,104 @@ test("shows an error when the chat stream completes without text", async ({
       ),
   ).toBeVisible();
 });
+
+test("submits the latest editor text once even when the form is submitted twice", async ({
+  page,
+}) => {
+  let requestCount = 0;
+  await page.route("http://localhost:3001/api/ask", (route) => {
+    requestCount += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: "text/plain; charset=utf-8",
+      body: "テスト返答",
+    });
+  });
+
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("入力直後の質問");
+  await page.locator("form").evaluate((form) => {
+    if (!(form instanceof HTMLFormElement)) {
+      throw new Error("Prompt form not found");
+    }
+    form.requestSubmit();
+    form.requestSubmit();
+  });
+
+  await expect(page.getByText("入力直後の質問", { exact: true })).toBeVisible();
+  await expect(page.getByText("テスト返答", { exact: true })).toBeVisible();
+  expect(requestCount).toBe(1);
+});
+
+test("does not block message submission while the server clock request is pending", async ({
+  page,
+}) => {
+  let clockRequestCount = 0;
+  await page.route("http://localhost:3001/api/ask/time", async () => {
+    clockRequestCount += 1;
+    await new Promise<void>(() => {});
+  });
+  await page.route("http://localhost:3001/api/ask", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/plain; charset=utf-8",
+      body: "即時応答",
+    }),
+  );
+
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.evaluate(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(() => clockRequestCount).toBeGreaterThan(0);
+  await page.locator("#prompt").fill("時刻同期中の質問");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(
+    page.getByText("時刻同期中の質問", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("即時応答", { exact: true })).toBeVisible();
+});
+
+test("stops a pending streamed response and returns to send state", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch;
+    window.fetch = Object.assign(
+      (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url !== "http://localhost:3001/api/ask") {
+          return originalFetch(input, init);
+        }
+
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("途中までの返答"));
+                init?.signal?.addEventListener(
+                  "abort",
+                  () => controller.error(init.signal?.reason),
+                  { once: true },
+                );
+              },
+            }),
+          ),
+        );
+      },
+      originalFetch,
+    );
+  });
+
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("応答を停止する");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Stop" }).click();
+
+  await expect(page.getByRole("button", { name: "Converse" })).toBeVisible();
+  await expect(page.getByText("送信が取り消されました。")).toBeVisible();
+});

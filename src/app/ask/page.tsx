@@ -560,12 +560,14 @@ type ExpandedCode = {
   index: number;
   code: string;
   language?: string;
+  origin: { left: number; top: number; width: number; height: number };
 };
 
 const CodeDialogContext = createContext<{
   expanded: ExpandedCode | null;
   setExpanded: React.Dispatch<React.SetStateAction<ExpandedCode | null>>;
   isAnimating: boolean;
+  isClosing: boolean;
 } | null>(null);
 
 const CodeControls = ({
@@ -611,9 +613,7 @@ const CodeControls = ({
 
   return (
     <>
-      <div
-        className={`flex items-center justify-between gap-2 border-b border-back-5 px-2 py-1 ${fullscreen ? "bg-back-2/90" : "bg-back-2"}`}
-      >
+      <div className="flex items-center justify-between gap-2 border-b border-back-5 px-2 py-1 bg-back-2">
         <span className="truncate select-text font-mono text-sm px-2">
           {language || "text"}
         </span>
@@ -671,10 +671,12 @@ const MarkdownPre = ({
   const { parallaxEnabled } = usePreferences();
   const dialog = useContext(CodeDialogContext);
   if (!dialog) throw new Error("Code dialog provider is missing");
-  const { isAnimating } = dialog;
   const layoutId = useId();
   const frameRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(-1);
+  const { elementRef: codeScrollRef } = useNativeScroll<HTMLPreElement>({
+    axis: "x",
+  });
   const codeElement = isValidElement<{
     className?: string;
     children?: ReactNode;
@@ -707,6 +709,7 @@ const MarkdownPre = ({
   }, [code, language, dialog]);
 
   const isExpanded =
+    !dialog.isClosing &&
     dialog.expanded?.root === frameRef.current?.closest(".prose") &&
     dialog.expanded?.index === index &&
     index >= 0;
@@ -717,12 +720,19 @@ const MarkdownPre = ({
     const currentIndex = Array.from(
       root.querySelectorAll("[data-code-frame]"),
     ).indexOf(frame);
+    const bounds = frame.getBoundingClientRect();
     dialog.setExpanded({
       id: layoutId,
       root,
       index: currentIndex,
       code,
       language,
+      origin: {
+        left: bounds.left,
+        top: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      },
     });
   };
 
@@ -731,9 +741,9 @@ const MarkdownPre = ({
       <MorphingDialogFrame
         id={isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}
         enabled={parallaxEnabled}
-        className={`overflow-hidden rounded-2xl border border-back-5 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
+        className={`overflow-visible rounded-2xl border border-back-5 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
       >
-        <motion.div layout={!isAnimating}>
+        <motion.div layout="position" className="overflow-hidden rounded-2xl">
           <CodeControls
             code={code}
             language={language}
@@ -747,7 +757,8 @@ const MarkdownPre = ({
           />
           <pre
             {...props}
-            className={`${props.className ?? ""} my-0! rounded-none!`}
+            ref={codeScrollRef}
+            className={`${props.className ?? ""} my-0! rounded-t-none! rounded-b-2xl! [--scroll-fade-size:2.5rem]`}
           >
             {children}
           </pre>
@@ -766,9 +777,25 @@ const CodeDialogProvider = ({
 }) => {
   const { parallaxEnabled } = usePreferences();
   const [expanded, setExpanded] = useState<ExpandedCode | null>(null);
-  const close = () => {
+  const [isClosing, setIsClosing] = useState(false);
+  const { elementRef: expandedCodeRef } = useNativeScroll<HTMLPreElement>(
+    { axis: "both" },
+    [expanded?.id],
+  );
+  const [closingTarget, setClosingTarget] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
+  const finishClose = useCallback(() => {
+    if (!expanded) return;
     const selected = expanded;
     setExpanded(null);
+    setIsClosing(false);
+    setClosingTarget(null);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         selected?.root
@@ -779,11 +806,79 @@ const CodeDialogProvider = ({
           ?.focus();
       });
     });
-  };
+  }, [expanded]);
+  const finishCloseRef = useRef(finishClose);
+  finishCloseRef.current = finishClose;
+  const close = useCallback(() => {
+    if (!expanded || isClosing) return;
+    if (!parallaxEnabled) {
+      finishClose();
+      return;
+    }
+    const dialog = document.querySelector<HTMLElement>(
+      '[aria-label="Fullscreen Code View"] .prose-fluina',
+    );
+    if (!dialog) {
+      console.error(
+        "Could not measure the code block for its close animation.",
+      );
+      finishClose();
+      return;
+    }
+
+    const dialogBounds = dialog.getBoundingClientRect();
+    setClosingTarget({
+      x: expanded.origin.left - dialogBounds.left,
+      y: expanded.origin.top - dialogBounds.top,
+      width: expanded.origin.width,
+      height: expanded.origin.height,
+      startWidth: dialogBounds.width,
+      startHeight: dialogBounds.height,
+    });
+    setIsClosing(true);
+  }, [expanded, finishClose, isClosing, parallaxEnabled]);
+
+  useLayoutEffect(() => {
+    if (!isClosing || !closingTarget) return;
+
+    const dialog = document.querySelector<HTMLElement>(
+      '[aria-label="Fullscreen Code View"] .prose-fluina',
+    );
+    if (!dialog) {
+      console.error("Could not find the code dialog for its close animation.");
+      finishCloseRef.current();
+      return;
+    }
+
+    const animation = dialog.animate(
+      [
+        {
+          transform: "translate(0px, 0px)",
+          width: `${closingTarget.startWidth}px`,
+          height: `${closingTarget.startHeight}px`,
+        },
+        {
+          transform: `translate(${closingTarget.x}px, ${closingTarget.y}px)`,
+          width: `${closingTarget.width}px`,
+          height: `${closingTarget.height}px`,
+        },
+      ],
+      {
+        duration: TRANSITION.duration * 1000,
+        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+      },
+    );
+    animation.onfinish = () => {
+      animation.commitStyles();
+      finishCloseRef.current();
+    };
+
+    return () => animation.cancel();
+  }, [closingTarget, isClosing]);
   return (
     <MorphingDialog>
       <CodeDialogContext.Provider
-        value={{ expanded, setExpanded, isAnimating }}
+        value={{ expanded, setExpanded, isAnimating, isClosing }}
       >
         {children}
         <ModalOverlay
@@ -793,6 +888,7 @@ const CodeDialogProvider = ({
             if (!open) close();
           }}
           className="code-dialog-overlay fixed inset-0 z-50"
+          data-closing={isClosing ? "" : undefined}
         >
           <div
             aria-hidden="true"
@@ -806,13 +902,13 @@ const CodeDialogProvider = ({
               {expanded && (
                 <MorphingDialogContent
                   id={expanded.id}
-                  enabled={parallaxEnabled}
+                  enabled={parallaxEnabled && !isClosing}
                   managed
-                  className="prose prose-fluina flex size-full max-w-none flex-col overflow-hidden bg-transparent"
+                  className="prose prose-fluina flex size-full max-w-none flex-col overflow-visible bg-transparent"
                 >
                   <motion.div
-                    layout={!isAnimating}
-                    className="flex flex-1 flex-col"
+                    layout="position"
+                    className="flex min-h-0 min-w-0 flex-1 flex-col"
                   >
                     <CodeControls
                       code={expanded.code}
@@ -825,7 +921,10 @@ const CodeDialogProvider = ({
                           : undefined
                       }
                     />
-                    <pre className="my-0! flex-1 overflow-auto select-text **:select-text">
+                    <pre
+                      ref={expandedCodeRef}
+                      className="my-0! min-h-0 flex-1 select-text [--scroll-fade-size:2.5rem] **:select-text"
+                    >
                       <MarkdownCode
                         className={
                           expanded.language
@@ -1662,10 +1761,15 @@ export default function Ask() {
       setHasOlderMessages(oldest !== null && first !== null && oldest < first);
     };
 
-    const purge = () =>
-      runArchiveTask(async () => {
+    const purge = async () => {
+      try {
+        await syncServerClock(getApiUrl());
+      } catch (error) {
+        console.warn("Server clock sync before chat purge failed:", error);
+      }
+
+      return runArchiveTask(async () => {
         try {
-          await syncServerClock(getApiUrl()).catch(() => undefined);
           const sequences = await purgeExpiredChatTurns();
           if (sequences.length === 0) return;
 
@@ -1675,6 +1779,7 @@ export default function Ask() {
           console.warn("Expired chat purge failed:", error);
         }
       });
+    };
 
     // 他のタブでの削除を、このタブの画面にも反映する
     if (channel) {
@@ -1960,6 +2065,7 @@ export default function Ask() {
   //  ================================================================
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const submissionInProgressRef = useRef(false);
 
   const requestAssistantReply = useCallback(
     async (promptContent: string) => {
@@ -2272,12 +2378,23 @@ export default function Ask() {
             : { kind: "error", text: errorMessage },
         };
         if (!assistantMessagePersisted) {
-          try {
-            await appendQueuedMessage(failedMessage);
-            await refreshVisibleArchivePage();
-          } catch (archiveFailure) {
-            console.error("Failed to persist assistant error:", archiveFailure);
-            finishRevealingMessage(assistantMessageId);
+          const persistFailedMessage = async () => {
+            try {
+              await appendQueuedMessage(failedMessage);
+              await refreshVisibleArchivePage();
+            } catch (archiveFailure) {
+              console.error(
+                "Failed to persist assistant error:",
+                archiveFailure,
+              );
+              finishRevealingMessage(assistantMessageId);
+            }
+          };
+
+          if (isUserCancelled) {
+            void persistFailedMessage();
+          } else {
+            await persistFailedMessage();
           }
         }
         if (!reply.trim()) finishRevealingMessage(assistantMessageId);
@@ -2299,9 +2416,17 @@ export default function Ask() {
 
   const handleSubmit = async (e?: SyntheticEvent<HTMLFormElement>) => {
     if (e) e.preventDefault();
-    if (!hasInput || isLoading || !archiveReady) return;
+    const userPrompt = (editorRef.current?.innerText || value).trim();
+    if (
+      (!userPrompt && files.length === 0) ||
+      isLoading ||
+      submissionInProgressRef.current ||
+      !archiveReady
+    ) {
+      return;
+    }
 
-    const userPrompt = value.trim();
+    submissionInProgressRef.current = true;
     const userMessageId = generateId();
     const newUserMessage: Message = {
       id: userMessageId,
@@ -2318,53 +2443,62 @@ export default function Ask() {
     };
 
     try {
-      await appendQueuedMessage(newUserMessage);
-      await refreshVisibleArchivePage("smooth");
-    } catch (error) {
-      console.error("User message persistence failed:", error);
-      return;
-    }
-
-    setValue("");
-    if (editorRef.current) editorRef.current.innerText = "";
-    if (isMobile) editorRef.current?.blur();
-    setIsAdjusted(false);
-    setIsScrollable(false);
-    collapseComposer();
-    setFiles([]);
-
-    if (typeof window !== "undefined" && !navigator.onLine) {
       try {
-        await appendQueuedMessage({
-          id: `${userMessageId}-error`,
-          role: "assistant",
-          content: "",
-          notice: {
-            kind: "error",
-            text: "ネットワークに接続されていないため、接続環境を確認してください。",
-          },
-          timestamp: serverNow(),
-        });
+        await appendQueuedMessage(newUserMessage);
         await refreshVisibleArchivePage("smooth");
       } catch (error) {
-        console.error("Offline message persistence failed:", error);
+        console.error("User message persistence failed:", error);
+        return;
       }
-      return;
-    }
 
-    await requestAssistantReply(userPrompt);
+      setValue("");
+      if (editorRef.current) editorRef.current.innerText = "";
+      if (isMobile) editorRef.current?.blur();
+      setIsAdjusted(false);
+      setIsScrollable(false);
+      collapseComposer();
+      setFiles([]);
+
+      if (typeof window !== "undefined" && !navigator.onLine) {
+        try {
+          await appendQueuedMessage({
+            id: `${userMessageId}-error`,
+            role: "assistant",
+            content: "",
+            notice: {
+              kind: "error",
+              text: "ネットワークに接続されていないため、接続環境を確認してください。",
+            },
+            timestamp: serverNow(),
+          });
+          await refreshVisibleArchivePage("smooth");
+        } catch (error) {
+          console.error("Offline message persistence failed:", error);
+        }
+        return;
+      }
+
+      await requestAssistantReply(userPrompt);
+    } finally {
+      submissionInProgressRef.current = false;
+    }
   };
 
   const appendPromptAtLatest = useCallback(
     async (message: Message) => {
-      if (!archiveReady || isLoading) return;
+      if (!archiveReady || isLoading || submissionInProgressRef.current) {
+        return;
+      }
 
+      submissionInProgressRef.current = true;
       try {
         await appendQueuedMessage(message);
         await refreshVisibleArchivePage("smooth");
         await requestAssistantReply(message.content);
       } catch (error) {
         console.error("Appending a prompt to chat history failed:", error);
+      } finally {
+        submissionInProgressRef.current = false;
       }
     },
     [

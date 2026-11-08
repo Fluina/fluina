@@ -186,7 +186,8 @@
   --code-dialog-backdrop-filter: blur(1rem);
 }
 
-.code-dialog-overlay[data-exiting] .code-dialog-backdrop {
+.code-dialog-overlay[data-exiting] .code-dialog-backdrop,
+.code-dialog-overlay[data-closing] .code-dialog-backdrop {
   animation-name: code-dialog-backdrop-out;
 }
 

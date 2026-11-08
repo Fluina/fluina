@@ -349,10 +349,21 @@ test("renders and preserves a streamed code block with code controls", async ({
   await expect(turn.locator('[data-streamdown="code-block"]')).toHaveCount(0);
   const pre = turn.locator("pre");
   await expect(pre).toHaveCSS("overflow-x", "auto");
+  await expect(pre).toHaveCSS("border-bottom-left-radius", "16px");
+  await expect(pre).toHaveCSS("border-bottom-right-radius", "16px");
   await expect(pre.locator("../..")).toHaveCSS("border-radius", "16px");
   await expect(turn.getByRole("button", { name: "Save code" })).toBeEnabled();
   const header = pre.locator("..").locator("div").first();
   await expect(header).toHaveCSS("border-bottom-width", "1px");
+  const clippedFrame = pre.locator("xpath=ancestor::div[@data-code-frame]");
+  await expect(clippedFrame.locator(":scope > div > div")).toHaveCSS(
+    "overflow",
+    "hidden",
+  );
+  await expect(clippedFrame.locator(":scope > div > div")).toHaveCSS(
+    "border-radius",
+    "16px",
+  );
   const styling = await pre.evaluate((element) => {
     const before = getComputedStyle(element).paddingLeft;
     const prose = element.closest(".prose");
@@ -383,6 +394,144 @@ test("renders and preserves a streamed code block with code controls", async ({
     .poll(() => code.locator(".syntax-token").count(), { timeout: 30000 })
     .toBeGreaterThan(1);
   await expect(turn.getByRole("button", { name: "Copy code" })).toHaveCount(1);
+});
+
+test("keeps code text at a stable size while a streamed code block grows", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await mockAnswer(page, "```js\nconst value = 1;", true);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コード生成");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const code = page.locator("[data-chat-last-turn] pre code");
+  await expect(code).toContainText("const value = 1;");
+  await page.evaluate(() => {
+    const stream = window as Window & {
+      appendTestAnswer?: (chunk: string) => void;
+    };
+    stream.appendTestAnswer?.(
+      `${Array.from(
+        { length: 20 },
+        (_, index) => `\nconst item${index} = ${index};`,
+      ).join("")}\n\`\`\``,
+    );
+  });
+
+  const characterWidths = await code.evaluate(
+    (element) =>
+      new Promise<number[]>((resolve) => {
+        const samples: number[] = [];
+        const start = performance.now();
+        const sample = () => {
+          const text = document
+            .createTreeWalker(element, NodeFilter.SHOW_TEXT)
+            .nextNode();
+          if (text?.textContent) {
+            const range = document.createRange();
+            range.setStart(text, 0);
+            range.setEnd(text, Math.min(3, text.textContent.length));
+            samples.push(range.getBoundingClientRect().width);
+          }
+          if (performance.now() - start < 700) requestAnimationFrame(sample);
+          else resolve(samples);
+        };
+        requestAnimationFrame(sample);
+      }),
+  );
+
+  expect(characterWidths.length).toBeGreaterThan(2);
+  expect(
+    Math.max(...characterWidths) - Math.min(...characterWidths),
+  ).toBeLessThan(1);
+});
+
+test("supports horizontal and vertical edge scrolling in expanded code", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const longLine = `const value = ${"W".repeat(240)}`;
+  const code = [
+    "```text",
+    longLine,
+    ...Array.from({ length: 100 }, (_, index) => `line ${index}`),
+    "```",
+  ].join("\n");
+  await mockAnswer(page, code);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("長いコードをスクロール");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  const collapsedViewport = page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .locator("pre[data-scroll-edge-fade]");
+  await expect(collapsedViewport).toBeVisible();
+  const collapsedWidth = await collapsedViewport.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(collapsedWidth.scrollWidth).toBeGreaterThan(
+    collapsedWidth.clientWidth,
+  );
+  await expect(collapsedViewport).toHaveCSS("--scroll-fade-right", "1");
+  await collapsedViewport.click({
+    position: { x: collapsedWidth.clientWidth - 2, y: 20 },
+  });
+  await expect
+    .poll(() => collapsedViewport.evaluate((element) => element.scrollLeft))
+    .toBeGreaterThan(0);
+  await collapsedViewport.click({ position: { x: 2, y: 20 } });
+  await expect
+    .poll(() => collapsedViewport.evaluate((element) => element.scrollLeft))
+    .toBe(0);
+
+  await page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .getByRole("button", { name: "Expand code" })
+    .click();
+
+  const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
+  const viewport = dialog.locator("pre[data-scroll-edge-fade]");
+  await expect(viewport).toBeVisible();
+  const dimensions = await viewport.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    clientWidth: element.clientWidth,
+    scrollHeight: element.scrollHeight,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
+  expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
+
+  await viewport.click({
+    position: { x: dimensions.clientWidth / 2, y: dimensions.clientHeight - 2 },
+  });
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) => element.scrollTop + element.clientHeight),
+    )
+    .toBeGreaterThanOrEqual(dimensions.scrollHeight - 1);
+  await viewport.click({
+    position: { x: dimensions.clientWidth - 2, y: dimensions.clientHeight / 2 },
+  });
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) => element.scrollLeft + element.clientWidth),
+    )
+    .toBeGreaterThanOrEqual(dimensions.scrollWidth - 1);
+  await dialog.getByRole("button", { name: "Close expanded code" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(collapsedViewport).toHaveAttribute("data-scroll-edge-fade", "");
+  const restoredWidth = await collapsedViewport.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(restoredWidth.scrollWidth).toBeGreaterThan(restoredWidth.clientWidth);
+  await expect(collapsedViewport).toHaveCSS("--scroll-fade-right", "1");
 });
 
 test("reports clipboard failures without claiming a successful copy", async ({
@@ -419,6 +568,7 @@ test("reports clipboard failures without claiming a successful copy", async ({
 
 test("morphs the code block into and out of fullscreen", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -439,6 +589,9 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
     .locator("[data-chat-last-turn]")
     .last()
     .getByRole("button", { name: "Expand code" });
+  const sourceFrame = expand.locator("xpath=ancestor::div[@data-code-frame]");
+  const originBounds = await sourceFrame.boundingBox();
+  expect(originBounds).not.toBeNull();
   await page.evaluate(() => {
     const state = window as Window & {
       backdropSamples?: { opacity: number; blur: number }[];
@@ -469,6 +622,15 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
   });
   const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
   await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".prose-fluina")).toHaveCSS(
+    "overflow-x",
+    "visible",
+  );
+  await expect(
+    expand
+      .locator("xpath=ancestor::div[@data-code-frame]")
+      .locator(":scope > div"),
+  ).toHaveCSS("overflow-x", "visible");
   const samples = await dialog
     .locator("pre")
     .locator("../..")
@@ -584,27 +746,114 @@ test("morphs the code block into and out of fullscreen", async ({ page }) => {
   expect(
     await page.evaluate(() => window.getSelection()?.toString()),
   ).toBeTruthy();
+
+  await page.evaluate(() => {
+    const state = window as Window & {
+      backdropSamples?: { opacity: number; blur: number }[];
+    };
+    state.backdropSamples = [];
+  });
+  await page.evaluate(() => {
+    const state = window as Window & {
+      codeCloseSamples?: {
+        left: number;
+        top: number;
+        frame: number;
+        height: number;
+        text: number;
+      }[];
+      stopCodeCloseSampling?: boolean;
+    };
+    state.codeCloseSamples = [];
+    state.stopCodeCloseSampling = false;
+    const sample = () => {
+      const content = document.querySelector<HTMLElement>(
+        '[aria-label="Fullscreen Code View"] .prose-fluina',
+      );
+      if (content) {
+        const code = content.querySelector("code");
+        const text =
+          code &&
+          document.createTreeWalker(code, NodeFilter.SHOW_TEXT).nextNode();
+        let textWidth = 0;
+        if (text?.textContent) {
+          const range = document.createRange();
+          range.setStart(text, 0);
+          range.setEnd(text, Math.min(3, text.textContent.length));
+          textWidth = range.getBoundingClientRect().width;
+        }
+        state.codeCloseSamples?.push({
+          left: content.getBoundingClientRect().left,
+          top: content.getBoundingClientRect().top,
+          frame: content.getBoundingClientRect().width,
+          height: content.getBoundingClientRect().height,
+          text: textWidth,
+        });
+      }
+      if (!state.stopCodeCloseSampling) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
   await dialog.getByRole("button", { name: "Close expanded code" }).click();
+  await expect(dialog).toBeVisible();
   await expect(dialog).toHaveCount(0);
-  const closingSizes = await expand
-    .locator("xpath=ancestor::div[@data-code-frame]")
-    .locator(":scope > div")
-    .evaluate(
-      (element) =>
-        new Promise<number[]>((resolve) => {
-          const samples: number[] = [];
-          const start = performance.now();
-          const sample = () => {
-            samples.push(element.getBoundingClientRect().width);
-            if (performance.now() - start < 800) requestAnimationFrame(sample);
-            else resolve(samples);
-          };
-          requestAnimationFrame(sample);
-        }),
-    );
-  expect(Math.max(...closingSizes) - Math.min(...closingSizes)).toBeGreaterThan(
-    20,
+  const closeBackdropSamples = await page.evaluate(
+    () =>
+      (
+        window as Window & {
+          backdropSamples?: { opacity: number; blur: number }[];
+        }
+      ).backdropSamples ?? [],
   );
+  expect(closeBackdropSamples.length).toBeGreaterThan(2);
+  expect(
+    Math.max(...closeBackdropSamples.map((sample) => sample.opacity)) -
+      Math.min(...closeBackdropSamples.map((sample) => sample.opacity)),
+  ).toBeGreaterThan(0.1);
+  expect(
+    Math.max(...closeBackdropSamples.map((sample) => sample.blur)) -
+      Math.min(...closeBackdropSamples.map((sample) => sample.blur)),
+  ).toBeGreaterThan(1);
+  const closeWidths = await page.evaluate(() => {
+    const state = window as Window & {
+      codeCloseSamples?: {
+        left: number;
+        top: number;
+        frame: number;
+        height: number;
+        text: number;
+      }[];
+      stopCodeCloseSampling?: boolean;
+    };
+    state.stopCodeCloseSampling = true;
+    return state.codeCloseSamples ?? [];
+  });
+  expect(closeWidths.length).toBeGreaterThan(2);
+  const closingFrameSizes = closeWidths.map((sample) => sample.frame);
+  const closingTextSizes = closeWidths
+    .map((sample) => sample.text)
+    .filter((size) => size > 0);
+  expect(
+    Math.max(...closingFrameSizes) - Math.min(...closingFrameSizes),
+  ).toBeGreaterThan(20);
+  expect(closingTextSizes.length).toBeGreaterThan(2);
+  expect(
+    Math.max(...closingTextSizes) - Math.min(...closingTextSizes),
+  ).toBeLessThan(1);
+  const closingEnd = closeWidths.at(-1);
+  expect(closingEnd).toBeDefined();
+  expect(
+    Math.abs((closingEnd?.left ?? 0) - (originBounds?.x ?? 0)),
+  ).toBeLessThan(3);
+  expect(
+    Math.abs((closingEnd?.top ?? 0) - (originBounds?.y ?? 0)),
+  ).toBeLessThan(3);
+  expect(
+    Math.abs((closingEnd?.frame ?? 0) - (originBounds?.width ?? 0)),
+  ).toBeLessThan(3);
+  expect(
+    Math.abs((closingEnd?.height ?? 0) - (originBounds?.height ?? 0)),
+  ).toBeLessThan(3);
   await expect(expand).toBeFocused();
   await page.evaluate(() => {
     (
