@@ -1,5 +1,6 @@
-import { Value } from "@sinclair/typebox/value";
-import { t } from "elysia";
+import { Manifest, t } from "elysia";
+import type { Static } from "typebox/type";
+import { Value } from "typebox/value";
 
 const envSchema = t.Object({
   NODE_ENV: t.Optional(
@@ -23,22 +24,31 @@ const envSchema = t.Object({
   R2_UPLOAD_BUCKET: t.Optional(t.String({ minLength: 1 })),
 });
 
+type Environment = Static<typeof envSchema>;
+
 const checkEnv = () => {
-  if (!Value.Check(envSchema, process.env)) {
-    const errors = [...Value.Errors(envSchema, process.env)];
+  const isAotBuild = Manifest.isAotBuildEnv();
+  const validatedEnv = Value.Default(envSchema, process.env) as Environment;
+  if (isAotBuild && !validatedEnv.OPENROUTER_API_KEY) {
+    validatedEnv.OPENROUTER_API_KEY = "aot-build-placeholder";
+  }
+
+  if (!isAotBuild && !Value.Check(envSchema, validatedEnv)) {
+    const errors = [...Value.Errors(envSchema, validatedEnv)];
 
     console.error("Environment Variable Settings are Invalid:");
 
     for (const error of errors) {
-      console.error(`  - ${error.path}: ${error.message}`);
+      console.error(`  - ${error.instancePath}: ${error.message}`);
     }
 
     process.exit(1);
   }
 
   if (
+    !isAotBuild &&
     Boolean(process.env.MANIM_RENDERER_URL) !==
-    Boolean(process.env.MANIM_RENDERER_TOKEN)
+      Boolean(process.env.MANIM_RENDERER_TOKEN)
   ) {
     console.error(
       "MANIM_RENDERER_URL and MANIM_RENDERER_TOKEN must be configured together.",
@@ -53,6 +63,7 @@ const checkEnv = () => {
     "R2_UPLOAD_BUCKET",
   ];
   if (
+    !isAotBuild &&
     r2UploadSettings.some((key) => process.env[key]) &&
     r2UploadSettings.some((key) => !process.env[key])
   ) {
@@ -62,7 +73,7 @@ const checkEnv = () => {
     process.exit(1);
   }
 
-  return Value.Cast(envSchema, process.env);
+  return validatedEnv;
 };
 
 export const env = checkEnv();

@@ -1,4 +1,4 @@
-import { Value } from "@sinclair/typebox/value";
+import { Value } from "typebox/value";
 import { env } from "../config/env";
 import { type VisualScene, VisualSceneSchema } from "../modules/ask/schema";
 

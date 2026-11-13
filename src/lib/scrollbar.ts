@@ -1,11 +1,14 @@
 import { type DependencyList, type RefObject, useEffect, useRef } from "react";
 
 export type ScrollAxis = "x" | "y" | "both" | "none";
+export type ScrollEdge = "top" | "bottom" | "left" | "right";
 
 export interface UseNativeScrollOptions<T extends HTMLElement = HTMLElement> {
   axis: ScrollAxis;
+  scrollBehavior?: "auto" | "smooth";
   enableEdgeFade?: boolean;
   elementRef?: RefObject<T | null>;
+  onEdgeClick?: (edge: ScrollEdge) => boolean;
   onScroll?: (viewport: HTMLElement) => void;
   onInit?: (viewport: HTMLElement) => (() => void) | undefined;
 }
@@ -27,7 +30,11 @@ function getOverflowClasses(axis: ScrollAxis) {
   }
 }
 
-function applyOverflow(host: HTMLElement, axis: ScrollAxis) {
+function applyOverflow(
+  host: HTMLElement,
+  axis: ScrollAxis,
+  scrollBehavior: "auto" | "smooth",
+) {
   const classes = getOverflowClasses(axis);
   const addedClasses = classes.filter(
     (className) => !host.classList.contains(className),
@@ -45,7 +52,7 @@ function applyOverflow(host: HTMLElement, axis: ScrollAxis) {
   host.classList.add(...addedClasses);
   host.style.setProperty("overflow-x", overflowX);
   host.style.setProperty("overflow-y", overflowY);
-  host.style.setProperty("scroll-behavior", "auto");
+  host.style.setProperty("scroll-behavior", scrollBehavior);
 
   return () => {
     host.classList.remove(...addedClasses);
@@ -87,8 +94,14 @@ function updateScrollFadeVariables(
       Math.abs(anchor.getBoundingClientRect().top - viewportTop) <=
       anchorTolerance,
   );
+  const isStickyHeaderActive = viewport.hasAttribute(
+    "data-sticky-header-active",
+  );
   const fadeValues = {
-    top: canScrollY && scrollTop > 1 && !isAtTopAnchor ? 1 : 0,
+    top:
+      canScrollY && scrollTop > 1 && !isAtTopAnchor && !isStickyHeaderActive
+        ? 1
+        : 0,
     bottom: canScrollY && scrollTop < maxScrollTop - 1 ? 1 : 0,
     left: canScrollX && scrollLeft > 1 ? 1 : 0,
     right: canScrollX && scrollLeft < maxScrollLeft - 1 ? 1 : 0,
@@ -165,7 +178,7 @@ function observeThroughContents(parent: HTMLElement, observer: ResizeObserver) {
 
 type FadeEdge = "top" | "bottom" | "left" | "right";
 
-function resolveFadeSize(host: HTMLElement): number {
+export function getScrollFadeSize(host: HTMLElement): number {
   const raw = getComputedStyle(host)
     .getPropertyValue("--scroll-fade-size")
     .trim();
@@ -183,7 +196,11 @@ function resolveFadeSize(host: HTMLElement): number {
   return value;
 }
 
-function setupFadeInteraction(host: HTMLElement, viewport: HTMLElement) {
+function setupFadeInteraction(
+  host: HTMLElement,
+  viewport: HTMLElement,
+  onEdgeClick?: (edge: ScrollEdge) => boolean,
+) {
   const getEdge = (event: PointerEvent | MouseEvent): FadeEdge | null => {
     const rect = viewport.getBoundingClientRect();
     const left = rect.left + viewport.clientLeft;
@@ -199,7 +216,7 @@ function setupFadeInteraction(host: HTMLElement, viewport: HTMLElement) {
       return null;
     }
 
-    const size = resolveFadeSize(host) / 2;
+    const size = getScrollFadeSize(host) / 2;
     const candidates: [FadeEdge, number][] = [];
     const active = (name: string) =>
       host.style.getPropertyValue(`--scroll-fade-${name}`) === "1";
@@ -218,7 +235,7 @@ function setupFadeInteraction(host: HTMLElement, viewport: HTMLElement) {
 
   const playRipple = (edge: FadeEdge, event: MouseEvent) => {
     const rect = viewport.getBoundingClientRect();
-    const size = resolveFadeSize(host) / 2;
+    const size = getScrollFadeSize(host) / 2;
     const left = rect.left + viewport.clientLeft;
     const top = rect.top + viewport.clientTop;
     const width = viewport.clientWidth;
@@ -299,6 +316,7 @@ function setupFadeInteraction(host: HTMLElement, viewport: HTMLElement) {
     event.preventDefault();
     event.stopPropagation();
     playRipple(edge, event);
+    if (onEdgeClick?.(edge)) return;
     viewport.scrollTo({
       top:
         edge === "top"
@@ -330,7 +348,11 @@ function setupFadeInteraction(host: HTMLElement, viewport: HTMLElement) {
   };
 }
 
-function setupEdgeFade(host: HTMLElement, axis: ScrollAxis) {
+function setupEdgeFade(
+  host: HTMLElement,
+  axis: ScrollAxis,
+  onEdgeClick?: (edge: ScrollEdge) => boolean,
+) {
   host.setAttribute("data-scroll-edge-fade", "");
   const edgeOverlay = document.createElement("div");
   const followsCodeContent =
@@ -345,6 +367,7 @@ function setupEdgeFade(host: HTMLElement, axis: ScrollAxis) {
     if (!followsCodeContent) syncEdgeOverlayRect(host, edgeOverlay);
     updateScrollFadeVariables(host, host, axis);
   };
+  const handleStickyHeaderChange = () => update();
   const resizeObserver = new ResizeObserver(update);
   resizeObserver.observe(host);
   observeThroughContents(host, resizeObserver);
@@ -366,9 +389,10 @@ function setupEdgeFade(host: HTMLElement, axis: ScrollAxis) {
     subtree: true,
   });
 
-  const cleanupInteraction = setupFadeInteraction(host, host);
+  const cleanupInteraction = setupFadeInteraction(host, host, onEdgeClick);
   update();
   const frame = requestAnimationFrame(update);
+  host.addEventListener("scrollfadeupdate", handleStickyHeaderChange);
   const visualViewport = window.visualViewport;
   document.addEventListener("scroll", update, true);
   window.addEventListener("resize", update);
@@ -380,6 +404,7 @@ function setupEdgeFade(host: HTMLElement, axis: ScrollAxis) {
     cleanup: () => {
       cancelAnimationFrame(frame);
       cleanupInteraction();
+      host.removeEventListener("scrollfadeupdate", handleStickyHeaderChange);
       document.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
       visualViewport?.removeEventListener("scroll", update);
@@ -395,8 +420,10 @@ function setupEdgeFade(host: HTMLElement, axis: ScrollAxis) {
 export function useNativeScroll<T extends HTMLElement = HTMLDivElement>(
   {
     axis,
+    scrollBehavior = "auto",
     enableEdgeFade = true,
     elementRef: externalRef,
+    onEdgeClick,
     onScroll,
     onInit,
   }: UseNativeScrollOptions<T>,
@@ -404,11 +431,13 @@ export function useNativeScroll<T extends HTMLElement = HTMLDivElement>(
 ): UseNativeScrollResult<T> {
   const internalRef = useRef<T>(null);
   const elementRef = externalRef ?? internalRef;
+  const onEdgeClickRef = useRef(onEdgeClick);
   const onScrollRef = useRef(onScroll);
   const onInitRef = useRef(onInit);
   const initCleanupRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => {
+    onEdgeClickRef.current = onEdgeClick;
     onScrollRef.current = onScroll;
     onInitRef.current = onInit;
   });
@@ -417,8 +446,14 @@ export function useNativeScroll<T extends HTMLElement = HTMLDivElement>(
     const host = elementRef.current;
     if (!host) return;
 
-    const restoreOverflow = applyOverflow(host, axis);
-    const edgeFade = enableEdgeFade ? setupEdgeFade(host, axis) : undefined;
+    const restoreOverflow = applyOverflow(host, axis, scrollBehavior);
+    const edgeFade = enableEdgeFade
+      ? setupEdgeFade(
+          host,
+          axis,
+          (edge) => onEdgeClickRef.current?.(edge) ?? false,
+        )
+      : undefined;
     const initializeCallbacks = () => {
       initCleanupRef.current?.();
       initCleanupRef.current = onInitRef.current?.(host);
@@ -439,7 +474,7 @@ export function useNativeScroll<T extends HTMLElement = HTMLDivElement>(
       restoreOverflow();
     };
     // deps lets conditionally mounted hosts be re-attached
-  }, [axis, enableEdgeFade, elementRef, ...deps]);
+  }, [axis, scrollBehavior, enableEdgeFade, elementRef, ...deps]);
 
   return { elementRef };
 }

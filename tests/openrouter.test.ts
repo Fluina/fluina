@@ -13,6 +13,7 @@ const { generateAskResponse, generateHistorySummary } = await import(
   "../src/services/openrouter"
 );
 const { renderVisualScene } = await import("../src/services/manim-renderer");
+const { app } = await import("../src/app");
 const { askController } = await import("../src/modules/ask/controller");
 let restoreFetch = () => {};
 let restoreConsole = () => {};
@@ -25,6 +26,15 @@ afterEach(() => {
   restoreConsole = () => {};
   restoreR2();
   restoreR2 = () => {};
+});
+
+test("composes the Elysia v2 API under the API prefix", async () => {
+  const response = await app.handle(
+    new Request("http://localhost/api/ask/time"),
+  );
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ now: expect.any(Number) });
 });
 
 test("streams OpenRouter chat completion deltas", async () => {

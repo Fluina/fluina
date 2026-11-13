@@ -5,6 +5,7 @@ import {
   AudioLines,
   Camera,
   Check,
+  ChevronDown,
   Copy,
   Delete,
   Download,
@@ -91,7 +92,7 @@ import {
 import { saveCodeFile } from "@/lib/code-file";
 import { getDragOpacity, THEME, TRANSITION } from "@/lib/motion";
 import { useIsMobile, useOS } from "@/lib/os";
-import { useNativeScroll } from "@/lib/scrollbar";
+import { getScrollFadeSize, useNativeScroll } from "@/lib/scrollbar";
 
 const PLACEHOLDERS = [
   "Fluinaに訊いてみて！",
@@ -154,11 +155,15 @@ const EMPTY_ASSISTANT_MESSAGE =
 type ChatScrollBehavior = "instant" | "smooth";
 const mathPlugin = createMathPlugin({ singleDollarTextMath: true });
 
-const getChatScrollTarget = (viewport: HTMLElement) => {
+const getChatScrollTarget = (
+  viewport: HTMLElement,
+  followContentBottom = false,
+) => {
   const maxScrollTop = Math.max(
     viewport.scrollHeight - viewport.clientHeight,
     0,
   );
+  if (followContentBottom) return maxScrollTop;
   const lastTurn = viewport.querySelector<HTMLElement>("[data-chat-last-turn]");
   if (!lastTurn) return maxScrollTop;
 
@@ -352,19 +357,128 @@ const MarkdownParagraph = ({
     <p {...props}>{children}</p>
   );
 
+const stickyHeadersByHost = new WeakMap<HTMLElement, Set<HTMLElement>>();
+const findVerticalScrollHost = (element: HTMLElement) => {
+  let parent = element.parentElement;
+  while (parent && parent !== document.body) {
+    const overflowY = getComputedStyle(parent).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll") return parent;
+    parent = parent.parentElement;
+  }
+  return null;
+};
+const setStickyHeaderActive = (
+  host: HTMLElement,
+  header: HTMLElement,
+  isActive: boolean,
+) => {
+  const activeHeaders = stickyHeadersByHost.get(host) ?? new Set<HTMLElement>();
+  const wasActive = activeHeaders.has(header);
+  if (isActive) activeHeaders.add(header);
+  else activeHeaders.delete(header);
+
+  if (activeHeaders.size > 0) {
+    stickyHeadersByHost.set(host, activeHeaders);
+    host.setAttribute("data-sticky-header-active", "");
+  } else {
+    stickyHeadersByHost.delete(host);
+    host.removeAttribute("data-sticky-header-active");
+  }
+
+  if (wasActive !== isActive) {
+    host.dispatchEvent(new Event("scrollfadeupdate"));
+  }
+};
+
 const MarkdownTable = ({
   children,
   node: _node,
   ...props
 }: ComponentPropsWithoutRef<"table"> & { node?: unknown }) => {
-  const { elementRef } = useNativeScroll<HTMLElement>({ axis: "x" });
+  const { parallaxEnabled } = usePreferences();
+  const { elementRef } = useNativeScroll<HTMLElement>({
+    axis: "x",
+    scrollBehavior: parallaxEnabled ? "smooth" : "auto",
+  });
+  useEffect(() => {
+    const section = elementRef.current;
+    if (!section) return;
+    const host = findVerticalScrollHost(section);
+    if (!host) return;
+
+    let header: HTMLElement | null = null;
+    let originalTransform = "";
+    let appliedOffset = 0;
+    let frame = 0;
+    const update = () => {
+      const nextHeader = section.querySelector<HTMLElement>("thead");
+      if (header !== nextHeader) {
+        if (header) {
+          header.style.transform = originalTransform;
+          setStickyHeaderActive(host, header, false);
+        }
+        header = nextHeader;
+        originalTransform = header?.style.transform ?? "";
+        appliedOffset = 0;
+      }
+      if (!header) return;
+
+      const hostBounds = host.getBoundingClientRect();
+      const viewportTop = hostBounds.top + host.clientTop;
+      const sectionBounds = section.getBoundingClientRect();
+      const headerBounds = header.getBoundingClientRect();
+      const headerTop = headerBounds.top - appliedOffset;
+      const maxOffset = Math.max(
+        sectionBounds.bottom - headerTop - headerBounds.height,
+        0,
+      );
+      const offset = Math.min(Math.max(viewportTop - headerTop, 0), maxOffset);
+
+      appliedOffset = offset;
+      header.style.transform = offset
+        ? `${originalTransform} translateY(${offset}px)`.trim()
+        : originalTransform;
+      setStickyHeaderActive(host, header, offset > 1);
+    };
+    const scheduleUpdate = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+    const resizeObserver = new ResizeObserver(scheduleUpdate);
+    resizeObserver.observe(section);
+    const mutationObserver = new MutationObserver(scheduleUpdate);
+    mutationObserver.observe(section, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+
+    host.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    update();
+
+    return () => {
+      host.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      cancelAnimationFrame(frame);
+      if (header) {
+        header.style.transform = originalTransform;
+        setStickyHeaderActive(host, header, false);
+      }
+    };
+  }, [elementRef]);
 
   return (
-    <div className="relative mx-0.5 max-w-full rounded-2xl border border-back-5 has-[>section:focus-visible]:ring-2 has-[>section:focus-visible]:ring-fore-1 all">
+    <div className="relative mx-0.5 rounded-2xl border border-back-5 has-[>section:focus-visible]:ring-2 has-[>section:focus-visible]:ring-fore-1 all">
       <section
         ref={elementRef}
         aria-label="表"
-        className="w-full max-w-full rounded-[inherit] outline-none [&_table]:my-0 [&_thead]:bg-back-2 [&_thead_th]:py-2 [&_th]:px-4 [&_th]:align-middle [&_td]:px-4 [&_td]:align-middle"
+        className="w-full rounded-[inherit] outline-none [&_table]:my-0 [&_thead]:relative [&_thead]:z-10 [&_thead]:bg-back-2 [&_thead_th]:bg-back-2 [&_thead_th]:py-2 [&_th]:px-4 [&_th]:align-middle [&_th]:whitespace-nowrap [&_td]:px-4 [&_td]:align-middle [&_td]:whitespace-nowrap"
       >
         <table {...props}>{children}</table>
       </section>
@@ -586,17 +700,64 @@ const isBundledLanguage = (
   languages: Record<BundledLanguage, unknown>,
 ): language is BundledLanguage => Object.hasOwn(languages, language);
 
+const getLanguageTitle = (language?: string) => {
+  if (!language) return "Text";
+  const normalized = language.toLowerCase();
+  const formalNames: Record<string, string> = {
+    c: "C",
+    "c#": "C#",
+    "c++": "C++",
+    cs: "C#",
+    cpp: "C++",
+    csharp: "C#",
+    css: "CSS",
+    cxx: "C++",
+    fsharp: "F#",
+    html: "HTML",
+    javascript: "JavaScript",
+    js: "JavaScript",
+    json: "JSON",
+    md: "Markdown",
+    markdown: "Markdown",
+    objectivec: "Objective-C",
+    ocaml: "OCaml",
+    php: "PHP",
+    ps1: "PowerShell",
+    plaintext: "Text",
+    powershell: "PowerShell",
+    py: "Python",
+    bash: "Bash",
+    sql: "SQL",
+    text: "Text",
+    ts: "TypeScript",
+    typescript: "TypeScript",
+    xml: "XML",
+    yml: "YAML",
+    yaml: "YAML",
+  };
+  return (
+    formalNames[normalized] ??
+    `${language.charAt(0).toUpperCase()}${language.slice(1)}`
+  );
+};
+
+type CodeLineControl = "number" | "fold" | "expand";
+const EMPTY_COLLAPSED_LINES: ReadonlySet<number> = new Set();
+
 const MarkdownCode = ({
   node: _node,
   children,
   className,
   lineNumbers = false,
+  codeBlockId,
   ...props
 }: ComponentPropsWithoutRef<"code"> & {
   node?: unknown;
   lineNumbers?: boolean;
+  codeBlockId?: string;
 }) => {
   const dialog = useContext(CodeDialogContext);
+  const { parallaxEnabled } = usePreferences();
   const isAnimating = dialog?.isAnimating ?? false;
   const language = className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
   const code = markdownText(children);
@@ -651,42 +812,426 @@ const MarkdownCode = ({
     | undefined = lineNumbers
     ? { "--code-line-number-width": `${String(codeLines.length).length}ch` }
     : undefined;
+  const [localCollapsedLines, setLocalCollapsedLines] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const collapsedLines =
+    codeBlockId && dialog
+      ? (dialog.collapsedCodeBlocks.get(codeBlockId) ?? EMPTY_COLLAPSED_LINES)
+      : localCollapsedLines;
+  const setCollapsedLines: React.Dispatch<React.SetStateAction<Set<number>>> = (
+    update,
+  ) => {
+    if (!codeBlockId || !dialog) {
+      setLocalCollapsedLines(update);
+      return;
+    }
+    dialog.setCollapsedCodeBlocks((current) => {
+      const currentLines = new Set(current.get(codeBlockId) ?? []);
+      const nextLines =
+        typeof update === "function" ? update(currentLines) : update;
+      const next = new Map(current);
+      if (nextLines.size === 0) next.delete(codeBlockId);
+      else next.set(codeBlockId, nextLines);
+      return next;
+    });
+  };
+  const [codeControlTabStop, setCodeControlTabStop] = useState<{
+    lineIndex: number;
+    control: CodeLineControl;
+  }>({ lineIndex: 0, control: "number" });
+  const selectionAnchor = useRef<number | null>(null);
+  const selectionEnd = useRef<number | null>(null);
+  const selectionWasDragged = useRef(false);
+  const codeRef = useRef<HTMLElement>(null);
+  const lineIndents = codeLines.map(
+    (line) => line.match(/^[\t ]*/)?.[0].replace(/\t/g, "    ").length ?? 0,
+  );
+  const foldEndByLine = new Map<number, number>();
+  for (let lineIndex = 0; lineIndex < codeLines.length - 1; lineIndex += 1) {
+    if (codeLines[lineIndex].trim().length === 0) continue;
+    let firstChild = lineIndex + 1;
+    while (
+      firstChild < codeLines.length &&
+      codeLines[firstChild].trim().length === 0
+    ) {
+      firstChild += 1;
+    }
+    if (
+      firstChild >= codeLines.length ||
+      lineIndents[firstChild] <= lineIndents[lineIndex]
+    ) {
+      continue;
+    }
+    let end = firstChild;
+    while (
+      end + 1 < codeLines.length &&
+      (codeLines[end + 1].trim().length === 0 ||
+        lineIndents[end + 1] > lineIndents[lineIndex])
+    ) {
+      end += 1;
+    }
+    foldEndByLine.set(lineIndex, end);
+  }
+  const visibleLineIndices: number[] = [];
+  for (let lineIndex = 0; lineIndex < codeLines.length; ) {
+    visibleLineIndices.push(lineIndex);
+    const foldEnd = foldEndByLine.get(lineIndex);
+    lineIndex =
+      foldEnd !== undefined && collapsedLines.has(lineIndex)
+        ? foldEnd + 1
+        : lineIndex + 1;
+  }
+  const getCodeLineControls = (lineIndex: number): CodeLineControl[] => [
+    "number",
+    ...(foldEndByLine.has(lineIndex) ? ["fold" as const] : []),
+    ...(collapsedLines.has(lineIndex) ? ["expand" as const] : []),
+  ];
+  const validTabStop =
+    visibleLineIndices.includes(codeControlTabStop.lineIndex) &&
+    getCodeLineControls(codeControlTabStop.lineIndex).includes(
+      codeControlTabStop.control,
+    )
+      ? codeControlTabStop
+      : { lineIndex: visibleLineIndices[0] ?? 0, control: "number" as const };
+  const focusCodeControl = (lineIndex: number, control: CodeLineControl) => {
+    codeRef.current
+      ?.querySelector<HTMLButtonElement>(
+        `[data-line-index="${lineIndex}"] [data-code-line-control="${control}"]`,
+      )
+      ?.focus();
+  };
+  const scrollCodeLineIntoView = (lineIndex: number) => {
+    const row = codeRef.current?.querySelector<HTMLElement>(
+      `[data-line-index="${lineIndex}"]`,
+    );
+    if (!row) return;
+    const rowBounds = row.getBoundingClientRect();
+    let parent = row.parentElement;
+    while (parent && parent !== document.body) {
+      const overflowY = getComputedStyle(parent).overflowY;
+      if (
+        (overflowY === "auto" || overflowY === "scroll") &&
+        parent.scrollHeight > parent.clientHeight
+      ) {
+        const viewportBounds = parent.getBoundingClientRect();
+        const viewportTop = viewportBounds.top + parent.clientTop;
+        const viewportBottom = viewportTop + parent.clientHeight;
+        const scrollDelta =
+          rowBounds.top < viewportTop
+            ? rowBounds.top - viewportTop
+            : rowBounds.bottom > viewportBottom
+              ? rowBounds.bottom - viewportBottom
+              : 0;
+        if (scrollDelta !== 0) {
+          parent.scrollTo({
+            top: parent.scrollTop + scrollDelta,
+            behavior: parallaxEnabled ? "smooth" : "instant",
+          });
+        }
+        return;
+      }
+      parent = parent.parentElement;
+    }
+  };
+  const navigateCodeControls = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    lineIndex: number,
+    control: CodeLineControl,
+  ) => {
+    const horizontal = event.key === "ArrowLeft" || event.key === "ArrowRight";
+    const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
+    if (!horizontal && !vertical) return;
+    event.preventDefault();
+
+    let targetLine = lineIndex;
+    let targetControl: CodeLineControl | undefined;
+    if (horizontal) {
+      const controls = getCodeLineControls(lineIndex);
+      const controlIndex = controls.indexOf(control);
+      targetControl =
+        controls[controlIndex + (event.key === "ArrowRight" ? 1 : -1)];
+    } else {
+      const rowIndex = visibleLineIndices.indexOf(lineIndex);
+      const nextRowIndex = rowIndex + (event.key === "ArrowDown" ? 1 : -1);
+      targetLine = visibleLineIndices[nextRowIndex] ?? lineIndex;
+      const controls = getCodeLineControls(targetLine);
+      targetControl = controls.includes(control) ? control : "number";
+    }
+
+    if (targetControl) focusCodeControl(targetLine, targetControl);
+  };
+  const selectLines = (startLine: number, endLine: number) => {
+    const codeElement = codeRef.current;
+    if (!codeElement) return;
+    const rows = Array.from(
+      codeElement.querySelectorAll<HTMLElement>(".code-line"),
+    );
+    const startRow = rows.find(
+      (row) => Number(row.dataset.lineIndex) === startLine,
+    );
+    const endRow = rows.find(
+      (row) => Number(row.dataset.lineIndex) === endLine,
+    );
+    const startContent = startRow?.querySelector(".code-line-content");
+    const endContent = endRow?.querySelector(".code-line-content");
+    if (!startContent || !endContent) return;
+    const range = document.createRange();
+    range.selectNodeContents(startContent);
+    range.setEnd(endContent, endContent.childNodes.length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  };
+  const startSelection = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.button !== 0 || !(event.target instanceof Element)) return;
+    const lineNumber =
+      event.target.closest<HTMLButtonElement>(".code-line-number");
+    const line = lineNumber?.closest<HTMLElement>(".code-line");
+    const lineIndex = Number(line?.dataset.lineIndex);
+    if (!lineNumber || !Number.isInteger(lineIndex)) return;
+    event.preventDefault();
+    selectionAnchor.current = lineIndex;
+    selectionEnd.current = lineIndex;
+    selectionWasDragged.current = false;
+    selectLines(lineIndex, lineIndex);
+    lineNumber.setPointerCapture(event.pointerId);
+  };
+  const extendSelection = (event: React.PointerEvent<HTMLElement>) => {
+    const anchor = selectionAnchor.current;
+    if (anchor === null) return;
+    const targetLine = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>(".code-line");
+    const line = Number(targetLine?.dataset.lineIndex);
+    if (Number.isInteger(line) && targetLine) {
+      if (line !== anchor) selectionWasDragged.current = true;
+      selectionEnd.current = line;
+      selectLines(Math.min(anchor, line), Math.max(anchor, line));
+    }
+  };
+  const endSelection = () => {
+    const anchor = selectionAnchor.current;
+    const end = selectionEnd.current;
+    if (anchor !== null && end !== null) {
+      requestAnimationFrame(() =>
+        selectLines(Math.min(anchor, end), Math.max(anchor, end)),
+      );
+    }
+    selectionAnchor.current = null;
+    selectionEnd.current = null;
+  };
 
   return (
     <code
       {...props}
+      ref={codeRef}
       className={className}
       data-code-line-numbers={lineNumbers ? "" : undefined}
       style={lineNumberStyle}
+      onPointerDownCapture={startSelection}
+      onPointerMove={extendSelection}
+      onPointerUp={endSelection}
+      onPointerCancel={endSelection}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setCodeControlTabStop({
+            lineIndex: visibleLineIndices[0] ?? 0,
+            control: "number",
+          });
+        }
+      }}
     >
       {lineNumbers ? (
-        codeLines.map((line, lineIndex) => {
-          const tokens = lines?.[lineIndex]?.tokens;
-          const tokenLength =
-            tokens?.reduce(
-              (length, token) => length + token.content.length,
-              0,
-            ) ?? 0;
-          return (
-            <Fragment key={`${lineIndex}:${line}`}>
-              <span className="code-line" data-line-number={lineIndex + 1}>
-                {tokens?.map((token) => (
-                  <span
-                    key={token.offset}
-                    className="syntax-token"
-                    style={token.htmlStyle}
+        <AnimatePresence initial={false}>
+          {visibleLineIndices.map((lineIndex, visibleIndex) => {
+            const line = codeLines[lineIndex];
+            const tokens = lines?.[lineIndex]?.tokens;
+            const tokenLength =
+              tokens?.reduce(
+                (length, token) => length + token.content.length,
+                0,
+              ) ?? 0;
+            const foldEnd = foldEndByLine.get(lineIndex);
+            const isCollapsed =
+              foldEnd !== undefined && collapsedLines.has(lineIndex);
+            const previousLine = visibleLineIndices[visibleIndex - 1];
+            const nextLine = visibleLineIndices[visibleIndex + 1];
+            const joinsPrevious =
+              previousLine !== undefined &&
+              foldEndByLine.has(previousLine) &&
+              collapsedLines.has(previousLine);
+            const joinsNext =
+              nextLine !== undefined &&
+              foldEndByLine.has(nextLine) &&
+              collapsedLines.has(nextLine);
+            const collapsedBackgroundRadius =
+              joinsPrevious && joinsNext
+                ? "rounded-t-none rounded-b-none"
+                : joinsPrevious
+                  ? "rounded-t-none rounded-b-xl"
+                  : joinsNext
+                    ? "rounded-t-xl rounded-b-none"
+                    : "rounded-4xl";
+            return (
+              <motion.span
+                key={lineIndex}
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={THEME}
+                className="code-line isolate rounded-4xl"
+                style={{
+                  minHeight: 0,
+                  paddingLeft: "calc(var(--code-line-number-width) + 3.5ch)",
+                }}
+                data-line-index={lineIndex}
+                data-line-number={lineIndex + 1}
+              >
+                <AnimatePresence initial={false}>
+                  {isCollapsed && (
+                    <motion.span
+                      key="collapsed-background"
+                      aria-hidden="true"
+                      data-code-line-background=""
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={TRANSITION}
+                      className={`pointer-events-none absolute inset-0 z-0 ${collapsedBackgroundRadius} bg-blue/50`}
+                    />
+                  )}
+                </AnimatePresence>
+                <Button
+                  ripple={false}
+                  className="code-line-number absolute left-0 z-10 h-lh text-fore-5 [font-variant-numeric:tabular-nums] select-none! hover:text-fore-1"
+                  style={{ width: "var(--code-line-number-width)" }}
+                  shape="circle"
+                  data-code-line-control="number"
+                  excludeFromTabOrder={
+                    validTabStop.lineIndex !== lineIndex ||
+                    validTabStop.control !== "number"
+                  }
+                  aria-label={`行 ${lineIndex + 1} を選択`}
+                  onFocus={() => {
+                    setCodeControlTabStop({ lineIndex, control: "number" });
+                    scrollCodeLineIntoView(lineIndex);
+                  }}
+                  onKeyDown={(event) =>
+                    navigateCodeControls(event, lineIndex, "number")
+                  }
+                  onPress={(event) => {
+                    if (
+                      event.pointerType === "keyboard" ||
+                      event.pointerType === "virtual" ||
+                      !selectionWasDragged.current
+                    ) {
+                      requestAnimationFrame(() =>
+                        selectLines(lineIndex, lineIndex),
+                      );
+                    }
+                    selectionWasDragged.current = false;
+                  }}
+                >
+                  {lineIndex + 1}
+                </Button>
+                {foldEnd !== undefined && (
+                  <Button
+                    className="code-line-fold absolute z-10 inline-flex h-lh w-5 text-fore-5 hover:text-fore-1"
+                    style={{
+                      left: "calc(var(--code-line-number-width) + 0.5ch)",
+                    }}
+                    shape="circle"
+                    data-code-line-control="fold"
+                    excludeFromTabOrder={
+                      validTabStop.lineIndex !== lineIndex ||
+                      validTabStop.control !== "fold"
+                    }
+                    aria-label={
+                      isCollapsed
+                        ? `行 ${lineIndex + 1} の入れ子を展開`
+                        : `行 ${lineIndex + 1} の入れ子を折りたたむ`
+                    }
+                    aria-expanded={!isCollapsed}
+                    onFocus={() => {
+                      setCodeControlTabStop({ lineIndex, control: "fold" });
+                      scrollCodeLineIntoView(lineIndex);
+                    }}
+                    onKeyDown={(event) =>
+                      navigateCodeControls(event, lineIndex, "fold")
+                    }
+                    onPress={() =>
+                      setCollapsedLines((current) => {
+                        const next = new Set(current);
+                        if (next.has(lineIndex)) next.delete(lineIndex);
+                        else next.add(lineIndex);
+                        return next;
+                      })
+                    }
                   >
-                    {token.content}
-                  </span>
-                ))}
-                {line.slice(tokenLength)}
-                {lineIndex < codeLines.length - 1 && (
-                  <span className="code-line-break">{"\n"}</span>
+                    <motion.span
+                      animate={{ rotate: isCollapsed ? -90 : 0 }}
+                      transition={TRANSITION}
+                      className="inline-flex"
+                    >
+                      <ChevronDown size={16} />
+                    </motion.span>
+                  </Button>
                 )}
-              </span>
-            </Fragment>
-          );
-        })
+                <span className="code-line-content relative z-10 select-text">
+                  {tokens?.map((token) => (
+                    <span
+                      key={token.offset}
+                      className="syntax-token"
+                      style={token.htmlStyle}
+                    >
+                      {token.content}
+                    </span>
+                  ))}
+                  {line.slice(tokenLength)}
+                  {visibleIndex < visibleLineIndices.length - 1 && (
+                    <span className="code-line-break">{"\n"}</span>
+                  )}
+                  {visibleIndex === visibleLineIndices.length - 1 &&
+                    line.length === 0 && (
+                      <span aria-hidden="true" className="code-line-break" />
+                    )}
+                </span>
+                {isCollapsed && foldEnd !== undefined && (
+                  <Button
+                    ripple={false}
+                    className="relative select-none! z-10 ml-[1ch] rounded-4xl text-fore-5 hover:text-fore-1"
+                    aria-label={`${foldEnd - lineIndex}行を展開`}
+                    data-code-line-control="expand"
+                    excludeFromTabOrder={
+                      validTabStop.lineIndex !== lineIndex ||
+                      validTabStop.control !== "expand"
+                    }
+                    onFocus={() => {
+                      setCodeControlTabStop({ lineIndex, control: "expand" });
+                      scrollCodeLineIntoView(lineIndex);
+                    }}
+                    onKeyDown={(event) =>
+                      navigateCodeControls(event, lineIndex, "expand")
+                    }
+                    onPress={() => {
+                      setCollapsedLines((current) => {
+                        const next = new Set(current);
+                        next.delete(lineIndex);
+                        return next;
+                      });
+                      requestAnimationFrame(() =>
+                        focusCodeControl(lineIndex, "fold"),
+                      );
+                    }}
+                  >
+                    … {foldEnd - lineIndex}行
+                  </Button>
+                )}
+              </motion.span>
+            );
+          })}
+        </AnimatePresence>
       ) : visible ? (
         <>
           {lines?.map((line, lineIndex) => (
@@ -731,6 +1276,10 @@ type ExpandedCode = {
 const CodeDialogContext = createContext<{
   expanded: ExpandedCode | null;
   setExpanded: React.Dispatch<React.SetStateAction<ExpandedCode | null>>;
+  collapsedCodeBlocks: ReadonlyMap<string, ReadonlySet<number>>;
+  setCollapsedCodeBlocks: React.Dispatch<
+    React.SetStateAction<Map<string, Set<number>>>
+  >;
   completedCodeBlocks: ReadonlySet<string>;
   isAnimating: boolean;
   isClosing: boolean;
@@ -755,6 +1304,8 @@ const CodeControls = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [isSticky, setIsSticky] = useState(false);
+  const headerRef = useRef<HTMLDivElement>(null);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(code);
@@ -781,17 +1332,60 @@ const CodeControls = ({
     return () => clearTimeout(timer);
   }, [copied]);
 
+  useEffect(() => {
+    if (fullscreen) return;
+    const header = headerRef.current;
+    const frame = header?.closest<HTMLElement>("[data-code-frame]");
+    const host = header ? findVerticalScrollHost(header) : null;
+    if (!header || !frame || !host) return;
+
+    let updateFrame = 0;
+    const update = () => {
+      const viewportTop = host.getBoundingClientRect().top + host.clientTop;
+      const frameBounds = frame.getBoundingClientRect();
+      const headerBounds = header.getBoundingClientRect();
+      const isPinned =
+        frameBounds.top < viewportTop &&
+        frameBounds.bottom > viewportTop + headerBounds.height &&
+        headerBounds.top <= viewportTop + 1;
+      setIsSticky(isPinned);
+      setStickyHeaderActive(host, header, isPinned);
+    };
+    const scheduleUpdate = () => {
+      if (updateFrame) return;
+      updateFrame = requestAnimationFrame(() => {
+        updateFrame = 0;
+        update();
+      });
+    };
+    const resizeObserver = new ResizeObserver(scheduleUpdate);
+    resizeObserver.observe(frame);
+    resizeObserver.observe(header);
+    host.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
+    update();
+
+    return () => {
+      host.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
+      resizeObserver.disconnect();
+      cancelAnimationFrame(updateFrame);
+      setStickyHeaderActive(host, header, false);
+    };
+  }, [fullscreen]);
+
   return (
     <>
       <motion.div
+        ref={headerRef}
         layout={Boolean(motionId)}
         layoutId={motionId ? `${motionId}-header` : undefined}
         data-code-header=""
         style={{
-          borderTopLeftRadius: fullscreen ? 0 : 16,
-          borderTopRightRadius: fullscreen ? 0 : 16,
+          borderTopLeftRadius: fullscreen || isSticky ? 0 : 16,
+          borderTopRightRadius: fullscreen || isSticky ? 0 : 16,
         }}
-        className={`flex items-center justify-between gap-2 border-b border-back-5 px-2 py-1 bg-back-2 ${dragHandle ? "touch-none cursor-grab active:cursor-grabbing" : ""}`}
+        className={`flex items-center justify-between gap-2 border-b border-back-5 px-2 py-1 bg-back-2 ${fullscreen ? "" : "sticky top-0 z-20"} ${dragHandle ? "touch-none cursor-grab active:cursor-grabbing" : ""}`}
         onPointerDown={(event) => {
           if (!dragHandle) return;
           if (
@@ -805,7 +1399,7 @@ const CodeControls = ({
         }}
       >
         <span className="truncate font-mono select-none! text-sm px-2">
-          {language || "text"}
+          {getLanguageTitle(language)}
         </span>
         <motion.div
           layout="position"
@@ -915,13 +1509,42 @@ const MarkdownPre = ({
     dialog.expanded?.index === index &&
     index >= 0;
   const { elementRef: codeScrollRef } = useNativeScroll<HTMLPreElement>(
-    { axis: "x", enableEdgeFade: !isExpanded },
+    {
+      axis: "x",
+      scrollBehavior: parallaxEnabled ? "smooth" : "auto",
+      enableEdgeFade: !isExpanded,
+    },
     [isExpanded],
   );
+  const [isHorizontallyScrollable, setIsHorizontallyScrollable] =
+    useState(false);
+  useLayoutEffect(() => {
+    const pre = codeScrollRef.current;
+    if (!pre) return;
+
+    const updateOverflow = () => {
+      setIsHorizontallyScrollable(pre.scrollWidth > pre.clientWidth + 1);
+    };
+    const resizeObserver = new ResizeObserver(updateOverflow);
+    resizeObserver.observe(pre);
+    const mutationObserver = new MutationObserver(updateOverflow);
+    mutationObserver.observe(pre, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    updateOverflow();
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, [codeScrollRef.current]);
   const codeElement = isValidElement<{
     className?: string;
     children?: ReactNode;
     lineNumbers?: boolean;
+    codeBlockId?: string;
   }>(children)
     ? children
     : null;
@@ -985,13 +1608,13 @@ const MarkdownPre = ({
   };
 
   return (
-    <div ref={frameRef} data-code-frame="">
+    <section ref={frameRef} aria-label="コードブロック" data-code-frame="">
       <MorphingDialogFrame
         id={isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}
         enabled={sharedLayoutEnabled}
-        className={`overflow-visible rounded-2xl border border-back-5 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
+        className={`overflow-visible mx-0.5 rounded-2xl border border-back-5 has-[pre:focus-visible]:ring-2 has-[pre:focus-visible]:ring-fore-1 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
       >
-        <div className="overflow-hidden rounded-b-2xl">
+        <div className="overflow-clip rounded-b-2xl">
           <CodeControls
             code={code}
             language={language}
@@ -1012,17 +1635,25 @@ const MarkdownPre = ({
           >
             <pre
               {...props}
+              tabIndex={
+                isHorizontallyScrollable && !isExpanded
+                  ? (props.tabIndex ?? 0)
+                  : undefined
+              }
               ref={codeScrollRef}
-              className={`${props.className ?? ""} my-0! [--scroll-fade-size:2.5rem]`}
+              className={`${props.className ?? ""} my-0! outline-none [--scroll-fade-size:2.5rem]`}
             >
               {codeElement
-                ? cloneElement(codeElement, { lineNumbers: true })
+                ? cloneElement(codeElement, {
+                    lineNumbers: true,
+                    codeBlockId: layoutId,
+                  })
                 : children}
             </pre>
           </motion.div>
         </div>
       </MorphingDialogFrame>
-    </div>
+    </section>
   );
 };
 
@@ -1038,6 +1669,9 @@ const CodeDialogProvider = ({
   const { parallaxEnabled } = usePreferences();
   const isMobile = useIsMobile();
   const [expanded, setExpanded] = useState<ExpandedCode | null>(null);
+  const [collapsedCodeBlocks, setCollapsedCodeBlocks] = useState<
+    Map<string, Set<number>>
+  >(() => new Map());
   const [isClosing, setIsClosing] = useState(false);
   const [backdropOpacity, setBackdropOpacity] = useState(0.5);
   const dragControls = useDragControls();
@@ -1448,6 +2082,8 @@ const CodeDialogProvider = ({
         value={{
           expanded,
           setExpanded,
+          collapsedCodeBlocks,
+          setCollapsedCodeBlocks,
           completedCodeBlocks,
           isAnimating,
           isClosing,
@@ -1541,6 +2177,7 @@ const CodeDialogProvider = ({
                       >
                         <MarkdownCode
                           lineNumbers
+                          codeBlockId={expanded.id}
                           className={
                             expanded.language
                               ? `language-${expanded.language}`
@@ -2053,6 +2690,9 @@ export default function Ask() {
   const nativeSmoothScrollCleanupRef = useRef<(() => void) | null>(null);
   const pendingLatestTurnScrollRef = useRef<ChatScrollBehavior | null>(null);
   const shouldStickToLatestTurnRef = useRef(true);
+  const assistantReplyActiveRef = useRef(false);
+  const assistantReplyOverflowedRef = useRef(false);
+  const assistantUserScrollStartRef = useRef<number | null>(null);
   const streamedMessageIdsRef = useRef(new Set<string>());
   const revealPositionRef = useRef(new Map<string, number>());
   const finishRevealingMessage = useCallback((id: string) => {
@@ -2129,9 +2769,14 @@ export default function Ask() {
           viewport.removeEventListener("scrollend", onScrollEnd);
           nativeSmoothScrollCleanupRef.current = null;
           updateTailSpacer(viewport);
-          const finalTarget = getChatScrollTarget(viewport);
-          if (Math.abs(finalTarget - viewport.scrollTop) > 1) {
-            viewport.scrollTop = finalTarget;
+          if (shouldStickToLatestTurnRef.current) {
+            const finalTarget = getChatScrollTarget(
+              viewport,
+              assistantReplyActiveRef.current,
+            );
+            if (Math.abs(finalTarget - viewport.scrollTop) > 1) {
+              viewport.scrollTo({ top: finalTarget, behavior: "instant" });
+            }
           }
           scrollTopRef.current = viewport.scrollTop;
         };
@@ -2146,7 +2791,7 @@ export default function Ask() {
           const lastTurn = viewport.querySelector<HTMLElement>(
             "[data-chat-last-turn]",
           );
-          const signature = `${lastTurn?.offsetHeight ?? 0}/${viewport.scrollHeight}/${Math.round(getChatScrollTarget(viewport))}`;
+          const signature = `${lastTurn?.offsetHeight ?? 0}/${viewport.scrollHeight}/${Math.round(getChatScrollTarget(viewport, assistantReplyActiveRef.current))}`;
           stableFrames = signature === previousSignature ? stableFrames + 1 : 0;
           previousSignature = signature;
           if (stableFrames < 2 && performance.now() - waitStartedAt < 500) {
@@ -2154,7 +2799,10 @@ export default function Ask() {
             return;
           }
           updateTailSpacer(viewport);
-          const target = getChatScrollTarget(viewport);
+          const target = getChatScrollTarget(
+            viewport,
+            assistantReplyActiveRef.current,
+          );
           if (Math.abs(target - viewport.scrollTop) <= 1) {
             finish();
             return;
@@ -2168,8 +2816,11 @@ export default function Ask() {
       }
 
       updateTailSpacer(viewport);
-      const target = getChatScrollTarget(viewport);
-      viewport.scrollTop = target;
+      const target = getChatScrollTarget(
+        viewport,
+        assistantReplyActiveRef.current,
+      );
+      viewport.scrollTo({ top: target, behavior: "instant" });
       scrollTopRef.current = target;
     },
     [updateTailSpacer],
@@ -2404,7 +3055,6 @@ export default function Ask() {
       });
     };
 
-    // 他のタブでの削除を、このタブの画面にも反映する
     if (channel) {
       channel.onmessage = (event: MessageEvent) => {
         const data: unknown = event.data;
@@ -2596,17 +3246,184 @@ export default function Ask() {
   ]);
 
   useEffect(() => {
+    const host = chatScrollRef.current;
+    if (!host) return;
+
+    let isTabNavigation = false;
+    let clearTabNavigationFrame = 0;
+    let horizontalScrollOffsets = new Map<HTMLElement, number>();
+    const getVisibleTabStops = () => {
+      const hostBounds = host.getBoundingClientRect();
+      const viewportTop = hostBounds.top + host.clientTop;
+      const viewportBottom = viewportTop + host.clientHeight;
+      const viewportLeft = hostBounds.left + host.clientLeft;
+      const viewportRight = viewportLeft + host.clientWidth;
+      return Array.from(
+        host.querySelectorAll<HTMLElement>(
+          "a[href], button, input, select, textarea, [tabindex]",
+        ),
+      ).filter((element) => {
+        if (
+          element.tabIndex < 0 ||
+          element.hasAttribute("disabled") ||
+          element.getAttribute("aria-disabled") === "true" ||
+          element.closest('[inert], [aria-hidden="true"]') ||
+          element.getClientRects().length === 0
+        ) {
+          return false;
+        }
+
+        const style = getComputedStyle(element);
+        if (style.display === "none" || style.visibility !== "visible") {
+          return false;
+        }
+
+        const bounds = element.getBoundingClientRect();
+        return (
+          bounds.bottom > viewportTop &&
+          bounds.top < viewportBottom &&
+          bounds.right > viewportLeft &&
+          bounds.left < viewportRight
+        );
+      });
+    };
+    const centerFocusedItem = (target: HTMLElement) => {
+      const targetBounds = target.getBoundingClientRect();
+      const hostBounds = host.getBoundingClientRect();
+      const viewportTop = hostBounds.top + host.clientTop;
+      const viewportCenter = viewportTop + host.clientHeight / 2;
+      const targetCenter = (targetBounds.top + targetBounds.bottom) / 2;
+      const maxScrollTop = Math.max(host.scrollHeight - host.clientHeight, 0);
+      const scrollTop = Math.min(
+        maxScrollTop,
+        Math.max(0, host.scrollTop + targetCenter - viewportCenter),
+      );
+      host.scrollTo({
+        top: scrollTop,
+        behavior: parallaxEnabled ? "smooth" : "instant",
+      });
+    };
+    const stopFollowingOnTab = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      shouldStickToLatestTurnRef.current = false;
+      assistantUserScrollStartRef.current = null;
+      horizontalScrollOffsets = new Map(
+        Array.from(host.querySelectorAll<HTMLElement>("pre")).map((pre) => [
+          pre,
+          pre.scrollLeft,
+        ]),
+      );
+      isTabNavigation = true;
+      cancelAnimationFrame(clearTabNavigationFrame);
+      clearTabNavigationFrame = requestAnimationFrame(() => {
+        isTabNavigation = false;
+        horizontalScrollOffsets.clear();
+      });
+
+      const activeElement = document.activeElement;
+      if (
+        activeElement !== document.body &&
+        activeElement !== document.documentElement
+      ) {
+        return;
+      }
+
+      const visibleTabStops = getVisibleTabStops();
+      const target = event.shiftKey
+        ? visibleTabStops[visibleTabStops.length - 1]
+        : visibleTabStops[0];
+      if (!target) return;
+
+      event.preventDefault();
+      target.focus({ preventScroll: true });
+    };
+    const scrollFocusedItemIntoView = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !host.contains(target)) return;
+
+      shouldStickToLatestTurnRef.current = false;
+      assistantUserScrollStartRef.current = null;
+
+      if (isTabNavigation) {
+        const codeBlock = target.closest<HTMLElement>("pre");
+        const horizontalScrollLeft = codeBlock
+          ? horizontalScrollOffsets.get(codeBlock)
+          : undefined;
+        requestAnimationFrame(() => {
+          if (codeBlock?.isConnected && horizontalScrollLeft !== undefined) {
+            codeBlock.scrollLeft = horizontalScrollLeft;
+          }
+          if (document.activeElement === target && host.contains(target)) {
+            centerFocusedItem(target);
+          }
+        });
+        return;
+      }
+
+      const targetBounds = target.getBoundingClientRect();
+      const hostBounds = host.getBoundingClientRect();
+      const viewportTop = hostBounds.top + host.clientTop;
+      const viewportBottom = viewportTop + host.clientHeight;
+      const scrollDelta =
+        targetBounds.top < viewportTop
+          ? targetBounds.top - viewportTop
+          : targetBounds.bottom > viewportBottom
+            ? targetBounds.bottom - viewportBottom
+            : 0;
+      if (scrollDelta === 0) return;
+
+      host.scrollTo({
+        top: host.scrollTop + scrollDelta,
+        behavior: parallaxEnabled ? "smooth" : "instant",
+      });
+    };
+
+    window.addEventListener("keydown", stopFollowingOnTab, true);
+    host.addEventListener("focusin", scrollFocusedItemIntoView);
+    return () => {
+      window.removeEventListener("keydown", stopFollowingOnTab, true);
+      host.removeEventListener("focusin", scrollFocusedItemIntoView);
+      cancelAnimationFrame(clearTabNavigationFrame);
+    };
+  }, [parallaxEnabled]);
+
+  useEffect(() => {
     if (!isInitialChatPositioned) return;
 
     const host = chatScrollRef.current;
     if (!host) return;
 
+    let userScrollIntentTimeout: ReturnType<typeof setTimeout> | null = null;
+    let previousScrollTop = host.scrollTop;
+    const clearUserScrollIntent = () => {
+      assistantUserScrollStartRef.current = null;
+      if (userScrollIntentTimeout !== null) {
+        clearTimeout(userScrollIntentTimeout);
+        userScrollIntentTimeout = null;
+      }
+    };
+    const syncReplyOverflow = () => {
+      const spacer = host.querySelector<HTMLElement>("[data-chat-tail-spacer]");
+      if (!spacer) return;
+      updateTailSpacer(host);
+      if (
+        assistantReplyActiveRef.current &&
+        !assistantReplyOverflowedRef.current &&
+        (Number.parseFloat(spacer.style.height) || 0) <= 1
+      ) {
+        assistantReplyOverflowedRef.current = true;
+        shouldStickToLatestTurnRef.current = false;
+      }
+    };
     const stick = () => {
+      updateTailSpacer(host);
+      syncReplyOverflow();
       if (
         shouldStickToLatestTurnRef.current &&
         !nativeSmoothScrollCleanupRef.current
       ) {
-        scrollToLatestTurn("instant");
+        clearUserScrollIntent();
+        scrollToLatestTurn("instant", host);
       }
     };
     const resizeObserver = new ResizeObserver(stick);
@@ -2647,10 +3464,39 @@ export default function Ask() {
 
     const handleScroll = () => {
       const viewport = host;
+      const currentScrollTop = viewport.scrollTop;
+      const didScrollDown = currentScrollTop > previousScrollTop + 1;
+      if (assistantReplyActiveRef.current) {
+        syncReplyOverflow();
+      }
+      const didUserScroll =
+        assistantUserScrollStartRef.current !== null &&
+        Math.abs(currentScrollTop - previousScrollTop) > 1;
+      if (didUserScroll) {
+        clearUserScrollIntent();
+        if (!assistantReplyActiveRef.current) {
+          shouldStickToLatestTurnRef.current = false;
+        } else if (!assistantReplyOverflowedRef.current) {
+          shouldStickToLatestTurnRef.current = false;
+        } else if (assistantReplyOverflowedRef.current) {
+          const maxScrollTop = Math.max(
+            viewport.scrollHeight - viewport.clientHeight,
+            0,
+          );
+          shouldStickToLatestTurnRef.current =
+            didScrollDown &&
+            maxScrollTop - currentScrollTop <= getScrollFadeSize(viewport);
+        }
+      }
+      previousScrollTop = currentScrollTop;
+      const target = getChatScrollTarget(
+        viewport,
+        assistantReplyActiveRef.current,
+      );
       if (
         shouldStickToLatestTurnRef.current &&
         !nativeSmoothScrollCleanupRef.current &&
-        Math.abs(getChatScrollTarget(viewport) - viewport.scrollTop) > 1
+        Math.abs(target - viewport.scrollTop) > 1
       ) {
         stick();
       }
@@ -2659,14 +3505,69 @@ export default function Ask() {
     const userEvents = [
       "wheel",
       "touchstart",
+      "touchmove",
       "pointerdown",
+      "pointermove",
       "keydown",
     ] as const;
-    const stopFollowing = () => {
-      shouldStickToLatestTurnRef.current = false;
+    const markUserScrollIntent = (event: Event) => {
+      if (
+        event instanceof PointerEvent &&
+        event.type === "pointermove" &&
+        event.buttons === 0
+      ) {
+        return;
+      }
+      if (
+        event instanceof KeyboardEvent &&
+        ![
+          "ArrowDown",
+          "ArrowUp",
+          "End",
+          "Home",
+          "PageDown",
+          "PageUp",
+          " ",
+        ].includes(event.key)
+      ) {
+        return;
+      }
+      const maxScrollTop = Math.max(host.scrollHeight - host.clientHeight, 0);
+      const isScrollDownIntent =
+        (event instanceof WheelEvent && event.deltaY > 0) ||
+        (event instanceof KeyboardEvent &&
+          ["ArrowDown", "End", "PageDown", " "].includes(event.key));
+      const isScrollUpIntent =
+        (event instanceof WheelEvent && event.deltaY < 0) ||
+        (event instanceof KeyboardEvent &&
+          ["ArrowUp", "Home", "PageUp"].includes(event.key));
+      if (
+        assistantReplyActiveRef.current &&
+        assistantReplyOverflowedRef.current
+      ) {
+        if (isScrollUpIntent) {
+          shouldStickToLatestTurnRef.current = false;
+        } else if (
+          isScrollDownIntent &&
+          maxScrollTop - host.scrollTop <= getScrollFadeSize(host)
+        ) {
+          shouldStickToLatestTurnRef.current = true;
+          clearUserScrollIntent();
+          stick();
+          return;
+        }
+      }
+      assistantUserScrollStartRef.current = host.scrollTop;
+      if (userScrollIntentTimeout !== null) {
+        clearTimeout(userScrollIntentTimeout);
+      }
+      userScrollIntentTimeout = setTimeout(() => {
+        assistantUserScrollStartRef.current = null;
+        userScrollIntentTimeout = null;
+      }, 250);
     };
     for (const type of userEvents) {
-      host.addEventListener(type, stopFollowing, {
+      host.addEventListener(type, markUserScrollIntent, {
         capture: true,
         passive: true,
       });
@@ -2678,7 +3579,10 @@ export default function Ask() {
       mutationObserver.disconnect();
       host.removeEventListener("scroll", handleScroll, true);
       for (const type of userEvents) {
-        host.removeEventListener(type, stopFollowing, true);
+        host.removeEventListener(type, markUserScrollIntent, true);
+      }
+      if (userScrollIntentTimeout !== null) {
+        clearTimeout(userScrollIntentTimeout);
       }
     };
   }, [isInitialChatPositioned, scrollToLatestTurn, updateTailSpacer]);
@@ -2692,6 +3596,10 @@ export default function Ask() {
 
   const requestAssistantReply = useCallback(
     async (promptContent: string) => {
+      assistantReplyActiveRef.current = true;
+      assistantReplyOverflowedRef.current = false;
+      assistantUserScrollStartRef.current = null;
+      shouldStickToLatestTurnRef.current = false;
       setIsLoading(true);
 
       const controller = new AbortController();
@@ -3024,6 +3932,10 @@ export default function Ask() {
         setStreamingMessage(null);
       } finally {
         clearTimeout(timeoutId);
+        assistantReplyActiveRef.current = false;
+        assistantReplyOverflowedRef.current = false;
+        assistantUserScrollStartRef.current = null;
+        shouldStickToLatestTurnRef.current = false;
         if (abortControllerRef.current === controller) {
           abortControllerRef.current = null;
         }
@@ -4052,7 +4964,7 @@ export default function Ask() {
                   key="chat-title-text"
                   layout="position"
                   transition={TRANSITION}
-                  className="text-center text-3xl text-fore-1 font-serif"
+                  className="text-center text-3xl text-fore-1"
                 >
                   何でも訊いてみてね！
                 </motion.h1>
@@ -4072,6 +4984,16 @@ export default function Ask() {
               scrollRef={chatScrollRef}
               scroll={{
                 axis: "y",
+                scrollBehavior: parallaxEnabled ? "smooth" : "auto",
+                onEdgeClick: (edge) => {
+                  if (edge !== "bottom" || !assistantReplyActiveRef.current) {
+                    return false;
+                  }
+                  shouldStickToLatestTurnRef.current = true;
+                  assistantUserScrollStartRef.current = null;
+                  scrollToLatestTurn("smooth");
+                  return true;
+                },
                 onInit: (viewport) => {
                   const previousOverflowAnchor = viewport.style.overflowAnchor;
                   viewport.style.overflowAnchor = "none";
@@ -4185,7 +5107,7 @@ export default function Ask() {
 
                             {(isEditing || !isUser || msg.content.trim()) && (
                               <div
-                                className={`**:select-text min-w-0 max-w-full ${isUser ? "bg-back-2 px-6 py-4 rounded-4xl" : "w-full"}`}
+                                className={`**:select-text min-w-0 max-w-full ${isUser ? "bg-back-2 px-6 py-4 rounded-4xl rounded-tr-none" : "w-full"}`}
                               >
                                 {isEditing ? (
                                   <motion.div

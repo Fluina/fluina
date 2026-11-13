@@ -47,7 +47,7 @@ export function Tooltip({
         offset={offset}
         {...props}
         className={({ isEntering, isExiting }) => `
-                bg-fore-1 p-1 shadow-lg all duration-250 pointer-events-none overflow-clip
+                bg-fore-1 rounded-4xl p-1 shadow-lg all duration-250 pointer-events-none overflow-clip
                 ${
                   isExiting
                     ? "opacity-0 scale-100"
@@ -64,14 +64,24 @@ export function Tooltip({
 
           {resolvedKeys && resolvedKeys.length > 0 && (
             <kbd className="flex justify-center items-center gap-0.5">
-              {resolvedKeys.map((key) => (
-                <kbd
-                  key={key}
-                  className="whitespace-nowrap bg-fore-5/50 px-1 py-0.5 text-xs text-center text-back-5"
-                >
-                  {key}
-                </kbd>
-              ))}
+              {resolvedKeys.map((key, index) => {
+                const radius =
+                  resolvedKeys.length === 1
+                    ? "rounded-4xl"
+                    : index === 0
+                      ? "rounded-l-4xl rounded-r-none"
+                      : index === resolvedKeys.length - 1
+                        ? "rounded-l-none rounded-r-4xl"
+                        : "rounded-l-none rounded-r-none";
+                return (
+                  <kbd
+                    key={key}
+                    className={`whitespace-nowrap ${radius} bg-fore-5/50 px-1 py-0.5 text-xs text-center text-back-5`}
+                  >
+                    {key}
+                  </kbd>
+                );
+              })}
             </kbd>
           )}
         </span>

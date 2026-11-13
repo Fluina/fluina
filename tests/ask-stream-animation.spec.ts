@@ -42,11 +42,387 @@ async function mockAnswer(page: Page, response: string, held = false) {
   );
 }
 
+test("follows a streamed answer only after returning to its bottom", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockAnswer(page, "回答の最初", true);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("回答を続けてください");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const viewport = await page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .evaluateHandle((turn) => {
+      let ancestor = turn.parentElement;
+      while (ancestor && getComputedStyle(ancestor).overflowY !== "auto") {
+        ancestor = ancestor.parentElement;
+      }
+      if (!(ancestor instanceof HTMLElement)) {
+        throw new Error("Chat scroll viewport not found");
+      }
+      return ancestor;
+    });
+  const assistantMessage = page
+    .locator("[data-chat-last-turn] [data-chat-message-id]")
+    .last();
+  await expect(page.getByText("回答の最初")).toBeVisible();
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) => element.scrollHeight - element.clientHeight,
+      ),
+    )
+    .toBe(0);
+  await page.evaluate(() => {
+    (
+      window as Window & { appendTestAnswer?: (text: string) => void }
+    ).appendTestAnswer?.(
+      `\n\n${Array.from(
+        { length: 40 },
+        (_, index) => `段落${index} ${"回答テキスト".repeat(12)}`,
+      ).join("\n\n")}`,
+    );
+  });
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) => element.scrollHeight - element.clientHeight,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await page.evaluate(() => {
+    (
+      window as Window & { appendTestAnswer?: (text: string) => void }
+    ).appendTestAnswer?.(`\n\n${"新しい回答".repeat(1000)}`);
+  });
+  await expect
+    .poll(() => assistantMessage.textContent())
+    .toContain("新しい回答".repeat(1000));
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBe(0);
+
+  const fadeSize = await viewport.evaluate((element) => {
+    const raw = getComputedStyle(element)
+      .getPropertyValue("--scroll-fade-size")
+      .trim();
+    const size = Number.parseFloat(raw);
+    return raw.endsWith("rem")
+      ? size *
+          Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+      : size;
+  });
+  await viewport.evaluate((element, size) => {
+    element.scrollTop = element.scrollHeight - element.clientHeight - size - 40;
+  }, fadeSize);
+  const scrollTopBeforeEnteringFade = await viewport.evaluate(
+    (element) => element.scrollTop,
+  );
+  await viewport.hover();
+  await page.mouse.wheel(0, 50);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(scrollTopBeforeEnteringFade);
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) =>
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      ),
+    )
+    .toBeLessThanOrEqual(fadeSize);
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) =>
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      ),
+    )
+    .toBe(0);
+  await viewport.hover();
+  await page.mouse.wheel(0, -1000);
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) =>
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      ),
+    )
+    .toBeGreaterThan(fadeSize);
+  await viewport.evaluate((element) => {
+    element.scrollTop = element.scrollHeight - element.clientHeight - 20;
+  });
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) =>
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      ),
+    )
+    .toBe(20);
+  await viewport.evaluate((element) => {
+    element.dispatchEvent(
+      new WheelEvent("wheel", { deltaY: 10, bubbles: true }),
+    );
+  });
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) =>
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      ),
+    )
+    .toBe(0);
+  const scrollTopAtBottom = await viewport.evaluate(
+    (element) => element.scrollTop,
+  );
+  await page.evaluate(() => {
+    (
+      window as Window & { appendTestAnswer?: (text: string) => void }
+    ).appendTestAnswer?.(`\n\n${"追尾される回答".repeat(1000)}`);
+  });
+  await expect
+    .poll(() => assistantMessage.textContent())
+    .toContain("追尾される回答".repeat(1000));
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(scrollTopAtBottom);
+  const followedScrollTop = await viewport.evaluate(
+    (element) => element.scrollTop,
+  );
+  await viewport.hover();
+  await page.mouse.wheel(0, -1000);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeLessThan(followedScrollTop);
+  const scrollTopWhileReading = await viewport.evaluate(
+    (element) => element.scrollTop,
+  );
+  await page.evaluate(() => {
+    (
+      window as Window & { appendTestAnswer?: (text: string) => void }
+    ).appendTestAnswer?.(`\n\n${"読み進めるための回答".repeat(1000)}`);
+  });
+  await expect
+    .poll(() => assistantMessage.textContent())
+    .toContain("読み進めるための回答".repeat(1000));
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBe(scrollTopWhileReading);
+
+  await page.evaluate(() => {
+    (window as Window & { finishTestAnswer?: () => void }).finishTestAnswer?.();
+  });
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  const scrollTopBeforeReading = await viewport.evaluate(
+    (element) => element.scrollTop,
+  );
+  await viewport.hover();
+  await page.mouse.wheel(0, -1000);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeLessThan(scrollTopBeforeReading);
+});
+
+test("starts Tab navigation from visible content and centers focused items", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const answer = Array.from(
+    { length: 40 },
+    (_, index) => `段落${index + 1} ${"会話履歴の文章です。".repeat(12)}`,
+  ).join("\n\n");
+  await mockAnswer(page, answer);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("チャットのTab移動");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible({
+    timeout: 30000,
+  });
+
+  const viewport = await page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .evaluateHandle((turn) => {
+      let ancestor = turn.parentElement;
+      while (ancestor && getComputedStyle(ancestor).overflowY !== "auto") {
+        ancestor = ancestor.parentElement;
+      }
+      if (!(ancestor instanceof HTMLElement)) {
+        throw new Error("Chat scroll viewport not found");
+      }
+      return ancestor;
+    });
+  await viewport.evaluate((element) => {
+    element.scrollTop = element.scrollHeight - element.clientHeight;
+  });
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  });
+
+  const expectedScrollTop = await viewport.evaluate((element) => {
+    const hostBounds = element.getBoundingClientRect();
+    const top = hostBounds.top + element.clientTop;
+    const bottom = top + element.clientHeight;
+    const left = hostBounds.left + element.clientLeft;
+    const right = left + element.clientWidth;
+    const candidate = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        "a[href], button, input, select, textarea, [tabindex]",
+      ),
+    ).find((target) => {
+      if (
+        target.tabIndex < 0 ||
+        target.hasAttribute("disabled") ||
+        target.getAttribute("aria-disabled") === "true" ||
+        target.closest('[inert], [aria-hidden="true"]') ||
+        target.getClientRects().length === 0
+      ) {
+        return false;
+      }
+
+      const style = getComputedStyle(target);
+      const bounds = target.getBoundingClientRect();
+      return (
+        style.display !== "none" &&
+        style.visibility === "visible" &&
+        bounds.bottom > top &&
+        bounds.top < bottom &&
+        bounds.right > left &&
+        bounds.left < right
+      );
+    });
+    if (!candidate) throw new Error("Visible chat tab stop not found");
+
+    candidate.setAttribute("data-test-tab-origin", "");
+    const bounds = candidate.getBoundingClientRect();
+    const targetCenter = (bounds.top + bounds.bottom) / 2;
+    const viewportCenter = top + element.clientHeight / 2;
+    return Math.max(
+      0,
+      Math.min(
+        element.scrollHeight - element.clientHeight,
+        element.scrollTop + targetCenter - viewportCenter,
+      ),
+    );
+  });
+
+  const visibleOrigin = page.locator("[data-test-tab-origin]");
+  await page.keyboard.press("Tab");
+  await expect(visibleOrigin).toBeFocused();
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element, expected) => Math.abs(element.scrollTop - expected),
+        expectedScrollTop,
+      ),
+    )
+    .toBeLessThan(1);
+});
+
+test("clicking the bottom fade enables follow until the user scrolls away", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockAnswer(page, "回答の最初", true);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("フェードから追尾する");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const viewport = await page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .evaluateHandle((turn) => {
+      let ancestor = turn.parentElement;
+      while (ancestor && getComputedStyle(ancestor).overflowY !== "auto") {
+        ancestor = ancestor.parentElement;
+      }
+      if (!(ancestor instanceof HTMLElement)) {
+        throw new Error("Chat scroll viewport not found");
+      }
+      return ancestor;
+    });
+  const assistantMessage = page
+    .locator("[data-chat-last-turn] [data-chat-message-id]")
+    .last();
+  await expect(page.getByText("回答の最初")).toBeVisible();
+  await page.evaluate(() => {
+    (
+      window as Window & { appendTestAnswer?: (text: string) => void }
+    ).appendTestAnswer?.(
+      `\n\n${Array.from(
+        { length: 40 },
+        (_, index) => `段落${index} ${"回答テキスト".repeat(12)}`,
+      ).join("\n\n")}`,
+    );
+  });
+  await expect.poll(() => assistantMessage.textContent()).toContain("段落39");
+  await viewport.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) =>
+        element.style.getPropertyValue("--scroll-fade-bottom"),
+      ),
+    )
+    .toBe("1");
+
+  const bounds = await viewport.boundingBox();
+  if (!bounds) throw new Error("Chat viewport not found");
+  await page.mouse.click(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height - 10,
+  );
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) =>
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      ),
+    )
+    .toBeLessThanOrEqual(1);
+
+  const scrollTopAtBottom = await viewport.evaluate(
+    (element) => element.scrollTop,
+  );
+  await page.evaluate(() => {
+    (
+      window as Window & { appendTestAnswer?: (text: string) => void }
+    ).appendTestAnswer?.(`\n\n${"クリック後に追尾する回答".repeat(1000)}`);
+  });
+  await expect
+    .poll(() => assistantMessage.textContent())
+    .toContain("クリック後に追尾する回答".repeat(1000));
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(scrollTopAtBottom);
+
+  const followedScrollTop = await viewport.evaluate(
+    (element) => element.scrollTop,
+  );
+  await viewport.hover();
+  await page.mouse.wheel(0, -1000);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeLessThan(followedScrollTop);
+  await page.evaluate(() => {
+    (window as Window & { finishTestAnswer?: () => void }).finishTestAnswer?.();
+  });
+});
+
 test("renders Markdown and HTML tables without the default frames or controls", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  const wideCell = "W".repeat(300);
+  const wideCell = "wide content ".repeat(30);
   await mockAnswer(
     page,
     `| 材料 | 分量 |\n| :--- | ---: |\n| ${wideCell} | 100g |\n\n<table><thead><tr><th>材料</th><th>分量</th></tr></thead><tbody><tr><td>牛乳</td><td>100ml</td></tr></tbody></table>\n\n\`\`\`js\nconst flour = 100;\n\`\`\``,
@@ -110,6 +486,7 @@ test("renders Markdown and HTML tables without the default frames or controls", 
       await expect(cell).toHaveCSS("padding-left", "16px");
       await expect(cell).toHaveCSS("padding-right", "16px");
       await expect(cell).toHaveCSS("vertical-align", "middle");
+      await expect(cell).toHaveCSS("white-space", "nowrap");
     }
     for (const header of await table.locator("thead th").all()) {
       await expect(header).toHaveCSS("padding-top", "8px");
@@ -151,6 +528,41 @@ test("renders Markdown and HTML tables without the default frames or controls", 
   await expect(tables).toHaveCount(2);
   await expect(turn.locator('[data-streamdown="table-wrapper"]')).toHaveCount(
     0,
+  );
+});
+
+test("keeps wide table cells on one line and scrollable", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const wideCell = "wide content ".repeat(30);
+  await mockAnswer(
+    page,
+    `| Description | Value |\n| --- | --- |\n| ${wideCell} | ready |`,
+  );
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("表の折り返し");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+
+  const region = page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .getByRole("region", { name: "表" });
+  const cell = region.locator("tbody td").first();
+  await expect(cell).toHaveText(wideCell);
+  await expect(cell).toHaveCSS("white-space", "nowrap");
+  const dimensions = await region.evaluate((element) => {
+    const table = element.querySelector("table");
+    if (!table) throw new Error("Table not found");
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      tableWidth: table.getBoundingClientRect().width,
+    };
+  });
+  expect(dimensions.scrollWidth, JSON.stringify(dimensions)).toBeGreaterThan(
+    dimensions.clientWidth,
   );
 });
 
@@ -226,6 +638,103 @@ test("shows a keyboard focus ring and scroll controls for wide tables", async ({
     .poll(() =>
       region.evaluate((element) =>
         element.style.getPropertyValue("--scroll-fade-right"),
+      ),
+    )
+    .toBe("0");
+});
+
+test("sticks table headers and code controls to the chat viewport while scrolling", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 900, height: 600 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const rows = Array.from(
+    { length: 32 },
+    (_, index) => `| ${"W".repeat(90)}${index + 1} | ${index + 1} |`,
+  ).join("\n");
+  const codeLines = Array.from(
+    { length: 60 },
+    (_, index) => `line${index + 1}();`,
+  ).join("\n");
+  await mockAnswer(
+    page,
+    `| Name | Value |\n| --- | --- |\n${rows}\n\n\`\`\`js\n${codeLines}\n\`\`\``,
+  );
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("固定ヘッダー");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+
+  const turn = page.locator("[data-chat-last-turn]").last();
+  const tableRegion = turn.getByRole("region", { name: "表" });
+  const headerCell = tableRegion.locator("thead th").first();
+  const codeFrame = turn.locator("[data-code-frame]").last();
+  const codeHeader = codeFrame.locator("[data-code-header]");
+  const viewport = await turn.evaluateHandle((element) => {
+    let parent = element.parentElement;
+    while (parent && getComputedStyle(parent).overflowY !== "auto") {
+      parent = parent.parentElement;
+    }
+    if (!(parent instanceof HTMLElement)) {
+      throw new Error("Chat scroll viewport not found");
+    }
+    return parent;
+  });
+  const scrollToTopEdge = async (target: typeof headerCell) => {
+    await target.evaluate((element) => {
+      let host = element.parentElement;
+      while (host && getComputedStyle(host).overflowY !== "auto") {
+        host = host.parentElement;
+      }
+      if (!(host instanceof HTMLElement)) {
+        throw new Error("Chat scroll viewport not found");
+      }
+      const hostBounds = host.getBoundingClientRect();
+      const viewportTop = hostBounds.top + host.clientTop;
+      const elementBounds = element.getBoundingClientRect();
+      host.scrollTop += elementBounds.top - viewportTop + 12;
+    });
+  };
+  const topOffset = (target: typeof headerCell) =>
+    target.evaluate((element, host) => {
+      const bounds = element.getBoundingClientRect();
+      const viewportBounds = host.getBoundingClientRect();
+      return bounds.top - (viewportBounds.top + host.clientTop);
+    }, viewport);
+
+  await scrollToTopEdge(headerCell);
+  await expect.poll(() => topOffset(headerCell)).toBeLessThan(2);
+  await expect.poll(() => topOffset(headerCell)).toBeGreaterThan(-2);
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) =>
+        element.style.getPropertyValue("--scroll-fade-top"),
+      ),
+    )
+    .toBe("0");
+
+  await expect
+    .poll(() =>
+      codeHeader.evaluate(
+        (element) => getComputedStyle(element).borderTopLeftRadius,
+      ),
+    )
+    .toBe("16px");
+  await scrollToTopEdge(codeHeader);
+  await expect.poll(() => topOffset(codeHeader)).toBeLessThan(2);
+  await expect.poll(() => topOffset(codeHeader)).toBeGreaterThan(-2);
+  await expect
+    .poll(() =>
+      codeHeader.evaluate(
+        (element) => getComputedStyle(element).borderTopLeftRadius,
+      ),
+    )
+    .toBe("0px");
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) =>
+        element.style.getPropertyValue("--scroll-fade-top"),
       ),
     )
     .toBe("0");
@@ -379,7 +888,11 @@ test("renders and preserves a streamed code block with code controls", async ({
       .locator(".code-line")
       .first()
       .evaluate((line) => {
-        return getComputedStyle(line, "::before").userSelect;
+        const lineNumber = line.querySelector(".code-line-number");
+        if (!(lineNumber instanceof HTMLElement)) {
+          throw new Error("Code line number is missing");
+        }
+        return getComputedStyle(lineNumber).userSelect;
       }),
   ).toBe("none");
   await expect(pre).toHaveCSS("border-bottom-left-radius", "16px");
@@ -394,6 +907,7 @@ test("renders and preserves a streamed code block with code controls", async ({
   );
   await expect(turn.getByRole("button", { name: "Save code" })).toBeEnabled();
   const header = turn.locator("[data-code-header]");
+  await expect(header).toContainText("JavaScript");
   await expect(header).toHaveCSS("border-bottom-width", "1px");
   const clippedFrame = pre.locator("xpath=ancestor::div[@data-code-frame]");
   await expect(clippedFrame.locator(":scope > div > div")).toHaveCSS(
@@ -438,6 +952,449 @@ test("renders and preserves a streamed code block with code controls", async ({
     .poll(() => code.locator(".syntax-token").count(), { timeout: 30000 })
     .toBeGreaterThan(1);
   await expect(turn.getByRole("button", { name: "Copy code" })).toHaveCount(1);
+});
+
+test("displays formal names for symbolic language identifiers", async ({
+  page,
+}) => {
+  await mockAnswer(
+    page,
+    "```cpp\nint main() {}\n```\n\n```csharp\nclass Example {}\n```",
+  );
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("言語名を表示");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const headers = page.locator("[data-code-header]");
+  await expect(headers).toHaveCount(2);
+  await expect(headers.nth(0)).toContainText("C++");
+  await expect(headers.nth(1)).toContainText("C#");
+});
+
+test("keeps the last code line above the horizontal scrollbar", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const wideLine = `const value = "${"x".repeat(160)}";`;
+  const codeText = `first();\n${wideLine}\n`;
+  await mockAnswer(page, `\`\`\`js\n${codeText}\`\`\``, true);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コードの最終行");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const code = page.locator("[data-chat-last-turn]").last().locator("pre code");
+  await expect(code.locator(".code-line")).toHaveCount(3);
+  await page.evaluate(() => {
+    (window as Window & { finishTestAnswer?: () => void }).finishTestAnswer?.();
+  });
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+  const lastLine = code.locator(".code-line").last();
+  await expect
+    .poll(() =>
+      lastLine.evaluate((line) => line.getBoundingClientRect().height),
+    )
+    .toBeGreaterThan(15);
+  const bottomClearance = await lastLine.evaluate((line) => {
+    const pre = line.closest("pre");
+    if (!pre) throw new Error("Code scroll area not found");
+    const style = getComputedStyle(pre);
+    const borderHeight =
+      Number.parseFloat(style.borderTopWidth) +
+      Number.parseFloat(style.borderBottomWidth);
+    const scrollbarHeight = pre.offsetHeight - pre.clientHeight - borderHeight;
+    return (
+      pre.getBoundingClientRect().bottom -
+      Number.parseFloat(style.borderBottomWidth) -
+      scrollbarHeight -
+      line.getBoundingClientRect().bottom
+    );
+  });
+  expect(bottomClearance).toBeGreaterThanOrEqual(0);
+});
+
+test("joins adjacent collapsed-line backgrounds but keeps isolated corners rounded", async ({
+  page,
+}) => {
+  const answer =
+    "```text\nfirst\n  value1\nsecond\n  value2\nthird\n  value3\n```";
+  await mockAnswer(page, answer);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("背景の連続");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+
+  const code = page.locator("[data-chat-last-turn]").last().locator("pre code");
+  const firstFold = code
+    .locator('.code-line[data-line-index="0"]')
+    .locator('[data-code-line-control="fold"]');
+  await firstFold.click();
+  await expect(firstFold).toHaveAttribute("aria-expanded", "false");
+  for (const lineNumber of [3, 5]) {
+    const fold = code
+      .locator(`.code-line[data-line-index="${lineNumber - 1}"]`)
+      .locator('[data-code-line-control="fold"]');
+    await fold.click();
+    await expect(fold).toHaveAttribute("aria-expanded", "false");
+  }
+
+  const backgrounds = code.locator("[data-code-line-background]");
+  await expect(backgrounds).toHaveCount(3);
+  const connectedGeometry = await backgrounds.evaluateAll((elements) =>
+    elements.map((element) => ({
+      topRounded: element.classList.contains("rounded-t-2xl"),
+      topSquare: element.classList.contains("rounded-t-none"),
+      bottomRounded: element.classList.contains("rounded-b-2xl"),
+      bottomSquare: element.classList.contains("rounded-b-none"),
+      wholeElementSquare: element.classList.contains("rounded-none"),
+      width: element.getBoundingClientRect().width,
+      rowWidth: element.parentElement?.getBoundingClientRect().width,
+    })),
+  );
+  expect(
+    connectedGeometry.map(({ width, rowWidth, ...radii }) => radii),
+  ).toEqual([
+    {
+      topRounded: true,
+      topSquare: false,
+      bottomRounded: false,
+      bottomSquare: true,
+      wholeElementSquare: false,
+    },
+    {
+      topRounded: false,
+      topSquare: true,
+      bottomRounded: false,
+      bottomSquare: true,
+      wholeElementSquare: false,
+    },
+    {
+      topRounded: false,
+      topSquare: true,
+      bottomRounded: true,
+      bottomSquare: false,
+      wholeElementSquare: false,
+    },
+  ]);
+  expect(
+    connectedGeometry.every(
+      ({ width, rowWidth }) =>
+        rowWidth !== undefined && Math.abs(width - rowWidth) < 1,
+    ),
+  ).toBe(true);
+
+  await code.getByRole("button", { name: "行 3 の入れ子を展開" }).click();
+  await expect(backgrounds).toHaveCount(2);
+  await expect
+    .poll(() =>
+      backgrounds.evaluateAll((elements) =>
+        elements.every((element) => element.classList.contains("rounded-4xl")),
+      ),
+    )
+    .toBe(true);
+});
+
+test("connects middle shortcut keycaps in tooltips", async ({ page }) => {
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.getByRole("button", { name: "Attatch" }).focus();
+
+  const tooltip = page.getByRole("tooltip");
+  await expect(tooltip).toBeVisible();
+  const keycaps = tooltip.locator("kbd kbd");
+  await expect(keycaps).toHaveCount(4);
+  const radii = await keycaps.evaluateAll((elements) =>
+    elements.map((element) => ({
+      full: element.classList.contains("rounded-4xl"),
+      left: element.classList.contains("rounded-l-4xl"),
+      right: element.classList.contains("rounded-r-4xl"),
+      leftSquare: element.classList.contains("rounded-l-none"),
+      rightSquare: element.classList.contains("rounded-r-none"),
+    })),
+  );
+  expect(radii).toEqual([
+    {
+      full: false,
+      left: true,
+      right: false,
+      leftSquare: false,
+      rightSquare: true,
+    },
+    {
+      full: false,
+      left: false,
+      right: false,
+      leftSquare: true,
+      rightSquare: true,
+    },
+    {
+      full: false,
+      left: false,
+      right: false,
+      leftSquare: true,
+      rightSquare: true,
+    },
+    {
+      full: false,
+      left: false,
+      right: true,
+      leftSquare: true,
+      rightSquare: false,
+    },
+  ]);
+  const gaps = await keycaps.evaluateAll((elements) =>
+    elements.slice(1).map((element, index) => {
+      const current = element.getBoundingClientRect();
+      const previous = elements[index].getBoundingClientRect();
+      return current.left - previous.right;
+    }),
+  );
+  expect(gaps.every((gap) => gap > 0)).toBe(true);
+});
+
+test("keeps folded lines synchronized with expanded code", async ({ page }) => {
+  const answer =
+    "```js\nfunction run() {\n  first();\n  if (true) {\n    nested();\n  }\n  last();\n}\nnext();\n```";
+  await mockAnswer(page, answer);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("折りたたみ状態");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const turn = page.locator("[data-chat-last-turn]").last();
+  const sourceCode = turn.locator("pre code");
+  const sourceLines = sourceCode.locator(".code-line");
+  await expect(sourceLines).toHaveCount(9);
+  await sourceCode
+    .getByRole("button", { name: "行 1 の入れ子を折りたたむ" })
+    .click();
+  await expect(sourceLines).toHaveCount(4);
+  await turn.getByRole("button", { name: "Expand code" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Fullscreen Code View" });
+  const expandedCode = dialog.locator("pre code");
+  const expandedLines = expandedCode.locator(".code-line");
+  await expect(expandedLines).toHaveCount(4);
+  await expandedCode.getByRole("button", { name: "5行を展開" }).click();
+  await expect(expandedLines).toHaveCount(9);
+  await dialog.getByRole("button", { name: "Close expanded code" }).click();
+  await expect(sourceLines).toHaveCount(9);
+});
+
+test("scrolls keyboard-focused code lines into view", async ({ page }) => {
+  const codeText = Array.from(
+    { length: 60 },
+    (_, index) => `line${index + 1}();`,
+  ).join("\n");
+  await mockAnswer(page, `\`\`\`js\n${codeText}\n\`\`\``);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("画面外のコード行");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const firstLineNumber = page
+    .locator("[data-chat-last-turn]")
+    .last()
+    .locator("pre code")
+    .last()
+    .getByRole("button", { name: "行 1 を選択" });
+  await expect(firstLineNumber).toHaveCount(1);
+  await expect(
+    page
+      .locator("[data-chat-last-turn]")
+      .last()
+      .locator("pre code")
+      .last()
+      .locator(".code-line"),
+  ).toHaveCount(61, { timeout: 15000 });
+  await firstLineNumber.focus();
+  await expect
+    .poll(() =>
+      firstLineNumber.evaluate((button) => {
+        const row = button.closest(".code-line");
+        if (!row) return false;
+        const bounds = row.getBoundingClientRect();
+        let parent = row.parentElement;
+        while (parent && parent !== document.body) {
+          const overflowY = getComputedStyle(parent).overflowY;
+          if (
+            (overflowY === "auto" || overflowY === "scroll") &&
+            parent.scrollHeight > parent.clientHeight
+          ) {
+            const viewport = parent.getBoundingClientRect();
+            return (
+              bounds.top >= viewport.top && bounds.bottom <= viewport.bottom
+            );
+          }
+          parent = parent.parentElement;
+        }
+        return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+      }),
+    )
+    .toBe(true);
+});
+
+test("selects code lines and folds indented blocks", async ({ page }) => {
+  const answer =
+    "```js\nfunction run() {\n  first();\n  if (true) {\n    nested();\n  }\n  last();\n}\nnext();\n```";
+  await mockAnswer(page, answer);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コードの行を操作");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const code = page.locator("[data-chat-last-turn]").last().locator("pre code");
+  const lines = code.locator(".code-line");
+  await expect(lines).toHaveCount(9);
+  await expect(lines.first()).toHaveCSS("overflow", "visible");
+  await expect(
+    code.getByRole("button", { name: "行 1 の入れ子を折りたたむ" }),
+  ).toBeVisible();
+  await expect(
+    code.getByRole("button", { name: "行 9 の入れ子を折りたたむ" }),
+  ).toHaveCount(0);
+  const firstLineNumber = code.getByRole("button", { name: "行 1 を選択" });
+  const firstLineFold = code.getByRole("button", {
+    name: "行 1 の入れ子を折りたたむ",
+  });
+  const codeBlock = code.locator("xpath=..");
+  await expect(codeBlock).not.toHaveAttribute("tabindex");
+  await expect(firstLineNumber).toHaveAttribute("tabindex", "0");
+  await expect(
+    code.getByRole("button", { name: "行 2 を選択" }),
+  ).toHaveAttribute("tabindex", "-1");
+  const expandCodeButton = page.getByRole("button", { name: "Expand code" });
+  await expandCodeButton.focus();
+  await expect(expandCodeButton).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(firstLineNumber).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(firstLineFold).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(code.getByRole("button", { name: "行 2 を選択" })).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(firstLineNumber).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(firstLineNumber).toBeFocused();
+
+  await code.getByRole("button", { name: "行 1 を選択" }).click();
+  await expect
+    .poll(() => code.evaluate(() => window.getSelection()?.toString()))
+    .toContain("function run() {");
+  await expect(lines.first()).not.toHaveClass(/bg-blue\/50/);
+
+  await code.getByRole("button", { name: "行 1 の入れ子を折りたたむ" }).click();
+  await expect(lines).toHaveCount(4);
+  await expect(lines.nth(1)).toHaveAttribute("data-line-number", "7");
+  await expect(code.getByText("… 5行")).toBeVisible();
+  const collapsedLineWidth = await lines.first().evaluate((line) => {
+    if (!(line instanceof HTMLElement)) throw new Error("Code line is missing");
+    return line.offsetWidth;
+  });
+  const backgroundWidth = await lines
+    .first()
+    .locator("[data-code-line-background]")
+    .evaluate((background) => {
+      if (!(background instanceof HTMLElement)) {
+        throw new Error("Code line background is missing");
+      }
+      return background.offsetWidth;
+    });
+  const expandButtonWidth = await code
+    .getByRole("button", { name: "5行を展開" })
+    .evaluate((button) => {
+      if (!(button instanceof HTMLElement)) {
+        throw new Error("Code line expand button is missing");
+      }
+      return button.offsetWidth;
+    });
+  expect(backgroundWidth).toBe(collapsedLineWidth);
+  expect(expandButtonWidth).toBeLessThan(backgroundWidth);
+  await page.keyboard.press("ArrowRight");
+  await expect(code.getByRole("button", { name: "5行を展開" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(lines).toHaveCount(9);
+  await expect
+    .poll(async () => {
+      const before = await lines.nth(3).evaluate((line) => {
+        if (!(line instanceof HTMLElement))
+          throw new Error("Code line is missing");
+        return line.getBoundingClientRect().top;
+      });
+      await page.waitForTimeout(50);
+      const after = await lines.nth(3).evaluate((line) => {
+        if (!(line instanceof HTMLElement))
+          throw new Error("Code line is missing");
+        return line.getBoundingClientRect().top;
+      });
+      return Math.abs(before - after) < 0.25;
+    })
+    .toBe(true);
+
+  const start = await code
+    .getByRole("button", { name: "行 2 を選択" })
+    .boundingBox();
+  const end = await code
+    .getByRole("button", { name: "行 4 を選択" })
+    .boundingBox();
+  if (!start || !end) throw new Error("Code line number is not visible");
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2);
+  await page.mouse.up();
+  await expect
+    .poll(() => code.evaluate(() => window.getSelection()?.toString()))
+    .toContain("first();");
+  await expect
+    .poll(() => code.evaluate(() => window.getSelection()?.toString()))
+    .toContain("nested();");
+  await expect(lines.nth(1)).not.toHaveClass(/bg-blue\/50/);
+  await expect(lines.nth(2)).not.toHaveClass(/bg-blue\/50/);
+  await expect(lines.nth(3)).not.toHaveClass(/bg-blue\/50/);
+});
+
+test("keeps code horizontal scroll position when Shift+Tab enters line controls", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const wideLine = `const value = "${"x".repeat(240)}";`;
+  await mockAnswer(page, `\`\`\`js\n${wideLine}\nnext();\n\`\`\``);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コードの横スクロール");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+
+  const turn = page.locator("[data-chat-last-turn]").last();
+  const code = turn.locator("pre code");
+  const pre = turn.locator("pre");
+  await expect(pre).toHaveAttribute("tabindex", "0");
+  const copyMessage = turn
+    .getByRole("button", { name: "Copy", exact: true })
+    .last();
+  await expect(copyMessage).toBeVisible();
+  await copyMessage.focus();
+
+  const scrollLeft = 64;
+  await pre.evaluate((element, value) => {
+    if (element.scrollWidth <= element.clientWidth) {
+      throw new Error("Code block did not overflow horizontally");
+    }
+    element.scrollLeft = value;
+  }, scrollLeft);
+  await expect
+    .poll(() => pre.evaluate((element) => element.scrollLeft))
+    .toBe(scrollLeft);
+
+  await page.keyboard.press("Shift+Tab");
+  await expect(code.getByRole("button", { name: "行 1 を選択" })).toBeFocused();
+  await expect
+    .poll(() => pre.evaluate((element) => element.scrollLeft))
+    .toBe(scrollLeft);
 });
 
 test("does not animate streamed code layout while its size changes", async ({

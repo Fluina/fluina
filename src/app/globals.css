@@ -80,9 +80,9 @@
   --tw-prose-quotes: var(--fore-5);
   --tw-prose-quote-borders: var(--back-5);
   --tw-prose-captions: var(--fore-1);
-  --tw-prose-kbd: var(--color-orange);
+  --tw-prose-kbd: var(--color-blue);
   --tw-prose-kbd-shadows: none;
-  --tw-prose-code: var(--color-orange);
+  --tw-prose-code: var(--color-blue);
   --tw-prose-pre-code: var(--fore-1);
   --tw-prose-pre-bg: var(--back-1);
   --tw-prose-th-borders: var(--back-5);
@@ -140,18 +140,6 @@
   vertical-align: top;
   white-space: pre;
   user-select: text;
-}
-
-.code-line::before {
-  position: absolute;
-  left: 0;
-  width: var(--code-line-number-width);
-  color: var(--fore-5);
-  content: attr(data-line-number);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  user-select: none;
-  pointer-events: none;
 }
 
 [data-theme="dark"] .syntax-token {
@@ -279,6 +267,15 @@
 }
 
 @layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-serif);
+  }
+
   html,
   body,
   *,

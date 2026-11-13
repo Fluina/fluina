@@ -21,6 +21,9 @@ export const askController = new Elysia({ prefix: "/ask" })
   })
   .post(
     "/uploads",
+    {
+      body: AskSchema.uploadBody,
+    },
     async ({ body, set }) => {
       try {
         set.headers["Cache-Control"] = "no-store";
@@ -33,12 +36,12 @@ export const askController = new Elysia({ prefix: "/ask" })
         };
       }
     },
-    {
-      body: AskSchema.uploadBody,
-    },
   )
   .post(
     "/",
+    {
+      body: AskSchema.body,
+    },
     async ({ body, request, set }) => {
       try {
         const files = body.files ?? [];
@@ -122,12 +125,12 @@ export const askController = new Elysia({ prefix: "/ask" })
         };
       }
     },
-    {
-      body: AskSchema.body,
-    },
   )
   .post(
     "/summarize",
+    {
+      body: AskSchema.summarizeBody,
+    },
     async ({ body, request, set }) => {
       try {
         return {
@@ -143,8 +146,5 @@ export const askController = new Elysia({ prefix: "/ask" })
           err instanceof OpenRouterRequestError ? err.statusCode : 500;
         return { error: "Failed to summarize chat history." };
       }
-    },
-    {
-      body: AskSchema.summarizeBody,
     },
   );

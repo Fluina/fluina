@@ -134,7 +134,7 @@ export const AskSchema = {
   body: t.Object({
     prompt: t.String(),
     summary: t.Optional(t.String({ maxLength: 12000 })),
-    history: t.Optional(t.ArrayString(historyMessage, { maxItems: 20 })),
+    history: t.Optional(t.Array(historyMessage, { maxItems: 20 })),
     files: t.Optional(t.Array(attachmentReference)),
   }),
   summarizeBody: t.Object({
