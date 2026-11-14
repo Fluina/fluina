@@ -1,6 +1,6 @@
 {
   "name": "fluina",
-  "version": "0.1.122",
+  "version": "0.1.123",
   "packageManager": "bun@1.4.4",
   "private": true,
   "scripts": {
