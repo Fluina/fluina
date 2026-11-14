@@ -668,11 +668,13 @@ test("sticks table headers and code controls to the chat viewport while scrollin
 
   const turn = page.locator("[data-chat-last-turn]").last();
   const tableRegion = turn.getByRole("region", { name: "表" });
+  const tableFrame = turn.locator("[data-table-frame]");
   const stickyHeader = turn.locator("[data-sticky-table-header]");
   const headerCell = turn
     .locator("[data-sticky-table-header] thead th")
     .first();
   const codeFrame = turn.locator("[data-code-frame]").last();
+  const codeSurface = codeFrame.locator("[data-code-frame-surface]");
   const codeHeader = codeFrame.locator("[data-code-header]");
   const viewport = await turn.evaluateHandle((element) => {
     let parent = element.parentElement;
@@ -707,6 +709,7 @@ test("sticks table headers and code controls to the chat viewport while scrollin
     }, viewport);
 
   await expect(stickyHeader).toHaveCSS("border-top-left-radius", "16px");
+  await expect(tableFrame).toHaveCSS("border-top-left-radius", "16px");
   await tableRegion.evaluate((region, host) => {
     if (!(host instanceof HTMLElement)) {
       throw new Error("Chat scroll viewport not found");
@@ -725,6 +728,7 @@ test("sticks table headers and code controls to the chat viewport while scrollin
   await expect.poll(() => topOffset(headerCell)).toBeLessThan(2);
   await expect.poll(() => topOffset(headerCell)).toBeGreaterThan(-2);
   await expect(stickyHeader).toHaveCSS("border-top-left-radius", "0px");
+  await expect(tableFrame).toHaveCSS("border-top-left-radius", "0px");
   await expect
     .poll(() =>
       viewport.evaluate((element) =>
@@ -740,6 +744,7 @@ test("sticks table headers and code controls to the chat viewport while scrollin
       ),
     )
     .toBe("16px");
+  await expect(codeSurface).toHaveCSS("border-top-left-radius", "16px");
   await scrollToTopEdge(codeHeader);
   await expect.poll(() => topOffset(codeHeader)).toBeLessThan(2);
   await expect.poll(() => topOffset(codeHeader)).toBeGreaterThan(-2);
@@ -750,6 +755,7 @@ test("sticks table headers and code controls to the chat viewport while scrollin
       ),
     )
     .toBe("0px");
+  await expect(codeSurface).toHaveCSS("border-top-left-radius", "0px");
   await expect
     .poll(() =>
       viewport.evaluate((element) =>
@@ -757,6 +763,18 @@ test("sticks table headers and code controls to the chat viewport while scrollin
       ),
     )
     .toBe("0");
+
+  await viewport.evaluate((host) => {
+    host.scrollTop = 0;
+  });
+  await expect(tableFrame).toHaveCSS("border-top-left-radius", "16px");
+  await expect(codeSurface).toHaveCSS("border-top-left-radius", "16px");
+});
+
+test("does not cache the ask page between deployments", async ({ page }) => {
+  const response = await page.goto("/ask");
+  expect(response).not.toBeNull();
+  expect(response?.headers()["cache-control"]).toContain("no-store");
 });
 
 test("keeps a mobile table header steady while scrolling", async ({ page }) => {

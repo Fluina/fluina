@@ -461,6 +461,8 @@ const MarkdownTable = ({
       const isPinned =
         frameBounds.top < viewportTop &&
         frameBounds.bottom > viewportTop + headerBounds.height;
+      frame.style.borderTopLeftRadius = isPinned ? "0px" : "";
+      frame.style.borderTopRightRadius = isPinned ? "0px" : "";
       stickyHeader.style.borderTopLeftRadius = isPinned ? "0px" : "";
       stickyHeader.style.borderTopRightRadius = isPinned ? "0px" : "";
       setStickyHeaderActive(host, stickyHeader, isPinned);
@@ -497,6 +499,8 @@ const MarkdownTable = ({
       resizeObserver.disconnect();
       mutationObserver.disconnect();
       cancelAnimationFrame(updateFrame);
+      frame.style.borderTopLeftRadius = "";
+      frame.style.borderTopRightRadius = "";
       stickyHeader.style.borderTopLeftRadius = "";
       stickyHeader.style.borderTopRightRadius = "";
       setStickyHeaderActive(host, stickyHeader, false);
@@ -504,7 +508,10 @@ const MarkdownTable = ({
   }, [elementRef]);
 
   return (
-    <div className="relative mx-0.5 rounded-2xl border border-back-5 has-[>section:focus-visible]:ring-2 has-[>section:focus-visible]:ring-fore-1 all">
+    <div
+      data-table-frame=""
+      className="relative mx-0.5 rounded-2xl border border-back-5 has-[>section:focus-visible]:ring-2 has-[>section:focus-visible]:ring-fore-1 all"
+    >
       {tableHead && (
         <div
           ref={stickyHeaderRef}
@@ -1388,8 +1395,11 @@ const CodeControls = ({
     if (fullscreen) return;
     const header = headerRef.current;
     const frame = header?.closest<HTMLElement>("[data-code-frame]");
+    const surface = frame?.querySelector<HTMLElement>(
+      "[data-code-frame-surface]",
+    );
     const host = header ? findVerticalScrollHost(header) : null;
-    if (!header || !frame || !host) return;
+    if (!header || !frame || !surface || !host) return;
 
     let updateFrame = 0;
     const update = () => {
@@ -1399,6 +1409,8 @@ const CodeControls = ({
       const isPinned =
         frameBounds.top < viewportTop &&
         frameBounds.bottom > viewportTop + headerBounds.height;
+      surface.style.borderTopLeftRadius = isPinned ? "0px" : "";
+      surface.style.borderTopRightRadius = isPinned ? "0px" : "";
       setIsSticky(isPinned);
       setStickyHeaderActive(host, header, isPinned);
     };
@@ -1426,6 +1438,8 @@ const CodeControls = ({
       visualViewport?.removeEventListener("scroll", scheduleUpdate);
       resizeObserver.disconnect();
       cancelAnimationFrame(updateFrame);
+      surface.style.borderTopLeftRadius = "";
+      surface.style.borderTopRightRadius = "";
       setStickyHeaderActive(host, header, false);
     };
   }, [fullscreen]);
@@ -1668,6 +1682,7 @@ const MarkdownPre = ({
       <MorphingDialogFrame
         id={isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}
         enabled={sharedLayoutEnabled}
+        data-code-frame-surface=""
         className={`overflow-visible mx-0.5 rounded-2xl border border-back-5 has-[pre:focus-visible]:ring-2 has-[pre:focus-visible]:ring-fore-1 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
       >
         <div className="overflow-clip rounded-b-2xl">
