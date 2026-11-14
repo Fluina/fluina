@@ -460,13 +460,18 @@ const MarkdownTable = ({
       subtree: true,
     });
 
-    host.addEventListener("scroll", scheduleUpdate, { passive: true });
+    const visualViewport = window.visualViewport;
+    host.addEventListener("scroll", update, { passive: true });
     window.addEventListener("resize", scheduleUpdate);
+    visualViewport?.addEventListener("resize", scheduleUpdate);
+    visualViewport?.addEventListener("scroll", scheduleUpdate);
     update();
 
     return () => {
-      host.removeEventListener("scroll", scheduleUpdate);
+      host.removeEventListener("scroll", update);
       window.removeEventListener("resize", scheduleUpdate);
+      visualViewport?.removeEventListener("resize", scheduleUpdate);
+      visualViewport?.removeEventListener("scroll", scheduleUpdate);
       resizeObserver.disconnect();
       mutationObserver.disconnect();
       cancelAnimationFrame(frame);
@@ -1356,8 +1361,7 @@ const CodeControls = ({
       const headerBounds = header.getBoundingClientRect();
       const isPinned =
         frameBounds.top < viewportTop &&
-        frameBounds.bottom > viewportTop + headerBounds.height &&
-        headerBounds.top <= viewportTop + 1;
+        frameBounds.bottom > viewportTop + headerBounds.height;
       setIsSticky(isPinned);
       setStickyHeaderActive(host, header, isPinned);
     };
@@ -1371,13 +1375,18 @@ const CodeControls = ({
     const resizeObserver = new ResizeObserver(scheduleUpdate);
     resizeObserver.observe(frame);
     resizeObserver.observe(header);
+    const visualViewport = window.visualViewport;
     host.addEventListener("scroll", scheduleUpdate, { passive: true });
     window.addEventListener("resize", scheduleUpdate);
+    visualViewport?.addEventListener("resize", scheduleUpdate);
+    visualViewport?.addEventListener("scroll", scheduleUpdate);
     update();
 
     return () => {
       host.removeEventListener("scroll", scheduleUpdate);
       window.removeEventListener("resize", scheduleUpdate);
+      visualViewport?.removeEventListener("resize", scheduleUpdate);
+      visualViewport?.removeEventListener("scroll", scheduleUpdate);
       resizeObserver.disconnect();
       cancelAnimationFrame(updateFrame);
       setStickyHeaderActive(host, header, false);

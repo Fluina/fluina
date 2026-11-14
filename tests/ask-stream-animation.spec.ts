@@ -703,6 +703,20 @@ test("sticks table headers and code controls to the chat viewport while scrollin
       return bounds.top - (viewportBounds.top + host.clientTop);
     }, viewport);
 
+  await tableRegion.evaluate((region, host) => {
+    if (!(host instanceof HTMLElement)) {
+      throw new Error("Chat scroll viewport not found");
+    }
+    host.style.scrollBehavior = "auto";
+    const viewportTop = host.getBoundingClientRect().top + host.clientTop;
+    host.scrollTop += region.getBoundingClientRect().top - viewportTop - 24;
+  }, viewport);
+  await viewport.evaluate(
+    (_host) =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
   await scrollToTopEdge(headerCell);
   await expect.poll(() => topOffset(headerCell)).toBeLessThan(2);
   await expect.poll(() => topOffset(headerCell)).toBeGreaterThan(-2);
@@ -798,6 +812,56 @@ test("keeps a mobile table header steady while scrolling", async ({ page }) => {
 
   expect(offsets.every((offset) => Math.abs(offset) < 1.5)).toBe(true);
   expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThan(1.5);
+});
+
+test("squares code toolbar corners when sticky in WebKit", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const codeLines = Array.from(
+    { length: 60 },
+    (_, index) => `line${index + 1}();`,
+  ).join("\n");
+  await mockAnswer(page, `\`\`\`js\n${codeLines}\n\`\`\``);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コードヘッダー");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+
+  const turn = page.locator("[data-chat-last-turn]").last();
+  const frame = turn.locator("[data-code-frame]");
+  const header = frame.locator("[data-code-header]");
+  const viewport = await turn.evaluateHandle((element) => {
+    let parent = element.parentElement;
+    while (parent && getComputedStyle(parent).overflowY !== "auto") {
+      parent = parent.parentElement;
+    }
+    if (!(parent instanceof HTMLElement)) {
+      throw new Error("Chat scroll viewport not found");
+    }
+    return parent;
+  });
+
+  await viewport.evaluate((host) => {
+    host.style.scrollBehavior = "auto";
+    host.scrollTop = 0;
+  });
+  await expect(header).toHaveCSS("border-top-left-radius", "16px");
+  await frame.evaluate((element, host) => {
+    if (!(host instanceof HTMLElement)) {
+      throw new Error("Chat scroll viewport not found");
+    }
+    const viewportTop = host.getBoundingClientRect().top + host.clientTop;
+    host.scrollTop += element.getBoundingClientRect().top - viewportTop + 24;
+  }, viewport);
+
+  await expect
+    .poll(() =>
+      header.evaluate(
+        (element) => getComputedStyle(element).borderTopLeftRadius,
+      ),
+    )
+    .toBe("0px");
 });
 
 for (const viewport of [
