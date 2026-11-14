@@ -1270,6 +1270,10 @@ test("joins adjacent collapsed-line backgrounds but keeps isolated corners round
 
   const backgrounds = code.locator("[data-code-line-background]");
   await expect(backgrounds).toHaveCount(3);
+  await expect(backgrounds.first()).toHaveCSS(
+    "transition-property",
+    "border-radius",
+  );
   const numberAlignment = await code.evaluate((element) => {
     const buttons = ["0", "9"].map((lineIndex) => {
       const button = element.querySelector<HTMLElement>(
@@ -1354,6 +1358,10 @@ test("connects middle shortcut keycaps in tooltips", async ({ page }) => {
   await expect(tooltip).toBeVisible();
   const keycaps = tooltip.locator("kbd kbd");
   await expect(keycaps).toHaveCount(4);
+  await expect(keycaps.first()).toHaveCSS(
+    "transition-property",
+    "border-radius",
+  );
   const radii = await keycaps.evaluateAll((elements) =>
     elements.map((element) => ({
       full: element.classList.contains("rounded-4xl"),

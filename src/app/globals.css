@@ -262,6 +262,12 @@
   @apply transition-transform duration-(--transition-duration);
 }
 
+@utility radius {
+  transition-property: border-radius;
+  transition-duration: var(--transition-duration);
+  transition-timing-function: var(--transition-timing-function);
+}
+
 @utility none {
   @apply transition-none;
 }

@@ -1133,7 +1133,7 @@ const MarkdownCode = ({
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                transition={THEME}
+                transition={TRANSITION}
                 className="code-line isolate rounded-4xl"
                 style={{
                   minHeight: 0,
@@ -1152,7 +1152,7 @@ const MarkdownCode = ({
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={TRANSITION}
-                      className={`pointer-events-none absolute -right-1 top-0 bottom-0 z-0 ${collapsedBackgroundRadius} bg-blue/50`}
+                      className={`radius pointer-events-none absolute -right-1 top-0 bottom-0 z-0 ${collapsedBackgroundRadius} bg-blue/50`}
                       style={{
                         left: "calc(-0.25rem - var(--code-line-number-width) + 1ch)",
                       }}

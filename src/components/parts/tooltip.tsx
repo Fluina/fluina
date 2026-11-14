@@ -76,7 +76,7 @@ export function Tooltip({
                 return (
                   <kbd
                     key={key}
-                    className={`whitespace-nowrap ${radius} bg-fore-5/50 px-1 py-0.5 text-xs text-center text-back-5`}
+                    className={`radius whitespace-nowrap ${radius} bg-fore-5/50 px-1 py-0.5 text-xs text-center text-back-5`}
                   >
                     {key}
                   </kbd>
