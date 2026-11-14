@@ -668,6 +668,7 @@ test("sticks table headers and code controls to the chat viewport while scrollin
 
   const turn = page.locator("[data-chat-last-turn]").last();
   const tableRegion = turn.getByRole("region", { name: "表" });
+  const stickyHeader = turn.locator("[data-sticky-table-header]");
   const headerCell = turn
     .locator("[data-sticky-table-header] thead th")
     .first();
@@ -705,6 +706,7 @@ test("sticks table headers and code controls to the chat viewport while scrollin
       return bounds.top - (viewportBounds.top + host.clientTop);
     }, viewport);
 
+  await expect(stickyHeader).toHaveCSS("border-top-left-radius", "16px");
   await tableRegion.evaluate((region, host) => {
     if (!(host instanceof HTMLElement)) {
       throw new Error("Chat scroll viewport not found");
@@ -722,6 +724,7 @@ test("sticks table headers and code controls to the chat viewport while scrollin
   await scrollToTopEdge(headerCell);
   await expect.poll(() => topOffset(headerCell)).toBeLessThan(2);
   await expect.poll(() => topOffset(headerCell)).toBeGreaterThan(-2);
+  await expect(stickyHeader).toHaveCSS("border-top-left-radius", "0px");
   await expect
     .poll(() =>
       viewport.evaluate((element) =>

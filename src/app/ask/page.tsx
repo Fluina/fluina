@@ -98,11 +98,10 @@ import { getScrollFadeSize, useNativeScroll } from "@/lib/scrollbar";
 const PLACEHOLDERS = [
   "Fluinaに訊いてみて！",
   "/ を入力してコマンドを発動！",
-  "ドラッグ＆ドロップでファイルを添付！",
   "# を入力してタグを追記！",
   "リンクを挿入！",
-  "ファイルとテキストを連関！",
   "コピペで註記！",
+  "ドラッグ＆ドロップでファイルを添付！",
   "今日も、おつかれ様。",
 ];
 
@@ -462,6 +461,8 @@ const MarkdownTable = ({
       const isPinned =
         frameBounds.top < viewportTop &&
         frameBounds.bottom > viewportTop + headerBounds.height;
+      stickyHeader.style.borderTopLeftRadius = isPinned ? "0px" : "";
+      stickyHeader.style.borderTopRightRadius = isPinned ? "0px" : "";
       setStickyHeaderActive(host, stickyHeader, isPinned);
     };
     const scheduleUpdate = () => {
@@ -496,6 +497,8 @@ const MarkdownTable = ({
       resizeObserver.disconnect();
       mutationObserver.disconnect();
       cancelAnimationFrame(updateFrame);
+      stickyHeader.style.borderTopLeftRadius = "";
+      stickyHeader.style.borderTopRightRadius = "";
       setStickyHeaderActive(host, stickyHeader, false);
     };
   }, [elementRef]);
