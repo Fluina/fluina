@@ -740,6 +740,66 @@ test("sticks table headers and code controls to the chat viewport while scrollin
     .toBe("0");
 });
 
+test("keeps a mobile table header steady while scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const rows = Array.from(
+    { length: 40 },
+    (_, index) => `| ${"mobile wide ".repeat(8)}${index} | value |`,
+  ).join("\n");
+  await mockAnswer(page, `| Description | Value |\n| --- | --- |\n${rows}`);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("モバイル表ヘッダー");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+
+  const turn = page.locator("[data-chat-last-turn]").last();
+  const region = turn.getByRole("region", { name: "表" });
+  const header = region.locator("thead");
+  const viewport = await turn.evaluateHandle((element) => {
+    let parent = element.parentElement;
+    while (parent && getComputedStyle(parent).overflowY !== "auto") {
+      parent = parent.parentElement;
+    }
+    if (!(parent instanceof HTMLElement)) {
+      throw new Error("Chat scroll viewport not found");
+    }
+    return parent;
+  });
+
+  await header.evaluate((element, host) => {
+    if (!(host instanceof HTMLElement)) {
+      throw new Error("Chat scroll viewport not found");
+    }
+    const viewportTop = host.getBoundingClientRect().top + host.clientTop;
+    host.scrollTop += element.getBoundingClientRect().top - viewportTop + 8;
+  }, viewport);
+
+  const offsets = await region.evaluate(async (section, host) => {
+    if (!(host instanceof HTMLElement)) {
+      throw new Error("Chat scroll viewport not found");
+    }
+    const thead = section.querySelector("thead");
+    if (!thead) throw new Error("Table header not found");
+    const samples: number[] = [];
+    for (let index = 0; index < 24; index += 1) {
+      host.scrollTop += 6;
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      samples.push(
+        thead.getBoundingClientRect().top -
+          (host.getBoundingClientRect().top + host.clientTop),
+      );
+    }
+    return samples;
+  }, viewport);
+
+  expect(offsets.every((offset) => Math.abs(offset) < 1.5)).toBe(true);
+  expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThan(1.5);
+});
+
 for (const viewport of [
   { width: 390, height: 844 },
   { width: 1440, height: 900 },
@@ -1017,8 +1077,10 @@ test("keeps the last code line above the horizontal scrollbar", async ({
 test("joins adjacent collapsed-line backgrounds but keeps isolated corners rounded", async ({
   page,
 }) => {
-  const answer =
-    "```text\nfirst\n  value1\nsecond\n  value2\nthird\n  value3\n```";
+  const answer = `\`\`\`text\nfirst\n  value1\nsecond\n  value2\nthird\n  value3\n${Array.from(
+    { length: 10 },
+    (_, index) => `line ${index + 7}`,
+  ).join("\n")}\n\`\`\``;
   await mockAnswer(page, answer);
   await page.goto("/ask");
   await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
@@ -1042,6 +1104,25 @@ test("joins adjacent collapsed-line backgrounds but keeps isolated corners round
 
   const backgrounds = code.locator("[data-code-line-background]");
   await expect(backgrounds).toHaveCount(3);
+  const numberAlignment = await code.evaluate((element) => {
+    const buttons = ["0", "9"].map((lineIndex) => {
+      const button = element.querySelector<HTMLElement>(
+        `.code-line[data-line-index="${lineIndex}"] .code-line-number`,
+      );
+      if (!button) throw new Error(`Line ${lineIndex} number not found`);
+      const range = document.createRange();
+      range.selectNodeContents(button);
+      return {
+        right: range.getBoundingClientRect().right,
+        width: button.getBoundingClientRect().width,
+      };
+    });
+    return buttons;
+  });
+  expect(
+    Math.abs(numberAlignment[0].right - numberAlignment[1].right),
+  ).toBeLessThan(1);
+  expect(numberAlignment[0].width).toBe(numberAlignment[1].width);
   const connectedGeometry = await backgrounds.evaluateAll((elements) =>
     elements.map((element) => ({
       topRounded: element.classList.contains("rounded-t-2xl"),
@@ -1081,7 +1162,9 @@ test("joins adjacent collapsed-line backgrounds but keeps isolated corners round
   expect(
     connectedGeometry.every(
       ({ width, rowWidth }) =>
-        rowWidth !== undefined && Math.abs(width - rowWidth) < 1,
+        rowWidth !== undefined &&
+        width - rowWidth > 10 &&
+        width - rowWidth <= 24,
     ),
   ).toBe(true);
 
@@ -1312,7 +1395,8 @@ test("selects code lines and folds indented blocks", async ({ page }) => {
       }
       return button.offsetWidth;
     });
-  expect(backgroundWidth).toBe(collapsedLineWidth);
+  expect(backgroundWidth).toBeGreaterThan(collapsedLineWidth);
+  expect(backgroundWidth - collapsedLineWidth).toBeLessThanOrEqual(10);
   expect(expandButtonWidth).toBeLessThan(backgroundWidth);
   await page.keyboard.press("ArrowRight");
   await expect(code.getByRole("button", { name: "5行を展開" })).toBeFocused();

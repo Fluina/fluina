@@ -434,11 +434,15 @@ const MarkdownTable = ({
       );
       const offset = Math.min(Math.max(viewportTop - headerTop, 0), maxOffset);
 
-      appliedOffset = offset;
-      header.style.transform = offset
-        ? `${originalTransform} translateY(${offset}px)`.trim()
-        : originalTransform;
-      setStickyHeaderActive(host, header, offset > 1);
+      const pixelRatio = window.devicePixelRatio || 1;
+      const snappedOffset = Math.round(offset * pixelRatio) / pixelRatio;
+      if (snappedOffset !== appliedOffset) {
+        appliedOffset = snappedOffset;
+        header.style.transform = snappedOffset
+          ? `${originalTransform} translate3d(0, ${snappedOffset}px, 0)`.trim()
+          : originalTransform;
+      }
+      setStickyHeaderActive(host, header, snappedOffset > 1);
     };
     const scheduleUpdate = () => {
       if (frame) return;
@@ -1069,9 +1073,9 @@ const MarkdownCode = ({
               joinsPrevious && joinsNext
                 ? "rounded-t-none rounded-b-none"
                 : joinsPrevious
-                  ? "rounded-t-none rounded-b-xl"
+                  ? "rounded-t-none rounded-b-2xl"
                   : joinsNext
-                    ? "rounded-t-xl rounded-b-none"
+                    ? "rounded-t-2xl rounded-b-none"
                     : "rounded-4xl";
             return (
               <motion.span
@@ -1098,14 +1102,20 @@ const MarkdownCode = ({
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
                       transition={TRANSITION}
-                      className={`pointer-events-none absolute inset-0 z-0 ${collapsedBackgroundRadius} bg-blue/50`}
+                      className={`pointer-events-none absolute -right-1 top-0 bottom-0 z-0 ${collapsedBackgroundRadius} bg-blue/50`}
+                      style={{
+                        left: "calc(-0.25rem - var(--code-line-number-width) + 1ch)",
+                      }}
                     />
                   )}
                 </AnimatePresence>
                 <Button
                   ripple={false}
                   className="code-line-number absolute left-0 z-10 h-lh text-fore-5 [font-variant-numeric:tabular-nums] select-none! hover:text-fore-1"
-                  style={{ width: "var(--code-line-number-width)" }}
+                  style={{
+                    width: "var(--code-line-number-width)",
+                    justifyContent: "flex-end",
+                  }}
                   shape="circle"
                   data-code-line-control="number"
                   excludeFromTabOrder={
