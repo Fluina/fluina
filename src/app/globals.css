@@ -330,6 +330,12 @@
   initial-value: 0;
 }
 
+@property --scroll-fade-top-effective {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
 @property --scroll-fade-bottom {
   syntax: "<number>";
   inherits: true;
@@ -417,6 +423,7 @@
 [data-scroll-edge-fade] {
   --scroll-fade-min-alpha: 0;
   --scroll-fade-top: 0;
+  --scroll-fade-top-effective: var(--scroll-fade-top);
   --scroll-fade-bottom: 0;
   --scroll-fade-left: 0;
   --scroll-fade-right: 0;
@@ -424,12 +431,22 @@
   position: relative;
 }
 
+[data-scroll-edge-fade][data-sticky-header-active],
+[data-scroll-edge-fade]:has([data-sticky-active]) {
+  --scroll-fade-top-effective: 0;
+
+  transition-property:
+    --scroll-fade-top-effective, --scroll-fade-bottom, --scroll-fade-left,
+    --scroll-fade-right;
+}
+
 [data-scroll-edge-fade] {
   mask-image:
     linear-gradient(
       to bottom,
       rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--scroll-fade-top) * var(--scroll-fade-size))
+      var(--color-back-0)
+        calc(var(--scroll-fade-top-effective) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to top,
@@ -455,7 +472,8 @@
     linear-gradient(
       to bottom,
       rgb(0 0 0 / var(--scroll-fade-min-alpha)) 0,
-      var(--color-back-0) calc(var(--scroll-fade-top) * var(--scroll-fade-size))
+      var(--color-back-0)
+        calc(var(--scroll-fade-top-effective) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to top,
@@ -500,14 +518,18 @@
 
 .scroll-edge-blur {
   @apply absolute z-10 pointer-events-none;
+  --scroll-fade-top-effective: var(--scroll-fade-top);
   -webkit-backdrop-filter: blur(var(--blur-xs));
   backdrop-filter: blur(var(--blur-xs));
+  transition: --scroll-fade-top-effective var(--transition-duration)
+    var(--transition-timing-function);
 
   mask-image:
     linear-gradient(
       to bottom,
       var(--color-back-0) 0,
-      transparent calc(var(--scroll-fade-top) * var(--scroll-fade-size))
+      transparent
+        calc(var(--scroll-fade-top-effective) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to top,
@@ -530,7 +552,8 @@
     linear-gradient(
       to bottom,
       var(--color-back-0) 0,
-      transparent calc(var(--scroll-fade-top) * var(--scroll-fade-size))
+      transparent
+        calc(var(--scroll-fade-top-effective) * var(--scroll-fade-size))
     ),
     linear-gradient(
       to top,
@@ -548,6 +571,11 @@
       transparent calc(var(--scroll-fade-right) * var(--scroll-fade-size))
     );
   -webkit-mask-composite: source-over;
+}
+
+[data-scroll-edge-fade][data-sticky-header-active] + .scroll-edge-blur,
+[data-scroll-edge-fade]:has([data-sticky-active]) + .scroll-edge-blur {
+  --scroll-fade-top-effective: 0;
 }
 
 .code-content-edge-blur {

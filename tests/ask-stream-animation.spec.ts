@@ -674,7 +674,7 @@ test("sticks table headers and code controls to the chat viewport while scrollin
     .locator("[data-sticky-table-header] thead th")
     .first();
   const codeFrame = turn.locator("[data-code-frame]").last();
-  const codeSurface = codeFrame.locator("[data-code-frame-surface]");
+  const codeSurface = codeFrame.locator(":scope > div");
   const codeHeader = codeFrame.locator("[data-code-header]");
   const viewport = await turn.evaluateHandle((element) => {
     let parent = element.parentElement;
@@ -758,11 +758,69 @@ test("sticks table headers and code controls to the chat viewport while scrollin
   await expect(codeSurface).toHaveCSS("border-top-left-radius", "0px");
   await expect
     .poll(() =>
+      codeHeader.evaluate((element) =>
+        element.hasAttribute("data-sticky-active"),
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
       viewport.evaluate((element) =>
         element.style.getPropertyValue("--scroll-fade-top"),
       ),
     )
     .toBe("0");
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) =>
+        element.hasAttribute("data-sticky-header-active"),
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) =>
+        getComputedStyle(element).transitionProperty.includes(
+          "--scroll-fade-top-effective",
+        ),
+      ),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) =>
+        getComputedStyle(element).getPropertyValue(
+          "--scroll-fade-top-effective",
+        ),
+      ),
+    )
+    .toBe("0");
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) => {
+        const overlay = element.nextElementSibling;
+        if (!(overlay instanceof HTMLElement)) {
+          throw new Error("Scroll fade overlay not found");
+        }
+        return getComputedStyle(overlay).getPropertyValue(
+          "--scroll-fade-top-effective",
+        );
+      }),
+    )
+    .toBe("0");
+  await expect
+    .poll(() =>
+      viewport.evaluate((element) => {
+        const overlay = element.nextElementSibling;
+        if (!(overlay instanceof HTMLElement)) {
+          throw new Error("Scroll fade overlay not found");
+        }
+        return getComputedStyle(overlay).transitionProperty.includes(
+          "--scroll-fade-top-effective",
+        );
+      }),
+    )
+    .toBe(true);
 
   await viewport.evaluate((host) => {
     host.scrollTop = 0;

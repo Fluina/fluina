@@ -372,6 +372,7 @@ const setStickyHeaderActive = (
   header: HTMLElement,
   isActive: boolean,
 ) => {
+  header.toggleAttribute("data-sticky-active", isActive);
   const activeHeaders = stickyHeadersByHost.get(host) ?? new Set<HTMLElement>();
   const wasActive = activeHeaders.has(header);
   if (isActive) activeHeaders.add(header);
@@ -1395,14 +1396,19 @@ const CodeControls = ({
     if (fullscreen) return;
     const header = headerRef.current;
     const frame = header?.closest<HTMLElement>("[data-code-frame]");
-    const surface = frame?.querySelector<HTMLElement>(
-      "[data-code-frame-surface]",
-    );
-    const host = header ? findVerticalScrollHost(header) : null;
-    if (!header || !frame || !surface || !host) return;
+    const surface = frame?.firstElementChild;
+    if (!header || !frame || !(surface instanceof HTMLElement)) return;
 
     let updateFrame = 0;
+    let activeHost: HTMLElement | null = null;
     const update = () => {
+      const host = findVerticalScrollHost(header);
+      if (!host) return;
+      if (activeHost && activeHost !== host) {
+        setStickyHeaderActive(activeHost, header, false);
+      }
+      activeHost = host;
+
       const viewportTop = host.getBoundingClientRect().top + host.clientTop;
       const frameBounds = frame.getBoundingClientRect();
       const headerBounds = header.getBoundingClientRect();
@@ -1425,14 +1431,15 @@ const CodeControls = ({
     resizeObserver.observe(frame);
     resizeObserver.observe(header);
     const visualViewport = window.visualViewport;
-    host.addEventListener("scroll", scheduleUpdate, { passive: true });
+    document.addEventListener("scroll", scheduleUpdate, true);
     window.addEventListener("resize", scheduleUpdate);
     visualViewport?.addEventListener("resize", scheduleUpdate);
     visualViewport?.addEventListener("scroll", scheduleUpdate);
     update();
+    scheduleUpdate();
 
     return () => {
-      host.removeEventListener("scroll", scheduleUpdate);
+      document.removeEventListener("scroll", scheduleUpdate, true);
       window.removeEventListener("resize", scheduleUpdate);
       visualViewport?.removeEventListener("resize", scheduleUpdate);
       visualViewport?.removeEventListener("scroll", scheduleUpdate);
@@ -1440,7 +1447,7 @@ const CodeControls = ({
       cancelAnimationFrame(updateFrame);
       surface.style.borderTopLeftRadius = "";
       surface.style.borderTopRightRadius = "";
-      setStickyHeaderActive(host, header, false);
+      if (activeHost) setStickyHeaderActive(activeHost, header, false);
     };
   }, [fullscreen]);
 
@@ -1682,7 +1689,6 @@ const MarkdownPre = ({
       <MorphingDialogFrame
         id={isExpanded && dialog.expanded ? dialog.expanded.id : layoutId}
         enabled={sharedLayoutEnabled}
-        data-code-frame-surface=""
         className={`overflow-visible mx-0.5 rounded-2xl border border-back-5 has-[pre:focus-visible]:ring-2 has-[pre:focus-visible]:ring-fore-1 ${isExpanded ? "pointer-events-none opacity-0" : ""}`}
       >
         <div className="overflow-clip rounded-b-2xl">
