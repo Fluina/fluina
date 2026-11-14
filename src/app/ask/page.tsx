@@ -2865,6 +2865,7 @@ export default function Ask() {
   const pendingLineBreakTimeoutRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const pendingLineBreakRef = useRef(false);
 
   const collapseComposer = useCallback(() => {
     setIsExpanded(false);
@@ -4317,10 +4318,12 @@ export default function Ask() {
     }
 
     const editorWidth = editor.getBoundingClientRect().width;
-    const measurement = editor.cloneNode(true) as HTMLDivElement;
+    const measurement = editor.cloneNode(false) as HTMLDivElement;
     measurement.removeAttribute("id");
     measurement.setAttribute("aria-hidden", "true");
     measurement.contentEditable = "false";
+    // Keep a trailing empty line measurable in the cloned editor.
+    measurement.textContent = value.endsWith("\n") ? `${value}\u200B` : value;
     measurement.style.position = "absolute";
     measurement.style.left = "-10000px";
     measurement.style.top = "0";
@@ -4370,7 +4373,14 @@ export default function Ask() {
         scrollContainer.scrollTop = currentScrollTop;
       }
     }
-  }, [collapseComposer, isAdjusted, isScrollable, isExpanded, scrollRef]);
+  }, [
+    collapseComposer,
+    isAdjusted,
+    isScrollable,
+    isExpanded,
+    scrollRef,
+    value,
+  ]);
 
   useLayoutEffect(() => {
     if (value === undefined) return;
@@ -4667,6 +4677,24 @@ export default function Ask() {
     ) {
       e.preventDefault();
       return;
+    }
+
+    if (
+      e.key === "Enter" &&
+      (isMobile || e.shiftKey) &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
+      pendingLineBreakRef.current = true;
+      if (pendingLineBreakTimeoutRef.current) {
+        clearTimeout(pendingLineBreakTimeoutRef.current);
+      }
+      pendingLineBreakTimeoutRef.current = setTimeout(() => {
+        pendingLineBreakRef.current = false;
+        pendingLineBreakTimeoutRef.current = null;
+      }, 0);
+      if (isMobile) return;
     }
 
     if (isMobile) return;
@@ -5812,10 +5840,17 @@ export default function Ask() {
                   ref={editorRef}
                   onInput={(e) => {
                     const rawText = getEditableText(e.currentTarget);
-                    const inputType = (e.nativeEvent as InputEvent).inputType;
+                    const inputEvent = e.nativeEvent as InputEvent;
                     const isLineBreak =
-                      inputType === "insertParagraph" ||
-                      inputType === "insertLineBreak";
+                      inputEvent.inputType === "insertParagraph" ||
+                      inputEvent.inputType === "insertLineBreak" ||
+                      Boolean(inputEvent.data?.includes("\n")) ||
+                      pendingLineBreakRef.current;
+                    if (pendingLineBreakTimeoutRef.current) {
+                      clearTimeout(pendingLineBreakTimeoutRef.current);
+                      pendingLineBreakTimeoutRef.current = null;
+                    }
+                    pendingLineBreakRef.current = false;
                     setValue(
                       isLineBreak && !rawText.endsWith("\n")
                         ? `${rawText}\n`

@@ -52,7 +52,7 @@ test("preserves and wraps whitespace and line breaks in the composer", async ({
   const prompt = page.locator("#prompt");
   const placeholder = prompt.locator("xpath=../../span[@aria-hidden='true']");
   const clearTextButton = page.getByRole("button", { name: "Clear Text" });
-  await prompt.focus();
+  await prompt.click();
   await page.keyboard.press("Space");
   await expect
     .poll(() => prompt.evaluate((element) => element.textContent))
@@ -78,6 +78,68 @@ test("preserves and wraps whitespace and line breaks in the composer", async ({
       prompt.evaluate((element) => element.getBoundingClientRect().height),
     )
     .toBeGreaterThan(lineHeight);
+});
+
+test("shrinks the focused composer after its final blank lines are deleted", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+    });
+  });
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+
+  const prompt = page.locator("#prompt");
+  const placeholder = prompt.locator("xpath=../../span[@aria-hidden='true']");
+  const singleLineHeight = await prompt.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  await prompt.click();
+  await expect(prompt).toBeFocused();
+  await prompt.evaluate((element) => {
+    element.innerHTML = "<div><br></div>";
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        key: "Enter",
+      }),
+    );
+    element.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        data: null,
+        inputType: "insertText",
+      }),
+    );
+  });
+  await expect(prompt).toBeFocused();
+  await expect(placeholder).toHaveCount(0);
+  await expect
+    .poll(() =>
+      prompt.evaluate((element) => element.getBoundingClientRect().height),
+    )
+    .toBeGreaterThan(singleLineHeight + 1);
+  await prompt.evaluate((element) => {
+    element.innerHTML = "<div><br></div><div><br></div>";
+    element.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "deleteContentBackward",
+      }),
+    );
+  });
+  await expect(prompt).toBeFocused();
+  await expect(placeholder).toHaveCount(1);
+  await expect
+    .poll(() =>
+      prompt.evaluate((element) => element.getBoundingClientRect().height),
+    )
+    .toBeLessThanOrEqual(singleLineHeight + 1);
 });
 
 test("follows a streamed answer only after returning to its bottom", async ({
