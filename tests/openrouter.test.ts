@@ -12,7 +12,9 @@ process.env.R2_UPLOAD_BUCKET ??= "test-private-uploads";
 const { generateAskResponse, generateHistorySummary } = await import(
   "../src/services/openrouter"
 );
-const { renderVisualScene } = await import("../src/services/manim-renderer");
+const { isVisualScene, normalizeVisualScene, renderVisualScene } = await import(
+  "../src/services/manim-renderer"
+);
 const { app } = await import("../src/app");
 const { askController } = await import("../src/modules/ask/controller");
 let restoreFetch = () => {};
@@ -279,13 +281,14 @@ test("renders a requested visual and appends an embeddable media marker", async 
   const scene = {
     kind: "image",
     title: "単位円",
-    elements: [
+    view: { xMin: -2, xMax: 2 },
+    items: [
+      { type: "axes" },
       {
         type: "circle",
         x: 0,
         y: 0,
-        radius: 2,
-        color: "#4DA3FF",
+        radius: 1,
       },
     ],
   };
@@ -345,6 +348,71 @@ test("renders a requested visual and appends an embeddable media marker", async 
   expect(JSON.parse(requests[1]?.body ?? "{}")).toEqual(scene);
 });
 
+test("normalizes content-based scenes without clamping data coordinates", () => {
+  const scene = normalizeVisualScene({
+    kind: "image",
+    title: "座標",
+    items: [
+      { type: "plot", expression: "process.exit()" },
+      { type: "plot", expression: "x+*2" },
+      { type: "plot", expression: "x^2 - 3" },
+      { type: "formula", latex: "y = x^2", x: 100, y: -100 },
+      { type: "point", x: 12, y: -9, label: "点", custom: true },
+    ],
+  });
+
+  expect(isVisualScene(scene)).toBe(true);
+  expect(scene).toEqual({
+    kind: "image",
+    title: "座標",
+    items: [
+      { type: "plot", expression: "x^2 - 3" },
+      { type: "formula", latex: "y = x^2" },
+      { type: "point", x: 12, y: -9, label: "点" },
+    ],
+  });
+  expect(
+    isVisualScene(
+      normalizeVisualScene({
+        kind: "image",
+        title: "静止画",
+        duration: 4,
+        items: [{ type: "axes" }],
+      }),
+    ),
+  ).toBe(false);
+});
+
+test("does not accept legacy positioned text elements", () => {
+  const scene = normalizeVisualScene({
+    kind: "image",
+    title: "旧形式",
+    elements: [{ type: "text", text: "点", x: 1, y: 2 }],
+  });
+
+  expect(isVisualScene(scene)).toBe(false);
+});
+
+test("treats null optional visual fields as omitted", () => {
+  const scene = normalizeVisualScene({
+    kind: "video",
+    title: "判別式",
+    view: null,
+    duration: null,
+    items: [
+      { type: "axes" },
+      { type: "point", x: 0, y: 0, label: null, color: null },
+    ],
+  });
+
+  expect(isVisualScene(scene)).toBe(true);
+  expect(scene).toEqual({
+    kind: "video",
+    title: "判別式",
+    items: [{ type: "axes" }, { type: "point", x: 0, y: 0 }],
+  });
+});
+
 test("returns a captions URL for rendered videos", async () => {
   const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
     Object.assign(
@@ -366,12 +434,10 @@ test("returns a captions URL for rendered videos", async () => {
       kind: "video",
       title: "円の展開",
       duration: 5,
-      elements: [
+      items: [
         {
-          type: "circle",
-          x: 0,
-          y: 0,
-          radius: 2,
+          type: "steps",
+          latex: ["x^2", "x \\cdot x"],
         },
       ],
     }),
@@ -380,6 +446,30 @@ test("returns a captions URL for rendered videos", async () => {
     url: "https://renderer.example.test/media/visual.mp4",
     captionsUrl: "https://renderer.example.test/media/visual.vtt",
     alt: "円の展開",
+  });
+});
+
+test("reports a renderer scene-schema mismatch as a deployment issue", async () => {
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      async () =>
+        Response.json({ detail: "Invalid scene schema" }, { status: 422 }),
+      { preconnect: globalThis.fetch.preconnect },
+    ),
+  );
+  restoreFetch = () => fetchSpy.mockRestore();
+
+  await expect(
+    renderVisualScene({
+      kind: "video",
+      title: "二次関数",
+      items: [{ type: "steps", latex: ["x^2", "x^2 + 1"] }],
+    }),
+  ).rejects.toMatchObject({
+    name: "ManimRendererError",
+    statusCode: 422,
+    message:
+      "レンダラーが現在のシーン形式を受け付けません。レンダラーを最新コードで再デプロイしてください。",
   });
 });
 

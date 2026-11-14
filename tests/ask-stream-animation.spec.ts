@@ -42,6 +42,44 @@ async function mockAnswer(page: Page, response: string, held = false) {
   );
 }
 
+test("preserves and wraps whitespace and line breaks in the composer", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+
+  const prompt = page.locator("#prompt");
+  const placeholder = prompt.locator("xpath=../../span[@aria-hidden='true']");
+  const clearTextButton = page.getByRole("button", { name: "Clear Text" });
+  await prompt.focus();
+  await page.keyboard.press("Space");
+  await expect
+    .poll(() => prompt.evaluate((element) => element.textContent))
+    .toBe(" ");
+  await expect(placeholder).toHaveCount(0);
+
+  await page.keyboard.press("Backspace");
+  await expect(placeholder).toHaveCount(1);
+  await expect(clearTextButton).toHaveCount(0);
+
+  await page.keyboard.press("Shift+Enter");
+  await expect(placeholder).toHaveCount(0);
+  await page.keyboard.press("Backspace");
+  await expect(placeholder).toHaveCount(1);
+  await expect(clearTextButton).toHaveCount(0);
+
+  const lineHeight = await prompt.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).lineHeight),
+  );
+  await page.keyboard.type(" ".repeat(100));
+  await expect
+    .poll(() =>
+      prompt.evaluate((element) => element.getBoundingClientRect().height),
+    )
+    .toBeGreaterThan(lineHeight);
+});
+
 test("follows a streamed answer only after returning to its bottom", async ({
   page,
 }) => {

@@ -1,16 +1,19 @@
 import asyncio
 import hmac
+import math
 import os
 import re
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Annotated, Literal, Union
 
 import boto3
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from scene import SAFE_LATEX_COMMANDS
+from scene_model import ExpressionError, validate_expression
 
 
 R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
@@ -33,34 +36,67 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class TextElement(StrictModel):
-    type: str = "text"
-    text: str = Field(min_length=1, max_length=200)
-    x: float = Field(ge=-7, le=7)
-    y: float = Field(ge=-7, le=7)
-    scale: float = Field(default=1, ge=0.25, le=2)
-    color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
-    animation: str | None = None
+class View(StrictModel):
+    xMin: float = Field(allow_inf_nan=False)
+    xMax: float = Field(allow_inf_nan=False)
 
     @model_validator(mode="after")
-    def check_type(self):
-        if self.type != "text":
-            raise ValueError("Invalid text element type")
+    def check_range(self):
+        width = self.xMax - self.xMin
+        if self.xMin >= self.xMax or not 0.5 <= width <= 40:
+            raise ValueError("Invalid horizontal view range")
         return self
 
 
-class FormulaElement(StrictModel):
-    type: str = "formula"
-    latex: str = Field(min_length=1, max_length=200)
-    x: float = Field(ge=-7, le=7)
-    y: float = Field(ge=-7, le=7)
-    scale: float = Field(default=1, ge=0.25, le=2)
+class AxesItem(StrictModel):
+    type: Literal["axes"]
+
+
+class PlotItem(StrictModel):
+    type: Literal["plot"]
+    expression: str = Field(min_length=1, max_length=200)
     color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
-    animation: str | None = None
+
+
+class PointItem(StrictModel):
+    type: Literal["point"]
+    x: float = Field(allow_inf_nan=False)
+    y: float = Field(allow_inf_nan=False)
+    label: str | None = Field(default=None, min_length=1, max_length=200)
+    color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class SegmentItem(StrictModel):
+    type: Literal["segment"]
+    from_: tuple[float, float] = Field(alias="from")
+    to: tuple[float, float]
+    color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    @model_validator(mode="after")
+    def check_coordinates(self):
+        if any(not math.isfinite(value) for value in (*self.from_, *self.to)):
+            raise ValueError("Invalid segment coordinates")
+        return self
+
+
+class CircleItem(StrictModel):
+    type: Literal["circle"]
+    x: float = Field(allow_inf_nan=False)
+    y: float = Field(allow_inf_nan=False)
+    radius: float = Field(gt=0, allow_inf_nan=False)
+    color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class FormulaItem(StrictModel):
+    type: Literal["formula"]
+    latex: str = Field(min_length=1, max_length=200)
+    color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
 
     @model_validator(mode="after")
     def check_formula(self):
-        if self.type != "formula" or not SAFE_LATEX_CHARACTERS.fullmatch(self.latex):
+        if not SAFE_LATEX_CHARACTERS.fullmatch(self.latex):
             raise ValueError("Invalid formula")
         commands = LATEX_COMMAND_PATTERN.findall(self.latex)
         if any(command not in SAFE_LATEX_COMMANDS for command in commands):
@@ -68,64 +104,75 @@ class FormulaElement(StrictModel):
         return self
 
 
-class ShapeElement(StrictModel):
-    type: str
-    x: float = Field(ge=-7, le=7)
-    y: float = Field(ge=-7, le=7)
-    radius: float | None = Field(default=None, ge=0.05, le=3)
-    width: float | None = Field(default=None, ge=0.05, le=10)
-    height: float | None = Field(default=None, ge=0.05, le=10)
-    scale: float = Field(default=1, ge=0.25, le=2)
+class StepsItem(StrictModel):
+    type: Literal["steps"]
+    latex: list[str] = Field(min_length=2, max_length=6)
     color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
-    animation: str | None = None
 
     @model_validator(mode="after")
-    def check_shape(self):
-        valid = (
-            self.type == "circle"
-            and self.radius is not None
-            or self.type == "rectangle"
-            and self.width is not None
-            and self.height is not None
-        )
-        if not valid:
-            raise ValueError("Invalid shape")
+    def check_formulas(self):
+        for formula in self.latex:
+            if not SAFE_LATEX_CHARACTERS.fullmatch(formula):
+                raise ValueError("Invalid formula")
+            commands = LATEX_COMMAND_PATTERN.findall(formula)
+            if any(command not in SAFE_LATEX_COMMANDS for command in commands):
+                raise ValueError("Unsupported formula command")
         return self
 
 
-class PointElement(StrictModel):
-    type: str
-    points: list[tuple[float, float]] = Field(min_length=2, max_length=500)
-    color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
-    animation: str | None = None
-
-    @model_validator(mode="after")
-    def check_points(self):
-        if self.type not in ("line", "graph") or any(
-            not -7 <= x <= 7 or not -7 <= y <= 7 for x, y in self.points
-        ):
-            raise ValueError("Invalid line or graph")
-        return self
+VisualItem = Annotated[
+    Union[
+        AxesItem,
+        PlotItem,
+        PointItem,
+        SegmentItem,
+        CircleItem,
+        FormulaItem,
+        StepsItem,
+    ],
+    Field(discriminator="type"),
+]
 
 
 class VisualScene(StrictModel):
-    kind: str
+    kind: Literal["image", "video"]
     title: str = Field(min_length=1, max_length=120)
-    duration: float | None = Field(default=None, ge=2, le=20)
-    elements: list[TextElement | FormulaElement | ShapeElement | PointElement] = Field(
-        min_length=1, max_length=40
-    )
+    view: View | None = None
+    duration: float | None = Field(default=None, ge=2, le=20, allow_inf_nan=False)
+    items: list[VisualItem] = Field(min_length=1, max_length=20)
 
     @model_validator(mode="after")
-    def check_scene(self):
-        if self.kind not in ("image", "video"):
-            raise ValueError("Invalid scene kind")
-        if any(
-            element.animation not in (None, "create", "fade_in", "write")
-            for element in self.elements
-        ):
-            raise ValueError("Invalid animation")
+    def check_duration(self):
+        if self.kind == "image" and self.duration is not None:
+            raise ValueError("Duration is only available for video scenes")
         return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def omit_invalid_plots(cls, value):
+        if not isinstance(value, dict) or not isinstance(value.get("items"), list):
+            return value
+        if len(value["items"]) > 20:
+            return value
+        normalized = dict(value)
+        normalized["items"] = [
+            item
+            for item in value["items"]
+            if not (
+                isinstance(item, dict)
+                and item.get("type") == "plot"
+                and _is_invalid_expression(item.get("expression"))
+            )
+        ]
+        return normalized
+
+
+def _is_invalid_expression(expression):
+    try:
+        validate_expression(expression)
+        return False
+    except ExpressionError:
+        return True
 
 
 def r2_configured() -> bool:
@@ -183,14 +230,6 @@ def authorize(authorization: str | None):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-def validate_scene(scene: VisualScene):
-    for element in scene.elements:
-        if isinstance(element, FormulaElement):
-            continue
-        if isinstance(element, TextElement) and element.type != "text":
-            raise HTTPException(status_code=422, detail="Invalid text element")
-
-
 def format_vtt_time(seconds: float) -> str:
     milliseconds = round(seconds * 1000)
     hours, milliseconds = divmod(milliseconds, 3_600_000)
@@ -204,11 +243,13 @@ def format_vtt_time(seconds: float) -> str:
 
 def make_captions(scene: VisualScene) -> str:
     labels = []
-    for element in scene.elements:
-        if isinstance(element, FormulaElement):
-            labels.append(element.latex)
-        elif isinstance(element, TextElement):
-            labels.append(element.text)
+    for item in scene.items:
+        if isinstance(item, FormulaItem):
+            labels.append(item.latex)
+        elif isinstance(item, StepsItem):
+            labels.extend(item.latex)
+        elif isinstance(item, PointItem) and item.label:
+            labels.append(item.label)
     description = " — ".join([scene.title, *labels])
     description = (
         description.replace("-->", "—>")
@@ -219,7 +260,12 @@ def make_captions(scene: VisualScene) -> str:
         .replace("\n", " ")
     )
     description = description[:2000]
-    duration = max(scene.duration or 6, len(scene.elements) * 0.5 + 1)
+    transition_count = sum(
+        len(item.latex) - 1
+        for item in scene.items
+        if isinstance(item, StepsItem)
+    )
+    duration = max(scene.duration or 6, transition_count * 0.5 + 1)
     return (
         "WEBVTT\n\n"
         f"{format_vtt_time(0)} --> {format_vtt_time(duration)}\n"
@@ -249,8 +295,6 @@ async def render(
             ) from error
         if request_size > MAX_REQUEST_BYTES:
             raise HTTPException(status_code=413, detail="Scene is too large")
-    validate_scene(scene)
-
     if not r2_configured():
         raise HTTPException(status_code=503, detail="Media storage is not configured")
 
@@ -260,7 +304,9 @@ async def render(
         with tempfile.TemporaryDirectory(prefix="fluina-manim-") as working_dir:
             work_path = Path(working_dir)
             scene_path = work_path / "scene.json"
-            scene_path.write_text(scene.model_dump_json(), encoding="utf-8")
+            scene_path.write_text(
+                scene.model_dump_json(by_alias=True), encoding="utf-8"
+            )
             output_stem = filename.rsplit(".", 1)[0]
             command = [
                 "manim",

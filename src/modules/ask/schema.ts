@@ -14,112 +14,88 @@ const attachmentReference = t.Object({
   type: t.String({ maxLength: 255 }),
 });
 
-const coordinate = t.Number({ minimum: -7, maximum: 7 });
-const sceneColor = t.Optional(t.String({ pattern: "^#[0-9A-Fa-f]{6}$" }));
+const color = t.Optional(t.String({ pattern: "^#[0-9A-Fa-f]{6}$" }));
+const coordinate = t.Number();
+const latex = t.String({ minLength: 1, maxLength: 200 });
 
-const point = t.Tuple([coordinate, coordinate]);
-const animation = t.Optional(
-  t.Union([t.Literal("create"), t.Literal("fade_in"), t.Literal("write")]),
-);
-
-const visualElement = t.Union([
+const visualItem = t.Union([
+  t.Object({ type: t.Literal("axes") }),
   t.Object({
-    type: t.Literal("text"),
-    text: t.String({ minLength: 1, maxLength: 200 }),
-    x: coordinate,
-    y: coordinate,
-    scale: t.Optional(t.Number({ minimum: 0.25, maximum: 2 })),
-    color: sceneColor,
-    animation,
+    type: t.Literal("plot"),
+    expression: t.String({ minLength: 1, maxLength: 200 }),
+    color,
   }),
   t.Object({
-    type: t.Literal("formula"),
-    latex: t.String({ minLength: 1, maxLength: 200 }),
+    type: t.Literal("point"),
     x: coordinate,
     y: coordinate,
-    scale: t.Optional(t.Number({ minimum: 0.25, maximum: 2 })),
-    color: sceneColor,
-    animation,
+    label: t.Optional(t.String({ minLength: 1, maxLength: 200 })),
+    color,
+  }),
+  t.Object({
+    type: t.Literal("segment"),
+    from: t.Tuple([coordinate, coordinate]),
+    to: t.Tuple([coordinate, coordinate]),
+    color,
   }),
   t.Object({
     type: t.Literal("circle"),
     x: coordinate,
     y: coordinate,
-    radius: t.Number({ minimum: 0.05, maximum: 3 }),
-    color: sceneColor,
-    animation,
+    radius: t.Number({ exclusiveMinimum: 0 }),
+    color,
   }),
   t.Object({
-    type: t.Literal("rectangle"),
-    x: coordinate,
-    y: coordinate,
-    width: t.Number({ minimum: 0.05, maximum: 10 }),
-    height: t.Number({ minimum: 0.05, maximum: 10 }),
-    color: sceneColor,
-    animation,
+    type: t.Literal("formula"),
+    latex,
+    color,
   }),
   t.Object({
-    type: t.Union([t.Literal("line"), t.Literal("graph")]),
-    points: t.Array(point, { minItems: 2, maxItems: 500 }),
-    color: sceneColor,
-    animation,
+    type: t.Literal("steps"),
+    latex: t.Array(latex, { minItems: 2, maxItems: 6 }),
+    color,
   }),
 ]);
 
 export const VisualSceneSchema = t.Object({
   kind: t.Union([t.Literal("image"), t.Literal("video")]),
   title: t.String({ minLength: 1, maxLength: 120 }),
+  view: t.Optional(
+    t.Object({
+      xMin: coordinate,
+      xMax: coordinate,
+    }),
+  ),
   duration: t.Optional(t.Number({ minimum: 2, maximum: 20 })),
-  elements: t.Array(visualElement, { minItems: 1, maxItems: 40 }),
+  items: t.Array(visualItem, { minItems: 1, maxItems: 20 }),
 });
+
+export type VisualItem =
+  | { type: "axes" }
+  | { type: "plot"; expression: string; color?: string }
+  | {
+      type: "point";
+      x: number;
+      y: number;
+      label?: string;
+      color?: string;
+    }
+  | {
+      type: "segment";
+      from: [number, number];
+      to: [number, number];
+      color?: string;
+    }
+  | { type: "circle"; x: number; y: number; radius: number; color?: string }
+  | { type: "formula"; latex: string; color?: string }
+  | { type: "steps"; latex: string[]; color?: string };
 
 export type VisualScene = {
   kind: "image" | "video";
   title: string;
+  view?: { xMin: number; xMax: number };
   duration?: number;
-  elements: Array<
-    | {
-        type: "text";
-        text: string;
-        x: number;
-        y: number;
-        scale?: number;
-        color?: string;
-        animation?: "create" | "fade_in" | "write";
-      }
-    | {
-        type: "formula";
-        latex: string;
-        x: number;
-        y: number;
-        scale?: number;
-        color?: string;
-        animation?: "create" | "fade_in" | "write";
-      }
-    | {
-        type: "circle";
-        x: number;
-        y: number;
-        radius: number;
-        color?: string;
-        animation?: "create" | "fade_in" | "write";
-      }
-    | {
-        type: "rectangle";
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-        color?: string;
-        animation?: "create" | "fade_in" | "write";
-      }
-    | {
-        type: "line" | "graph";
-        points: [number, number][];
-        color?: string;
-        animation?: "create" | "fade_in" | "write";
-      }
-  >;
+  items: VisualItem[];
 };
 
 const historyMessage = t.Object({

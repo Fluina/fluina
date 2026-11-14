@@ -20,23 +20,44 @@ type RenderedMedia = {
 };
 
 export const isVisualScene = (value: unknown): value is VisualScene =>
-  Value.Check(VisualSceneSchema, value);
+  Value.Check(VisualSceneSchema, value) &&
+  !(
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "image" &&
+    "duration" in value &&
+    value.duration !== undefined
+  );
 
 const ALLOWED_LATEX_COMMANDS = new Set(
   "alpha angle approx beta cdot circ cos delta div frac gamma ge infty int le left ln log lambda mu neq omega pi pm right sigma sin sqrt sum tan theta times".split(
     " ",
   ),
 );
-const ELEMENT_KEYS: Record<string, string[]> = {
-  text: ["type", "text", "x", "y", "scale", "color", "animation"],
-  formula: ["type", "latex", "x", "y", "scale", "color", "animation"],
-  circle: ["type", "x", "y", "radius", "color", "animation"],
-  rectangle: ["type", "x", "y", "width", "height", "color", "animation"],
-  line: ["type", "points", "color", "animation"],
-  graph: ["type", "points", "color", "animation"],
+const ALLOWED_EXPRESSION_NAMES = new Set([
+  "x",
+  "pi",
+  "sqrt",
+  "abs",
+  "sin",
+  "cos",
+  "tan",
+  "ln",
+  "log",
+  "exp",
+]);
+const ITEM_KEYS: Record<string, string[]> = {
+  axes: ["type"],
+  plot: ["type", "expression", "color"],
+  point: ["type", "x", "y", "label", "color"],
+  segment: ["type", "from", "to", "color"],
+  circle: ["type", "x", "y", "radius", "color"],
+  formula: ["type", "latex", "color"],
+  steps: ["type", "latex", "color"],
 };
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
-const ANIMATIONS = new Set(["create", "fade_in", "write"]);
+const SAFE_LATEX_CHARACTERS = /^[A-Za-z0-9\s{}_^=+\-*/().,\\|<>]+$/;
 
 const clamp = (value: unknown, min: number, max: number) =>
   typeof value === "number" && Number.isFinite(value)
@@ -49,56 +70,190 @@ const isSupportedFormula = (latex: unknown) =>
     ALLOWED_LATEX_COMMANDS.has(command.slice(1)),
   );
 
+const isSupportedExpression = (expression: unknown) => {
+  if (typeof expression !== "string" || expression.length === 0) return false;
+  const tokenPattern =
+    /\s*(?:(?:\d+(?:\.\d*)?|\.\d+)|([A-Za-z]+)|([()+\-*/^]))/gy;
+  const tokens: string[] = [];
+  let position = 0;
+  while (position < expression.length) {
+    if (!expression.slice(position).trim()) break;
+    tokenPattern.lastIndex = position;
+    const match = tokenPattern.exec(expression);
+    if (!match) return false;
+    const token = match[0].trim();
+    if (/^[A-Za-z]+$/.test(token) && !ALLOWED_EXPRESSION_NAMES.has(token)) {
+      return false;
+    }
+    tokens.push(token);
+    position = tokenPattern.lastIndex;
+  }
+
+  let index = 0;
+  const peek = () => tokens[index];
+  const parsePrimary = (): boolean => {
+    const token = peek();
+    if (!token) return false;
+    if (token === "(") {
+      index++;
+      if (!parseExpression() || peek() !== ")") return false;
+      index++;
+      return true;
+    }
+    if (
+      /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(token) ||
+      token === "x" ||
+      token === "pi"
+    ) {
+      index++;
+      return true;
+    }
+    if (
+      ["sqrt", "abs", "sin", "cos", "tan", "ln", "log", "exp"].includes(token)
+    ) {
+      index++;
+      if (peek() !== "(") return false;
+      index++;
+      if (!parseExpression() || peek() !== ")") return false;
+      index++;
+      return true;
+    }
+    return false;
+  };
+  const parsePower = (): boolean => {
+    if (!parsePrimary()) return false;
+    if (peek() !== "^") return true;
+    index++;
+    return parseUnary();
+  };
+  const parseUnary = (): boolean => {
+    if (peek() === "+" || peek() === "-") {
+      index++;
+      return parseUnary();
+    }
+    return parsePower();
+  };
+  const parseTerm = (): boolean => {
+    if (!parseUnary()) return false;
+    while (peek() === "*" || peek() === "/") {
+      index++;
+      if (!parseUnary()) return false;
+    }
+    return true;
+  };
+  const parseExpression = (): boolean => {
+    if (!parseTerm()) return false;
+    while (peek() === "+" || peek() === "-") {
+      index++;
+      if (!parseTerm()) return false;
+    }
+    return true;
+  };
+  return tokens.length > 0 && parseExpression() && index === tokens.length;
+};
+
 // AIの出力のうち、許可されていないプロパティや値を取り除いて仕様に合わせる
 export const normalizeVisualScene = (raw: unknown): unknown => {
   if (typeof raw !== "object" || raw === null) return raw;
   const scene = raw as Record<string, unknown>;
-  if (!Array.isArray(scene.elements)) return raw;
+  if (!Array.isArray(scene.items)) return raw;
 
-  const elements = scene.elements.flatMap((item): unknown[] => {
+  const view =
+    typeof scene.view === "object" && scene.view !== null
+      ? (scene.view as Record<string, unknown>)
+      : undefined;
+  if (view) {
+    const { xMin, xMax } = view;
+    if (
+      typeof xMin !== "number" ||
+      !Number.isFinite(xMin) ||
+      typeof xMax !== "number" ||
+      !Number.isFinite(xMax) ||
+      xMin >= xMax ||
+      xMax - xMin < 0.5 ||
+      xMax - xMin > 40
+    ) {
+      return raw;
+    }
+  } else if (scene.view !== undefined && scene.view !== null) {
+    return raw;
+  }
+
+  const items = scene.items.flatMap((item): unknown[] => {
     if (typeof item !== "object" || item === null) return [];
     const source = item as Record<string, unknown>;
-    const allowedKeys = ELEMENT_KEYS[String(source.type)];
-    if (!allowedKeys) return [];
-    if (source.type === "formula" && !isSupportedFormula(source.latex)) {
+    const allowedKeys = ITEM_KEYS[String(source.type)];
+    if (!allowedKeys) return [raw];
+
+    if (source.type === "plot" && !isSupportedExpression(source.expression)) {
       return [];
     }
 
-    const element: Record<string, unknown> = {};
+    const normalized: Record<string, unknown> = {};
     for (const key of allowedKeys) {
-      if (source[key] !== undefined) element[key] = source[key];
-    }
-    if (typeof element.color === "string" && !HEX_COLOR.test(element.color)) {
-      element.color = undefined;
+      if (source[key] !== undefined && source[key] !== null) {
+        normalized[key] = source[key];
+      }
     }
     if (
-      typeof element.animation === "string" &&
-      !ANIMATIONS.has(element.animation)
+      typeof normalized.color === "string" &&
+      !HEX_COLOR.test(normalized.color)
     ) {
-      element.animation = undefined;
+      delete normalized.color;
     }
-    for (const key of ["x", "y"]) {
-      element[key] = clamp(element[key], -7, 7);
+    if (typeof normalized.label === "string") {
+      normalized.label = normalized.label.slice(0, 200);
     }
-    if ("scale" in element) element.scale = clamp(element.scale, 0.25, 2);
-    if (Array.isArray(element.points)) {
-      element.points = element.points.map((point) =>
-        Array.isArray(point)
-          ? point.map((coordinate) => clamp(coordinate, -7, 7))
-          : point,
-      );
+    if (source.type === "plot" && typeof normalized.expression === "string") {
+      normalized.expression = normalized.expression.slice(0, 200);
+      if (!isSupportedExpression(normalized.expression)) return [];
     }
-    return [JSON.parse(JSON.stringify(element))];
+    if (source.type === "formula" && typeof normalized.latex === "string") {
+      const formula = normalized.latex.slice(0, 200);
+      normalized.latex = formula;
+      if (
+        !SAFE_LATEX_CHARACTERS.test(formula) ||
+        !isSupportedFormula(formula)
+      ) {
+        return [];
+      }
+    }
+    if (source.type === "steps" && Array.isArray(normalized.latex)) {
+      const formulas = normalized.latex
+        .filter((step): step is string => typeof step === "string")
+        .slice(0, 6)
+        .map((step) => step.slice(0, 200));
+      normalized.latex = formulas;
+      if (
+        formulas.some(
+          (step) =>
+            !SAFE_LATEX_CHARACTERS.test(step) || !isSupportedFormula(step),
+        )
+      ) {
+        return [];
+      }
+    }
+    return [JSON.parse(JSON.stringify(normalized))];
   });
+
+  if (items.some((item) => item === raw)) return raw;
 
   return {
     kind: scene.kind,
     title:
       typeof scene.title === "string" ? scene.title.slice(0, 120) : scene.title,
-    ...(typeof scene.duration === "number"
+    ...(view
+      ? {
+          view: {
+            xMin: view.xMin,
+            xMax: view.xMax,
+          },
+        }
+      : {}),
+    ...(typeof scene.duration === "number" && Number.isFinite(scene.duration)
       ? { duration: clamp(scene.duration, 2, 20) }
       : {}),
-    elements: elements.slice(0, 40),
+    items: items.slice(0, 20),
   };
 };
 
@@ -142,6 +297,12 @@ export const renderVisualScene = async (
 
   if (!response.ok) {
     console.error(`Manim renderer returned HTTP ${response.status}.`);
+    if (response.status === 422) {
+      throw new ManimRendererError(
+        "レンダラーが現在のシーン形式を受け付けません。レンダラーを最新コードで再デプロイしてください。",
+        422,
+      );
+    }
     throw new ManimRendererError(
       "ビジュアルのレンダリングに失敗しました。時間をおいて再試行してください。",
       response.status >= 500 ? 502 : response.status,

@@ -701,7 +701,7 @@ const getEditableText = (element: HTMLElement) => {
     }
   }
   flushInlineText();
-  return lines.join("\n");
+  return lines.join("\n").replace(/\n$/, "");
 };
 
 const getCodeBlockKey = (language: string, code: string) =>
@@ -2874,9 +2874,9 @@ export default function Ask() {
     setIsExpanded((expanded) => !expanded);
   }, []);
 
-  const hasText = value.trim().length > 0;
+  const hasText = value.length > 0;
   const hasFiles = files.length > 0;
-  const hasInput = hasText || hasFiles;
+  const hasInput = value.trim().length > 0 || hasFiles;
 
   const updateTailSpacer = useCallback((viewportOverride?: HTMLElement) => {
     const host = chatScrollRef.current;
@@ -4656,7 +4656,15 @@ export default function Ask() {
     )
       return;
 
-    if (e.key === "Enter" && !hasInput) {
+    if (
+      e.key === "Enter" &&
+      !hasInput &&
+      !isMobile &&
+      !e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
       e.preventDefault();
       return;
     }
@@ -5804,7 +5812,15 @@ export default function Ask() {
                   ref={editorRef}
                   onInput={(e) => {
                     const rawText = getEditableText(e.currentTarget);
-                    setValue(rawText.trim() ? rawText : "");
+                    const inputType = (e.nativeEvent as InputEvent).inputType;
+                    const isLineBreak =
+                      inputType === "insertParagraph" ||
+                      inputType === "insertLineBreak";
+                    setValue(
+                      isLineBreak && !rawText.endsWith("\n")
+                        ? `${rawText}\n`
+                        : rawText,
+                    );
                   }}
                   onKeyDown={handleTextareaKeyDown}
                   onPaste={pastePlainText}
@@ -5822,7 +5838,7 @@ export default function Ask() {
                   spellCheck={false}
                   aria-multiline="true"
                   id="prompt"
-                  className="block outline-none overflow-y-clip resize-none w-full min-w-0 wrap-anywhere whitespace-pre-wrap"
+                  className="block outline-none overflow-y-clip resize-none w-full min-w-0 wrap-anywhere whitespace-break-spaces"
                 />
               </motion.div>
             </motion.div>

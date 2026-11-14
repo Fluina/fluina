@@ -21,7 +21,7 @@ COPY requirements.txt pyproject.toml setup.py geometry.pyx ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir .
 
-COPY app.py scene.py ./
+COPY app.py scene.py scene_model.py ./
 
 EXPOSE 10000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "10000"]
