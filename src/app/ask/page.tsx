@@ -1119,33 +1119,36 @@ const MarkdownCode = ({
               nextLine !== undefined &&
               foldEndByLine.has(nextLine) &&
               collapsedLines.has(nextLine);
-            const collapsedBackgroundRadius =
-              joinsPrevious && joinsNext
-                ? {
-                    className: "rounded-t-none rounded-b-none",
-                    value: "0rem 0rem 0rem 0rem",
-                  }
-                : joinsPrevious
-                  ? {
-                      className: "rounded-t-none rounded-b-2xl",
-                      value: "0rem 0rem 1rem 1rem",
-                    }
-                  : joinsNext
-                    ? {
-                        className: "rounded-t-2xl rounded-b-none",
-                        value: "1rem 1rem 0rem 0rem",
-                      }
-                    : {
-                        className: "rounded-4xl",
-                        value: "2rem 2rem 2rem 2rem",
-                      };
+            // 上下の角丸を個別に決める。隣の折りたたみ行と接する側は直角にする。
+            const topRadius = joinsPrevious
+              ? "0rem"
+              : joinsNext
+                ? "1rem"
+                : "2rem";
+            const bottomRadius = joinsNext
+              ? "0rem"
+              : joinsPrevious
+                ? "1rem"
+                : "2rem";
+            // 結合面の角丸はアニメーションさせず即座に直角にする。
+            // 角丸が補間されている間は、隣り合う背景の間に切り欠き状の隙間が残ってしまうため。
+            const joinTransition = { duration: 0 };
+            const topCornerTransition = joinsPrevious
+              ? joinTransition
+              : TRANSITION;
+            const bottomCornerTransition = joinsNext
+              ? joinTransition
+              : TRANSITION;
             return (
               <motion.span
                 key={lineIndex}
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                transition={TRANSITION}
+                transition={{
+                  ...TRANSITION,
+                  height: { ...TRANSITION, restDelta: 0.01, restSpeed: 0.01 },
+                }}
                 className="code-line isolate rounded-4xl"
                 style={{
                   minHeight: 0,
@@ -1162,18 +1165,27 @@ const MarkdownCode = ({
                       data-code-line-background=""
                       initial={{
                         opacity: 0,
-                        borderRadius: "2rem 2rem 2rem 2rem",
+                        borderTopLeftRadius: joinsPrevious ? "0rem" : "2rem",
+                        borderTopRightRadius: joinsPrevious ? "0rem" : "2rem",
+                        borderBottomLeftRadius: joinsNext ? "0rem" : "2rem",
+                        borderBottomRightRadius: joinsNext ? "0rem" : "2rem",
                       }}
                       animate={{
                         opacity: 1,
-                        borderRadius: collapsedBackgroundRadius.value,
+                        borderTopLeftRadius: topRadius,
+                        borderTopRightRadius: topRadius,
+                        borderBottomLeftRadius: bottomRadius,
+                        borderBottomRightRadius: bottomRadius,
                       }}
-                      exit={{
-                        opacity: 0,
-                        borderRadius: "2rem 2rem 2rem 2rem",
+                      exit={{ opacity: 0 }}
+                      transition={{
+                        ...TRANSITION,
+                        borderTopLeftRadius: topCornerTransition,
+                        borderTopRightRadius: topCornerTransition,
+                        borderBottomLeftRadius: bottomCornerTransition,
+                        borderBottomRightRadius: bottomCornerTransition,
                       }}
-                      transition={TRANSITION}
-                      className={`pointer-events-none absolute -right-1 top-0 bottom-0 z-0 ${collapsedBackgroundRadius.className} bg-blue/50`}
+                      className="pointer-events-none absolute -right-1 top-0 bottom-0 z-0 bg-blue/25"
                       style={{
                         left: "calc(-0.25rem - var(--code-line-number-width) + 1ch)",
                       }}
