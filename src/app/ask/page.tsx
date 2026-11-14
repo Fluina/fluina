@@ -107,6 +107,7 @@ const PLACEHOLDERS = [
 
 const CODE_DISMISS_DISTANCE = 100;
 const CODE_DISMISS_VELOCITY = 500;
+const CODE_LINE_RENDER_DEFER_LIMIT = 200;
 
 interface ImageCaptureConstructor {
   new (
@@ -853,14 +854,18 @@ const MarkdownCode = ({
     code.startsWith(highlighted.code)
       ? highlighted
       : null;
-  let lineOffset = 0;
-  const lines = visible?.tokens.map((tokens) => {
-    const offset = lineOffset;
-    lineOffset +=
-      tokens.reduce((length, token) => length + token.content.length, 0) + 1;
-    return { offset, tokens };
-  });
-  const codeLines = code.split("\n");
+  const lines = useMemo(() => {
+    let lineOffset = 0;
+    return visible?.tokens.map((tokens) => {
+      const offset = lineOffset;
+      lineOffset +=
+        tokens.reduce((length, token) => length + token.content.length, 0) + 1;
+      return { offset, tokens };
+    });
+  }, [visible?.tokens]);
+  const codeLines = useMemo(() => code.split("\n"), [code]);
+  const deferCodeLineRendering =
+    codeLines.length > CODE_LINE_RENDER_DEFER_LIMIT;
   const lineNumberStyle:
     | (CSSProperties & { "--code-line-number-width": string })
     | undefined = lineNumbers
@@ -898,44 +903,59 @@ const MarkdownCode = ({
   const selectionEnd = useRef<number | null>(null);
   const selectionWasDragged = useRef(false);
   const codeRef = useRef<HTMLElement>(null);
-  const lineIndents = codeLines.map(
-    (line) => line.match(/^[\t ]*/)?.[0].replace(/\t/g, "    ").length ?? 0,
-  );
-  const foldEndByLine = new Map<number, number>();
-  for (let lineIndex = 0; lineIndex < codeLines.length - 1; lineIndex += 1) {
-    if (codeLines[lineIndex].trim().length === 0) continue;
-    let firstChild = lineIndex + 1;
-    while (
-      firstChild < codeLines.length &&
-      codeLines[firstChild].trim().length === 0
-    ) {
-      firstChild += 1;
+  const foldEndByLine = useMemo(() => {
+    const lineIndents = codeLines.map(
+      (line) => line.match(/^[\t ]*/)?.[0].replace(/\t/g, "    ").length ?? 0,
+    );
+    const nextNonBlankLine = new Array<number>(codeLines.length);
+    const nextNonBlankAtOrBelow = new Array<number>(codeLines.length);
+    const stack: number[] = [];
+    let nextNonBlank = codeLines.length;
+
+    for (let lineIndex = codeLines.length - 1; lineIndex >= 0; lineIndex -= 1) {
+      if (codeLines[lineIndex].trim().length > 0) {
+        nextNonBlank = lineIndex;
+        while (
+          stack.length > 0 &&
+          lineIndents[stack[stack.length - 1]] > lineIndents[lineIndex]
+        ) {
+          stack.pop();
+        }
+        nextNonBlankAtOrBelow[lineIndex] =
+          stack[stack.length - 1] ?? codeLines.length;
+        stack.push(lineIndex);
+      } else {
+        nextNonBlankAtOrBelow[lineIndex] = codeLines.length;
+      }
+      nextNonBlankLine[lineIndex] = nextNonBlank;
     }
-    if (
-      firstChild >= codeLines.length ||
-      lineIndents[firstChild] <= lineIndents[lineIndex]
-    ) {
-      continue;
+
+    const foldEnds = new Map<number, number>();
+    for (let lineIndex = 0; lineIndex < codeLines.length - 1; lineIndex += 1) {
+      const firstChild = nextNonBlankLine[lineIndex + 1];
+      if (
+        codeLines[lineIndex].trim().length === 0 ||
+        firstChild >= codeLines.length ||
+        lineIndents[firstChild] <= lineIndents[lineIndex]
+      ) {
+        continue;
+      }
+      foldEnds.set(lineIndex, nextNonBlankAtOrBelow[lineIndex] - 1);
     }
-    let end = firstChild;
-    while (
-      end + 1 < codeLines.length &&
-      (codeLines[end + 1].trim().length === 0 ||
-        lineIndents[end + 1] > lineIndents[lineIndex])
-    ) {
-      end += 1;
+    return foldEnds;
+  }, [codeLines]);
+  const visibleLineIndices = useMemo(() => {
+    const indices: number[] = [];
+    for (let lineIndex = 0; lineIndex < codeLines.length; ) {
+      indices.push(lineIndex);
+      const foldEnd = foldEndByLine.get(lineIndex);
+      lineIndex =
+        foldEnd !== undefined && collapsedLines.has(lineIndex)
+          ? foldEnd + 1
+          : lineIndex + 1;
     }
-    foldEndByLine.set(lineIndex, end);
-  }
-  const visibleLineIndices: number[] = [];
-  for (let lineIndex = 0; lineIndex < codeLines.length; ) {
-    visibleLineIndices.push(lineIndex);
-    const foldEnd = foldEndByLine.get(lineIndex);
-    lineIndex =
-      foldEnd !== undefined && collapsedLines.has(lineIndex)
-        ? foldEnd + 1
-        : lineIndex + 1;
-  }
+    return indices;
+  }, [codeLines.length, collapsedLines, foldEndByLine]);
   const getCodeLineControls = (lineIndex: number): CodeLineControl[] => [
     "number",
     ...(foldEndByLine.has(lineIndex) ? ["fold" as const] : []),
@@ -1018,14 +1038,11 @@ const MarkdownCode = ({
   const selectLines = (startLine: number, endLine: number) => {
     const codeElement = codeRef.current;
     if (!codeElement) return;
-    const rows = Array.from(
-      codeElement.querySelectorAll<HTMLElement>(".code-line"),
+    const startRow = codeElement.querySelector<HTMLElement>(
+      `.code-line[data-line-index="${startLine}"]`,
     );
-    const startRow = rows.find(
-      (row) => Number(row.dataset.lineIndex) === startLine,
-    );
-    const endRow = rows.find(
-      (row) => Number(row.dataset.lineIndex) === endLine,
+    const endRow = codeElement.querySelector<HTMLElement>(
+      `.code-line[data-line-index="${endLine}"]`,
     );
     const startContent = startRow?.querySelector(".code-line-content");
     const endContent = endRow?.querySelector(".code-line-content");
@@ -1082,6 +1099,7 @@ const MarkdownCode = ({
       ref={codeRef}
       className={className}
       data-code-line-numbers={lineNumbers ? "" : undefined}
+      data-code-line-rendering={deferCodeLineRendering ? "deferred" : undefined}
       style={lineNumberStyle}
       onPointerDownCapture={startSelection}
       onPointerMove={extendSelection}

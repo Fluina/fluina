@@ -131,6 +131,11 @@
   white-space: pre;
 }
 
+[data-code-line-rendering="deferred"] .code-line {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1lh;
+}
+
 .code-line-break {
   box-sizing: border-box;
   display: inline-block;

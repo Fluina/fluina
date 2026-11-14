@@ -1450,6 +1450,40 @@ test("keeps folded lines synchronized with expanded code", async ({ page }) => {
   await expect(sourceLines).toHaveCount(9);
 });
 
+test("defers offscreen painting for large code while preserving line controls", async ({
+  page,
+}) => {
+  const nestedLines = Array.from(
+    { length: 1_000 },
+    (_, index) => `  line${index + 1}();`,
+  );
+  await mockAnswer(
+    page,
+    `\`\`\`js\nroot() {\n${nestedLines.join("\n")}\n}\n\`\`\``,
+  );
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("大量行コード");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+
+  const code = page.locator("[data-chat-last-turn]").last().locator("pre code");
+  await expect(code).toHaveAttribute("data-code-line-rendering", "deferred");
+  await expect(code.locator(".code-line")).toHaveCount(1_002);
+  await expect(
+    code.getByRole("button", { name: "行 1 の入れ子を折りたたむ" }),
+  ).toBeVisible();
+  const supportsDeferredRendering = await code.evaluate(() =>
+    CSS.supports("content-visibility", "auto"),
+  );
+  if (supportsDeferredRendering) {
+    await expect(code.locator(".code-line").first()).toHaveCSS(
+      "content-visibility",
+      "auto",
+    );
+  }
+});
+
 test("scrolls keyboard-focused code lines into view", async ({ page }) => {
   const codeText = Array.from(
     { length: 60 },
