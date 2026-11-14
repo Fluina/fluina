@@ -74,11 +74,12 @@ any broader speed claim should be based on measured render timings.
 
 Video scenes support axes, plots, points, segments, circles, formulas, and
 step-by-step captions. The AI can animate plot expressions, point positions,
-and formula steps across keyframes; the renderer uses Manim's `-qh` quality
-preset (1920×1080 at 60 fps). Configure a one-day R2 lifecycle expiration rule
-for the `media/` prefix in the renderer's bucket. Keep public access disabled.
-The bucket's CORS policy should allow `GET` and `HEAD` from the Fluina site
-origin so generated videos and captions can be loaded in the browser.
+and formula steps across keyframes; the renderer uses Manim's `-qm` quality
+preset (1280×720 at 30 fps) to stay within the free Render plan's resources.
+Configure a one-day R2 lifecycle expiration rule for the `media/` prefix in the
+renderer's bucket. Keep public access disabled. The bucket's CORS policy
+should allow `GET` and `HEAD` from the Fluina site origin so generated videos
+and captions can be loaded in the browser.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

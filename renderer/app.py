@@ -373,7 +373,7 @@ async def render(
             output_stem = filename.rsplit(".", 1)[0]
             command = [
                 "manim",
-                "-qh",
+                "-qm",
                 "--media_dir",
                 str(work_path / "media"),
                 "-o",
