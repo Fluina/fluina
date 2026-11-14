@@ -668,7 +668,9 @@ test("sticks table headers and code controls to the chat viewport while scrollin
 
   const turn = page.locator("[data-chat-last-turn]").last();
   const tableRegion = turn.getByRole("region", { name: "表" });
-  const headerCell = tableRegion.locator("thead th").first();
+  const headerCell = turn
+    .locator("[data-sticky-table-header] thead th")
+    .first();
   const codeFrame = turn.locator("[data-code-frame]").last();
   const codeHeader = codeFrame.locator("[data-code-header]");
   const viewport = await turn.evaluateHandle((element) => {
@@ -770,7 +772,7 @@ test("keeps a mobile table header steady while scrolling", async ({ page }) => {
 
   const turn = page.locator("[data-chat-last-turn]").last();
   const region = turn.getByRole("region", { name: "表" });
-  const header = region.locator("thead");
+  const header = turn.locator("[data-sticky-table-header] thead");
   const viewport = await turn.evaluateHandle((element) => {
     let parent = element.parentElement;
     while (parent && getComputedStyle(parent).overflowY !== "auto") {
@@ -790,12 +792,10 @@ test("keeps a mobile table header steady while scrolling", async ({ page }) => {
     host.scrollTop += element.getBoundingClientRect().top - viewportTop + 8;
   }, viewport);
 
-  const offsets = await region.evaluate(async (section, host) => {
+  const offsets = await header.evaluate(async (thead, host) => {
     if (!(host instanceof HTMLElement)) {
       throw new Error("Chat scroll viewport not found");
     }
-    const thead = section.querySelector("thead");
-    if (!thead) throw new Error("Table header not found");
     const samples: number[] = [];
     for (let index = 0; index < 24; index += 1) {
       host.scrollTop += 6;
@@ -812,6 +812,29 @@ test("keeps a mobile table header steady while scrolling", async ({ page }) => {
 
   expect(offsets.every((offset) => Math.abs(offset) < 1.5)).toBe(true);
   expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThan(1.5);
+
+  const headerAlignment = () =>
+    turn.evaluate((element) => {
+      const stickyCell = element.querySelector<HTMLElement>(
+        "[data-sticky-table-header] th",
+      );
+      const sourceCell = element.querySelector<HTMLElement>(
+        'section[aria-label="表"] table thead th',
+      );
+      if (!stickyCell || !sourceCell) {
+        throw new Error("Table header cells are missing");
+      }
+      return Math.abs(
+        stickyCell.getBoundingClientRect().left -
+          sourceCell.getBoundingClientRect().left,
+      );
+    });
+  await expect.poll(headerAlignment).toBeLessThan(1);
+  await region.evaluate((section) => {
+    section.style.scrollBehavior = "auto";
+    section.scrollLeft = 80;
+  });
+  await expect.poll(headerAlignment).toBeLessThan(1);
 });
 
 test("squares code toolbar corners when sticky in WebKit", async ({ page }) => {

@@ -41,6 +41,7 @@ import type {
   SyntheticEvent,
 } from "react";
 import {
+  Children,
   cloneElement,
   createContext,
   Fragment,
@@ -396,63 +397,81 @@ const MarkdownTable = ({
   ...props
 }: ComponentPropsWithoutRef<"table"> & { node?: unknown }) => {
   const { parallaxEnabled } = usePreferences();
+  const stickyHeaderRef = useRef<HTMLDivElement>(null);
+  const stickyTableRef = useRef<HTMLTableElement>(null);
   const { elementRef } = useNativeScroll<HTMLElement>({
     axis: "x",
     scrollBehavior: parallaxEnabled ? "smooth" : "auto",
   });
-  useEffect(() => {
+  const tableHead = Children.toArray(children).find(
+    (child) => isValidElement(child) && child.type === "thead",
+  );
+  useLayoutEffect(() => {
     const section = elementRef.current;
-    if (!section) return;
+    const stickyHeader = stickyHeaderRef.current;
+    const stickyTable = stickyTableRef.current;
+    const frame = stickyHeader?.parentElement;
+    if (!section || !stickyHeader || !stickyTable || !frame) return;
     const host = findVerticalScrollHost(section);
     if (!host) return;
 
-    let header: HTMLElement | null = null;
-    let originalTransform = "";
-    let appliedOffset = 0;
-    let frame = 0;
+    let updateFrame = 0;
+    const observed = new Set<Element>();
     const update = () => {
-      const nextHeader = section.querySelector<HTMLElement>("thead");
-      if (header !== nextHeader) {
-        if (header) {
-          header.style.transform = originalTransform;
-          setStickyHeaderActive(host, header, false);
+      const sourceTable = section.querySelector<HTMLTableElement>("table");
+      const sourceHead =
+        sourceTable?.querySelector<HTMLTableSectionElement>("thead");
+      if (!sourceTable || !sourceHead) {
+        stickyHeader.style.height = "0px";
+        section.style.marginTop = "";
+      } else {
+        if (!observed.has(sourceTable)) {
+          resizeObserver.observe(sourceTable);
+          observed.add(sourceTable);
         }
-        header = nextHeader;
-        originalTransform = header?.style.transform ?? "";
-        appliedOffset = 0;
-      }
-      if (!header) return;
+        if (!observed.has(sourceHead)) {
+          resizeObserver.observe(sourceHead);
+          observed.add(sourceHead);
+        }
 
-      const hostBounds = host.getBoundingClientRect();
-      const viewportTop = hostBounds.top + host.clientTop;
-      const sectionBounds = section.getBoundingClientRect();
-      const headerBounds = header.getBoundingClientRect();
-      const headerTop = headerBounds.top - appliedOffset;
-      const maxOffset = Math.max(
-        sectionBounds.bottom - headerTop - headerBounds.height,
-        0,
-      );
-      const offset = Math.min(Math.max(viewportTop - headerTop, 0), maxOffset);
+        const headerHeight = sourceHead.getBoundingClientRect().height;
+        const tableWidth = sourceTable.getBoundingClientRect().width;
+        stickyHeader.style.height = `${headerHeight}px`;
+        section.style.marginTop = `${-headerHeight}px`;
+        stickyTable.style.width = `${tableWidth}px`;
 
-      const pixelRatio = window.devicePixelRatio || 1;
-      const snappedOffset = Math.round(offset * pixelRatio) / pixelRatio;
-      if (snappedOffset !== appliedOffset) {
-        appliedOffset = snappedOffset;
-        header.style.transform = snappedOffset
-          ? `${originalTransform} translate3d(0, ${snappedOffset}px, 0)`.trim()
-          : originalTransform;
+        const sourceCells = sourceHead.querySelectorAll<HTMLElement>("th, td");
+        const stickyCells = stickyTable.querySelectorAll<HTMLElement>("th, td");
+        if (sourceCells.length === stickyCells.length) {
+          sourceCells.forEach((cell, index) => {
+            stickyCells[index].style.width =
+              `${cell.getBoundingClientRect().width}px`;
+          });
+        }
+        for (const element of stickyHeader.querySelectorAll("[id]")) {
+          element.removeAttribute("id");
+        }
       }
-      setStickyHeaderActive(host, header, snappedOffset > 1);
+
+      stickyTable.style.transform = section.scrollLeft
+        ? `translateX(${-section.scrollLeft}px)`
+        : "";
+      const viewportTop = host.getBoundingClientRect().top + host.clientTop;
+      const frameBounds = frame.getBoundingClientRect();
+      const headerBounds = stickyHeader.getBoundingClientRect();
+      const isPinned =
+        frameBounds.top < viewportTop &&
+        frameBounds.bottom > viewportTop + headerBounds.height;
+      setStickyHeaderActive(host, stickyHeader, isPinned);
     };
     const scheduleUpdate = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
+      if (updateFrame) return;
+      updateFrame = requestAnimationFrame(() => {
+        updateFrame = 0;
         update();
       });
     };
     const resizeObserver = new ResizeObserver(scheduleUpdate);
-    resizeObserver.observe(section);
     const mutationObserver = new MutationObserver(scheduleUpdate);
     mutationObserver.observe(section, {
       childList: true,
@@ -461,29 +480,44 @@ const MarkdownTable = ({
     });
 
     const visualViewport = window.visualViewport;
-    host.addEventListener("scroll", update, { passive: true });
+    section.addEventListener("scroll", scheduleUpdate, { passive: true });
+    host.addEventListener("scroll", scheduleUpdate, { passive: true });
     window.addEventListener("resize", scheduleUpdate);
     visualViewport?.addEventListener("resize", scheduleUpdate);
     visualViewport?.addEventListener("scroll", scheduleUpdate);
     update();
 
     return () => {
-      host.removeEventListener("scroll", update);
+      section.removeEventListener("scroll", scheduleUpdate);
+      host.removeEventListener("scroll", scheduleUpdate);
       window.removeEventListener("resize", scheduleUpdate);
       visualViewport?.removeEventListener("resize", scheduleUpdate);
       visualViewport?.removeEventListener("scroll", scheduleUpdate);
       resizeObserver.disconnect();
       mutationObserver.disconnect();
-      cancelAnimationFrame(frame);
-      if (header) {
-        header.style.transform = originalTransform;
-        setStickyHeaderActive(host, header, false);
-      }
+      cancelAnimationFrame(updateFrame);
+      setStickyHeaderActive(host, stickyHeader, false);
     };
   }, [elementRef]);
 
   return (
     <div className="relative mx-0.5 rounded-2xl border border-back-5 has-[>section:focus-visible]:ring-2 has-[>section:focus-visible]:ring-fore-1 all">
+      {tableHead && (
+        <div
+          ref={stickyHeaderRef}
+          aria-hidden="true"
+          data-sticky-table-header=""
+          className="sticky top-0 z-20 overflow-clip rounded-t-[inherit] bg-back-2 [&_table]:my-0 [&_thead]:relative [&_thead]:z-10 [&_thead]:bg-back-2 [&_thead_th]:bg-back-2 [&_thead_th]:py-2 [&_th]:px-4 [&_th]:align-middle [&_th]:whitespace-nowrap [&_td]:px-4 [&_td]:align-middle [&_td]:whitespace-nowrap"
+        >
+          <table
+            ref={stickyTableRef}
+            className={props.className}
+            style={props.style}
+          >
+            {tableHead}
+          </table>
+        </div>
+      )}
       <section
         ref={elementRef}
         aria-label="表"
