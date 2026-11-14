@@ -13,22 +13,35 @@ export class ManimRendererError extends Error {
 }
 
 type RenderedMedia = {
-  kind: "image" | "video";
+  kind: "video";
   url: string;
   alt: string;
-  captionsUrl?: string;
+  captionsUrl: string;
 };
 
 export const isVisualScene = (value: unknown): value is VisualScene =>
   Value.Check(VisualSceneSchema, value) &&
-  !(
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    value.kind === "image" &&
-    "duration" in value &&
-    value.duration !== undefined
-  );
+  value.items.some((item) => {
+    if (item.type === "steps") {
+      return item.latex.some(
+        (formula, index) => index > 0 && formula !== item.latex[0],
+      );
+    }
+    if (item.type === "plot" && "expressions" in item) {
+      return item.expressions.some(
+        (expression, index) => index > 0 && expression !== item.expressions[0],
+      );
+    }
+    if (item.type === "point" && "positions" in item) {
+      return item.positions.some(
+        (position, index) =>
+          index > 0 &&
+          (position[0] !== item.positions[0]?.[0] ||
+            position[1] !== item.positions[0]?.[1]),
+      );
+    }
+    return false;
+  });
 
 const ALLOWED_LATEX_COMMANDS = new Set(
   "alpha angle approx beta cdot circ cos delta div frac gamma ge infty int le left ln log lambda mu neq omega pi pm right sigma sin sqrt sum tan theta times".split(
@@ -49,8 +62,8 @@ const ALLOWED_EXPRESSION_NAMES = new Set([
 ]);
 const ITEM_KEYS: Record<string, string[]> = {
   axes: ["type"],
-  plot: ["type", "expression", "color"],
-  point: ["type", "x", "y", "label", "color"],
+  plot: ["type", "expression", "expressions", "color"],
+  point: ["type", "x", "y", "positions", "label", "color"],
   segment: ["type", "from", "to", "color"],
   circle: ["type", "x", "y", "radius", "color"],
   formula: ["type", "latex", "color"],
@@ -185,10 +198,6 @@ export const normalizeVisualScene = (raw: unknown): unknown => {
     const allowedKeys = ITEM_KEYS[String(source.type)];
     if (!allowedKeys) return [raw];
 
-    if (source.type === "plot" && !isSupportedExpression(source.expression)) {
-      return [];
-    }
-
     const normalized: Record<string, unknown> = {};
     for (const key of allowedKeys) {
       if (source[key] !== undefined && source[key] !== null) {
@@ -204,9 +213,68 @@ export const normalizeVisualScene = (raw: unknown): unknown => {
     if (typeof normalized.label === "string") {
       normalized.label = normalized.label.slice(0, 200);
     }
-    if (source.type === "plot" && typeof normalized.expression === "string") {
-      normalized.expression = normalized.expression.slice(0, 200);
-      if (!isSupportedExpression(normalized.expression)) return [];
+    if (source.type === "plot") {
+      const expression = normalized.expression;
+      const expressions = normalized.expressions;
+      const hasExpression = typeof expression === "string";
+      const hasExpressions = Array.isArray(expressions);
+      if (hasExpression === hasExpressions) return [];
+      if (typeof expression === "string") {
+        normalized.expression = expression.slice(0, 200);
+        if (!isSupportedExpression(normalized.expression)) return [];
+      } else if (Array.isArray(expressions)) {
+        const boundedExpressions = expressions.slice(0, 6);
+        const keyframes = boundedExpressions.filter(
+          (expression): expression is string => typeof expression === "string",
+        );
+        if (
+          keyframes.length !== boundedExpressions.length ||
+          keyframes.length < 2 ||
+          keyframes.some(
+            (keyframe) => !isSupportedExpression(keyframe.slice(0, 200)),
+          )
+        ) {
+          return [];
+        }
+        normalized.expressions = keyframes.map((keyframe) =>
+          keyframe.slice(0, 200),
+        );
+      } else {
+        return [];
+      }
+    }
+    if (source.type === "point") {
+      const hasCoordinates =
+        typeof normalized.x === "number" || typeof normalized.y === "number";
+      const hasPositions = Array.isArray(normalized.positions);
+      if (hasCoordinates === hasPositions) return [];
+      const rawPositions = normalized.positions;
+      if (Array.isArray(rawPositions)) {
+        const boundedPositions = rawPositions.slice(0, 6);
+        const positions = boundedPositions.filter(
+          (position): position is [number, number] =>
+            Array.isArray(position) &&
+            position.length === 2 &&
+            position.every(
+              (coordinate) =>
+                typeof coordinate === "number" && Number.isFinite(coordinate),
+            ),
+        );
+        if (
+          positions.length !== boundedPositions.length ||
+          positions.length < 2
+        ) {
+          return [];
+        }
+        normalized.positions = positions;
+      } else if (
+        typeof normalized.x !== "number" ||
+        !Number.isFinite(normalized.x) ||
+        typeof normalized.y !== "number" ||
+        !Number.isFinite(normalized.y)
+      ) {
+        return [];
+      }
     }
     if (source.type === "formula" && typeof normalized.latex === "string") {
       const formula = normalized.latex.slice(0, 200);
@@ -323,10 +391,9 @@ export const renderVisualScene = async (
     !("alt" in payload) ||
     typeof payload.alt !== "string" ||
     !/^https?:\/\//.test(payload.url) ||
-    (scene.kind === "video" &&
-      (!("captions_url" in payload) ||
-        typeof payload.captions_url !== "string" ||
-        !/^https?:\/\//.test(payload.captions_url)))
+    !("captions_url" in payload) ||
+    typeof payload.captions_url !== "string" ||
+    !/^https?:\/\//.test(payload.captions_url)
   ) {
     throw new ManimRendererError("レンダラーの応答形式が不正です。");
   }
@@ -335,10 +402,6 @@ export const renderVisualScene = async (
     kind: scene.kind,
     url: payload.url,
     alt: payload.alt,
-    ...(scene.kind === "video" &&
-    "captions_url" in payload &&
-    typeof payload.captions_url === "string"
-      ? { captionsUrl: payload.captions_url }
-      : {}),
+    captionsUrl: payload.captions_url,
   };
 };

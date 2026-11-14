@@ -18,13 +18,23 @@ const color = t.Optional(t.String({ pattern: "^#[0-9A-Fa-f]{6}$" }));
 const coordinate = t.Number();
 const latex = t.String({ minLength: 1, maxLength: 200 });
 
-const visualItem = t.Union([
-  t.Object({ type: t.Literal("axes") }),
+const plotItem = t.Union([
   t.Object({
     type: t.Literal("plot"),
     expression: t.String({ minLength: 1, maxLength: 200 }),
     color,
   }),
+  t.Object({
+    type: t.Literal("plot"),
+    expressions: t.Array(t.String({ minLength: 1, maxLength: 200 }), {
+      minItems: 2,
+      maxItems: 6,
+    }),
+    color,
+  }),
+]);
+
+const pointItem = t.Union([
   t.Object({
     type: t.Literal("point"),
     x: coordinate,
@@ -32,6 +42,21 @@ const visualItem = t.Union([
     label: t.Optional(t.String({ minLength: 1, maxLength: 200 })),
     color,
   }),
+  t.Object({
+    type: t.Literal("point"),
+    positions: t.Array(t.Tuple([coordinate, coordinate]), {
+      minItems: 2,
+      maxItems: 6,
+    }),
+    label: t.Optional(t.String({ minLength: 1, maxLength: 200 })),
+    color,
+  }),
+]);
+
+const visualItem = t.Union([
+  t.Object({ type: t.Literal("axes") }),
+  plotItem,
+  pointItem,
   t.Object({
     type: t.Literal("segment"),
     from: t.Tuple([coordinate, coordinate]),
@@ -58,7 +83,7 @@ const visualItem = t.Union([
 ]);
 
 export const VisualSceneSchema = t.Object({
-  kind: t.Union([t.Literal("image"), t.Literal("video")]),
+  kind: t.Literal("video"),
   title: t.String({ minLength: 1, maxLength: 120 }),
   view: t.Optional(
     t.Object({
@@ -73,10 +98,17 @@ export const VisualSceneSchema = t.Object({
 export type VisualItem =
   | { type: "axes" }
   | { type: "plot"; expression: string; color?: string }
+  | { type: "plot"; expressions: string[]; color?: string }
   | {
       type: "point";
       x: number;
       y: number;
+      label?: string;
+      color?: string;
+    }
+  | {
+      type: "point";
+      positions: [number, number][];
       label?: string;
       color?: string;
     }
@@ -91,7 +123,7 @@ export type VisualItem =
   | { type: "steps"; latex: string[]; color?: string };
 
 export type VisualScene = {
-  kind: "image" | "video";
+  kind: "video";
   title: string;
   view?: { xMin: number; xMax: number };
   duration?: number;

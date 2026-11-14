@@ -16,6 +16,7 @@ from manim import (
     ORIGIN,
     Scene,
     Text,
+    Transform,
     TransformMatchingTex,
     UP,
     VGroup,
@@ -67,6 +68,7 @@ SAFE_LATEX_COMMANDS = {
 
 MARGIN = 0.4
 COLOR = "#4DA3FF"
+TRANSITION_TIME = 0.8
 
 
 def create_label(text, color=COLOR):
@@ -94,7 +96,7 @@ def _place_formula(formula, max_width):
     return formula
 
 
-def _formula_layout(items, region_width, center_x, top_y, is_video):
+def _formula_layout(items, region_width, center_x, top_y):
     transitions = []
     visible_blocks = []
     video_step_blocks = []
@@ -112,11 +114,16 @@ def _formula_layout(items, region_width, center_x, top_y, is_video):
         for formula in formulas:
             _place_formula(formula, region_width)
 
-        if item["type"] == "steps" and is_video:
+        if item["type"] == "steps":
             block = VGroup(formulas[0])
             visible_blocks.append(block)
             video_step_blocks.append((formulas, block))
-            transitions.extend(zip(formulas, formulas[1:]))
+            transitions.extend(
+                (index, "formula", current, target)
+                for index, (current, target) in enumerate(
+                    zip(formulas, formulas[1:])
+                )
+            )
         else:
             block = VGroup(*formulas).arrange(DOWN, buff=0.35, aligned_edge=LEFT)
             visible_blocks.append(block)
@@ -144,17 +151,24 @@ def build_scene_content(scene_data, frame_width=14.222, frame_height=8):
     view = scene_data.get("view") or {"xMin": -5, "xMax": 5}
     x_min, x_max = view["xMin"], view["xMax"]
 
-    plots = []
+    plot_frames = []
     data_y = []
+    spatial_transitions = []
     for item in items:
         if item["type"] == "plot":
-            samples = sample_expression(item["expression"], x_min, x_max)
-            segments = split_discontinuous_samples(samples)
-            if segments:
-                plots.append((segments, item.get("color", COLOR)))
+            expressions = item.get("expressions") or [item["expression"]]
+            frames = []
+            for expression in expressions:
+                segments = split_discontinuous_samples(
+                    sample_expression(expression, x_min, x_max)
+                )
+                frames.append(segments)
                 data_y.extend(y for segment in segments for _, y in segment)
+            if any(frames):
+                plot_frames.append((frames, item.get("color", COLOR)))
         elif item["type"] == "point":
-            data_y.append(item["y"])
+            positions = item.get("positions") or [(item["x"], item["y"])]
+            data_y.extend(y for _, y in positions)
         elif item["type"] == "segment":
             data_y.extend((item["from"][1], item["to"][1]))
         elif item["type"] == "circle":
@@ -183,33 +197,57 @@ def build_scene_content(scene_data, frame_width=14.222, frame_height=8):
         axes.move_to([graph_center_x, -0.3, 0])
         spatial = VGroup(axes)
 
-        for segments, color in plots:
-            for segment in segments:
-                points = segment
-                if len(points) < 2:
-                    continue
-                curve = VMobject(color=color, stroke_width=3)
-                curve.set_points_as_corners(
-                    [axes.c2p(x, y) for x, y in points]
+        for frames, color in plot_frames:
+            curve_frames = []
+            for segments in frames:
+                curves = VGroup()
+                for segment in segments:
+                    if len(segment) < 2:
+                        continue
+                    curve = VMobject(color=color, stroke_width=3)
+                    curve.set_points_as_corners(
+                        [axes.c2p(x, y) for x, y in segment]
+                    )
+                    curves.add(curve)
+                curve_frames.append(curves)
+            if curve_frames and curve_frames[0].submobjects:
+                spatial.add(curve_frames[0])
+            spatial_transitions.extend(
+                (index, "shape", current, target)
+                for index, (current, target) in enumerate(
+                    zip(curve_frames, curve_frames[1:])
                 )
-                spatial.add(curve)
+            )
 
         x_unit = graph_width / (x_max - x_min)
         y_unit = graph_height / (y_max - y_min)
         for item in items:
             if item["type"] == "point":
-                point = Dot(
-                    axes.c2p(item["x"], item["y"]),
-                    radius=0.045,
-                    color=item.get("color", COLOR),
+                positions = item.get("positions") or [(item["x"], item["y"])]
+                point_frames = []
+                for x, y in positions:
+                    point = Dot(
+                        axes.c2p(x, y),
+                        radius=0.045,
+                        color=item.get("color", COLOR),
+                    )
+                    group = VGroup(point)
+                    if item.get("label"):
+                        label = create_label(
+                            item["label"], item.get("color", COLOR)
+                        )
+                        if label.width > graph_width * 0.4:
+                            label.scale(graph_width * 0.4 / label.width)
+                        label.move_to(point.get_center() + UP * 0.22)
+                        group.add(label)
+                    point_frames.append(group)
+                spatial.add(point_frames[0])
+                spatial_transitions.extend(
+                    (index, "shape", current, target)
+                    for index, (current, target) in enumerate(
+                        zip(point_frames, point_frames[1:])
+                    )
                 )
-                spatial.add(point)
-                if item.get("label"):
-                    label = create_label(item["label"], item.get("color", COLOR))
-                    if label.width > graph_width * 0.4:
-                        label.scale(graph_width * 0.4 / label.width)
-                    label.move_to(point.get_center() + UP * 0.22)
-                    spatial.add(label)
             elif item["type"] == "segment":
                 spatial.add(
                     Line(
@@ -245,15 +283,17 @@ def build_scene_content(scene_data, frame_width=14.222, frame_height=8):
         formula_width = frame_width - 2 * margin
         formula_center_x = 0
     formula_top = frame_height / 2 - margin - title.height - 0.35
-    formulas, transitions = _formula_layout(
+    formulas, formula_transitions = _formula_layout(
         items,
         formula_width,
         formula_center_x,
         formula_top,
-        scene_data["kind"] == "video",
     )
+    transitions = spatial_transitions + formula_transitions
     visible = VGroup(spatial, formulas, title)
-    hidden_targets = {id(target): target for _, target in transitions}
+    hidden_targets = {
+        id(target): target for _, _, _, target in transitions
+    }
     layout = VGroup(visible, *hidden_targets.values())
 
     bounds = (
@@ -291,27 +331,47 @@ class GeneratedScene(Scene):
         )
         self.add(visible)
 
-        if scene_data["kind"] == "video":
-            transition_time = 0.5
-            for current, target in transitions:
-                try:
-                    self.play(
+        transition_count = max(
+            (transition_index + 1 for transition_index, *_ in transitions),
+            default=0,
+        )
+        for transition_index in range(transition_count):
+            step_transitions = [
+                transition
+                for transition in transitions
+                if transition[0] == transition_index
+            ]
+            animations = []
+            for _, kind, current, target in step_transitions:
+                if kind == "formula":
+                    animations.append(
                         TransformMatchingTex(
                             current,
                             target,
                             replace_mobject_with_target_in_scene=True,
-                        ),
-                        run_time=transition_time,
+                        )
                     )
-                    current = target
-                except Exception:
-                    self.remove(current)
-                    self.add(current)
-                    self.play(
-                        FadeOut(current),
-                        FadeIn(target),
-                        run_time=transition_time,
+                elif current.submobjects and target.submobjects:
+                    animations.append(
+                        Transform(
+                            current,
+                            target,
+                            replace_mobject_with_target_in_scene=True,
+                        )
                     )
-                    current = target
-            duration = scene_data.get("duration") or 6
-            self.wait(max(1, duration - transition_time * len(transitions)))
+                elif current.submobjects:
+                    animations.append(FadeOut(current))
+                elif target.submobjects:
+                    animations.append(FadeIn(target))
+            if not animations:
+                continue
+            try:
+                self.play(*animations, run_time=TRANSITION_TIME)
+            except Exception:
+                for _, _, current, target in step_transitions:
+                    if current.submobjects:
+                        self.play(FadeOut(current), run_time=TRANSITION_TIME / 2)
+                    if target.submobjects:
+                        self.play(FadeIn(target), run_time=TRANSITION_TIME / 2)
+        duration = scene_data.get("duration") or 6
+        self.wait(max(1, duration - TRANSITION_TIME * transition_count))

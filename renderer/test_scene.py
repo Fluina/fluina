@@ -50,19 +50,24 @@ class SceneModelTests(unittest.TestCase):
     def test_api_schema_drops_only_invalid_plots_and_preserves_data_values(self):
         scene = VisualScene.model_validate(
             {
-                "kind": "image",
+                "kind": "video",
+                "duration": 2,
                 "title": "座標",
                 "items": [
                     {"type": "plot", "expression": "__import__(x)"},
-                    {"type": "point", "x": 1, "y": 12, "label": "点"},
+                    {
+                        "type": "point",
+                        "positions": [[1, 12], [2, 13]],
+                        "label": "点",
+                    },
                 ],
             }
         )
 
         self.assertEqual(len(scene.items), 1)
-        self.assertEqual(scene.items[0].y, 12)
+        self.assertEqual(scene.items[0].positions[0][1], 12)
         self.assertEqual(
-            scene.model_dump(by_alias=True)["items"][0]["y"],
+            scene.model_dump(by_alias=True)["items"][0]["positions"][0][1],
             12,
         )
 
@@ -70,11 +75,56 @@ class SceneModelTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             VisualScene.model_validate(
                 {
-                    "kind": "image",
+                    "kind": "video",
                     "title": "旧形式",
                     "elements": [{"type": "text", "text": "点", "x": 1, "y": 2}],
                 }
             )
+
+    def test_api_schema_rejects_still_image_scenes(self):
+        with self.assertRaises(ValidationError):
+            VisualScene.model_validate(
+                {
+                    "kind": "image",
+                    "title": "静止画",
+                    "items": [{"type": "axes"}],
+                }
+            )
+
+    def test_api_schema_rejects_videos_without_animation(self):
+        with self.assertRaises(ValidationError):
+            VisualScene.model_validate(
+                {
+                    "kind": "video",
+                    "title": "固定図",
+                    "items": [
+                        {"type": "axes"},
+                        {"type": "plot", "expression": "x^2"},
+                    ],
+                }
+            )
+
+    def test_api_schema_accepts_plot_and_point_keyframes(self):
+        scene = VisualScene.model_validate(
+            {
+                "kind": "video",
+                "title": "判別式",
+                "items": [
+                    {
+                        "type": "plot",
+                        "expressions": ["x^2 - 2*x", "x^2 - 2*x + 1"],
+                    },
+                    {
+                        "type": "point",
+                        "positions": [[0, 0], [1, 0]],
+                        "label": "頂点",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(scene.items[0].expressions, ["x^2 - 2*x", "x^2 - 2*x + 1"])
+        self.assertEqual(scene.items[1].positions, [(0, 0), (1, 0)])
 
     def test_video_captions_include_step_transition_duration(self):
         scene = VisualScene.model_validate(
@@ -88,7 +138,24 @@ class SceneModelTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("00:00:03.500", make_captions(scene))
+        self.assertIn("00:00:05.000", make_captions(scene))
+
+    def test_video_captions_include_graph_keyframe_duration(self):
+        scene = VisualScene.model_validate(
+            {
+                "kind": "video",
+                "title": "放物線の移動",
+                "duration": 2,
+                "items": [
+                    {
+                        "type": "plot",
+                        "expressions": ["x^2", "x^2 + 1", "x^2 + 2", "x^2 + 3"],
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("00:00:03.400", make_captions(scene))
 
     def test_fit_bounds_stay_inside_the_margin(self):
         left, bottom, right, top = fit_frame_bounds((-20, -5, 20, 5))

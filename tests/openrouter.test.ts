@@ -276,25 +276,34 @@ test("rejects an empty prompt when no attachments are supplied", async () => {
   });
 });
 
-test("renders a requested visual and appends an embeddable media marker", async () => {
+test("renders a requested video and appends an embeddable media marker", async () => {
   const encoder = new TextEncoder();
   const scene = {
-    kind: "image",
-    title: "単位円",
+    kind: "video",
+    title: "二次関数",
+    duration: 4,
     view: { xMin: -2, xMax: 2 },
     items: [
       { type: "axes" },
       {
-        type: "circle",
-        x: 0,
-        y: 0,
-        radius: 1,
+        type: "plot",
+        expressions: ["x^2 - 1", "x^2", "x^2 + 1"],
       },
+      {
+        type: "point",
+        positions: [
+          [0, -1],
+          [0, 0],
+          [0, 1],
+        ],
+        label: "頂点",
+      },
+      { type: "steps", latex: ["x^2 - 1", "x^2", "x^2 + 1"] },
     ],
   };
   const bytes = encoder.encode(
     [
-      `data: ${JSON.stringify({ choices: [{ delta: { content: "単位円を示します。" } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "二次関数の変化を示します。" } }] })}\n\n`,
       `data: ${JSON.stringify({ choices: [{ delta: { content: `\n\`\`\`fluina-visual\n${JSON.stringify(scene)}\n\`\`\`` } }] })}\n\n`,
       "data: [DONE]\n\n",
     ].join(""),
@@ -319,9 +328,10 @@ test("renders a requested visual and appends an embeddable media marker", async 
         });
         if (url.startsWith("https://renderer.example.test/")) {
           return Response.json({
-            kind: "image",
-            url: "https://renderer.example.test/media/visual.png",
-            alt: "単位円",
+            kind: "video",
+            url: "https://renderer.example.test/media/visual.mp4",
+            captions_url: "https://renderer.example.test/media/visual.vtt",
+            alt: "二次関数",
           });
         }
         return new Response(bytes, {
@@ -334,12 +344,14 @@ test("renders a requested visual and appends an embeddable media marker", async 
   restoreFetch = () => fetchSpy.mockRestore();
 
   const chunks: string[] = [];
-  for await (const chunk of generateAskResponse("単位円を図で説明して")) {
+  for await (const chunk of generateAskResponse(
+    "二次関数の変化を動画で説明して",
+  )) {
     chunks.push(chunk);
   }
 
   const response = chunks.join("");
-  expect(response.startsWith("単位円を示します。")).toBe(true);
+  expect(response.startsWith("二次関数の変化を示します。")).toBe(true);
   expect(response).toContain("[[FLUINA_MEDIA:");
   expect(response).not.toContain("fluina-visual");
   expect(requests).toHaveLength(2);
@@ -348,9 +360,53 @@ test("renders a requested visual and appends an embeddable media marker", async 
   expect(JSON.parse(requests[1]?.body ?? "{}")).toEqual(scene);
 });
 
+test("normalizes AI-authored plot and point keyframes", () => {
+  const scene = normalizeVisualScene({
+    kind: "video",
+    title: "判別式",
+    items: [
+      { type: "axes" },
+      {
+        type: "plot",
+        expressions: ["x^2 - 2*x", "x^2 - 2*x + 1", "x^2 - 2*x + 2"],
+      },
+      {
+        type: "point",
+        positions: [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+        ],
+        label: "頂点",
+      },
+      { type: "steps", latex: ["D > 0", "D = 0", "D < 0"] },
+    ],
+  });
+
+  expect(isVisualScene(scene)).toBe(true);
+  expect(scene).toMatchObject({
+    items: [
+      { type: "axes" },
+      {
+        type: "plot",
+        expressions: ["x^2 - 2*x", "x^2 - 2*x + 1", "x^2 - 2*x + 2"],
+      },
+      {
+        type: "point",
+        positions: [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+        ],
+      },
+      { type: "steps", latex: ["D > 0", "D = 0", "D < 0"] },
+    ],
+  });
+});
+
 test("normalizes content-based scenes without clamping data coordinates", () => {
   const scene = normalizeVisualScene({
-    kind: "image",
+    kind: "video",
     title: "座標",
     items: [
       { type: "plot", expression: "process.exit()" },
@@ -358,17 +414,19 @@ test("normalizes content-based scenes without clamping data coordinates", () => 
       { type: "plot", expression: "x^2 - 3" },
       { type: "formula", latex: "y = x^2", x: 100, y: -100 },
       { type: "point", x: 12, y: -9, label: "点", custom: true },
+      { type: "steps", latex: ["x = 0", "x = 1"] },
     ],
   });
 
   expect(isVisualScene(scene)).toBe(true);
   expect(scene).toEqual({
-    kind: "image",
+    kind: "video",
     title: "座標",
     items: [
       { type: "plot", expression: "x^2 - 3" },
       { type: "formula", latex: "y = x^2" },
       { type: "point", x: 12, y: -9, label: "点" },
+      { type: "steps", latex: ["x = 0", "x = 1"] },
     ],
   });
   expect(
@@ -376,8 +434,16 @@ test("normalizes content-based scenes without clamping data coordinates", () => 
       normalizeVisualScene({
         kind: "image",
         title: "静止画",
-        duration: 4,
         items: [{ type: "axes" }],
+      }),
+    ),
+  ).toBe(false);
+  expect(
+    isVisualScene(
+      normalizeVisualScene({
+        kind: "video",
+        title: "固定図",
+        items: [{ type: "axes" }, { type: "plot", expression: "x^2" }],
       }),
     ),
   ).toBe(false);
@@ -385,7 +451,7 @@ test("normalizes content-based scenes without clamping data coordinates", () => 
 
 test("does not accept legacy positioned text elements", () => {
   const scene = normalizeVisualScene({
-    kind: "image",
+    kind: "video",
     title: "旧形式",
     elements: [{ type: "text", text: "点", x: 1, y: 2 }],
   });
@@ -402,6 +468,7 @@ test("treats null optional visual fields as omitted", () => {
     items: [
       { type: "axes" },
       { type: "point", x: 0, y: 0, label: null, color: null },
+      { type: "steps", latex: ["x = 0", "x = 1"] },
     ],
   });
 
@@ -409,7 +476,11 @@ test("treats null optional visual fields as omitted", () => {
   expect(scene).toEqual({
     kind: "video",
     title: "判別式",
-    items: [{ type: "axes" }, { type: "point", x: 0, y: 0 }],
+    items: [
+      { type: "axes" },
+      { type: "point", x: 0, y: 0 },
+      { type: "steps", latex: ["x = 0", "x = 1"] },
+    ],
   });
 });
 

@@ -12,7 +12,7 @@ import boto3
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from scene import SAFE_LATEX_COMMANDS
+from scene import SAFE_LATEX_COMMANDS, TRANSITION_TIME
 from scene_model import ExpressionError, validate_expression
 
 
@@ -54,16 +54,42 @@ class AxesItem(StrictModel):
 
 class PlotItem(StrictModel):
     type: Literal["plot"]
-    expression: str = Field(min_length=1, max_length=200)
+    expression: str | None = Field(default=None, min_length=1, max_length=200)
+    expressions: list[str] | None = Field(default=None, min_length=2, max_length=6)
     color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
+
+    @model_validator(mode="after")
+    def check_expression_keyframes(self):
+        if (self.expression is None) == (self.expressions is None):
+            raise ValueError("Provide either an expression or expression keyframes")
+        expressions = [self.expression] if self.expression is not None else self.expressions
+        for expression in expressions:
+            validate_expression(expression)
+        return self
 
 
 class PointItem(StrictModel):
     type: Literal["point"]
-    x: float = Field(allow_inf_nan=False)
-    y: float = Field(allow_inf_nan=False)
+    x: float | None = Field(default=None, allow_inf_nan=False)
+    y: float | None = Field(default=None, allow_inf_nan=False)
+    positions: list[tuple[float, float]] | None = Field(
+        default=None, min_length=2, max_length=6
+    )
     label: str | None = Field(default=None, min_length=1, max_length=200)
     color: str = Field(default="#4DA3FF", pattern=r"^#[0-9A-Fa-f]{6}$")
+
+    @model_validator(mode="after")
+    def check_positions(self):
+        has_coordinates = self.x is not None or self.y is not None
+        if has_coordinates and (self.x is None or self.y is None):
+            raise ValueError("Both x and y are required")
+        if has_coordinates == (self.positions is not None):
+            raise ValueError("Provide coordinates or position keyframes")
+        if self.positions and any(
+            not math.isfinite(value) for position in self.positions for value in position
+        ):
+            raise ValueError("Invalid point positions")
+        return self
 
 
 class SegmentItem(StrictModel):
@@ -135,17 +161,11 @@ VisualItem = Annotated[
 
 
 class VisualScene(StrictModel):
-    kind: Literal["image", "video"]
+    kind: Literal["video"]
     title: str = Field(min_length=1, max_length=120)
     view: View | None = None
     duration: float | None = Field(default=None, ge=2, le=20, allow_inf_nan=False)
     items: list[VisualItem] = Field(min_length=1, max_length=20)
-
-    @model_validator(mode="after")
-    def check_duration(self):
-        if self.kind == "image" and self.duration is not None:
-            raise ValueError("Duration is only available for video scenes")
-        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -161,10 +181,37 @@ class VisualScene(StrictModel):
             if not (
                 isinstance(item, dict)
                 and item.get("type") == "plot"
-                and _is_invalid_expression(item.get("expression"))
+                and _is_invalid_plot(item)
             )
         ]
         return normalized
+
+    @model_validator(mode="after")
+    def require_animation(self):
+        for item in self.items:
+            if isinstance(item, StepsItem) and any(
+                formula != item.latex[0] for formula in item.latex[1:]
+            ):
+                return self
+            if isinstance(item, PlotItem) and item.expressions and any(
+                expression != item.expressions[0]
+                for expression in item.expressions[1:]
+            ):
+                return self
+            if isinstance(item, PointItem) and item.positions and any(
+                position != item.positions[0] for position in item.positions[1:]
+            ):
+                return self
+        raise ValueError("Video scenes must contain an animated item")
+
+
+def _is_invalid_plot(item):
+    expressions = item.get("expressions")
+    if expressions is not None:
+        return not isinstance(expressions, list) or any(
+            _is_invalid_expression(expression) for expression in expressions
+        )
+    return _is_invalid_expression(item.get("expression"))
 
 
 def _is_invalid_expression(expression):
@@ -260,12 +307,28 @@ def make_captions(scene: VisualScene) -> str:
         .replace("\n", " ")
     )
     description = description[:2000]
-    transition_count = sum(
-        len(item.latex) - 1
-        for item in scene.items
-        if isinstance(item, StepsItem)
+    transition_count = max(
+        [
+            len(item.latex) - 1
+            for item in scene.items
+            if isinstance(item, StepsItem)
+        ]
+        + [
+            len(item.expressions) - 1
+            for item in scene.items
+            if isinstance(item, PlotItem) and item.expressions is not None
+        ]
+        + [
+            len(item.positions) - 1
+            for item in scene.items
+            if isinstance(item, PointItem) and item.positions is not None
+        ]
+        + [0]
     )
-    duration = max(scene.duration or 6, transition_count * 0.5 + 1)
+    duration = max(
+        scene.duration or 6,
+        transition_count * TRANSITION_TIME + 1,
+    )
     return (
         "WEBVTT\n\n"
         f"{format_vtt_time(0)} --> {format_vtt_time(duration)}\n"
@@ -299,7 +362,7 @@ async def render(
         raise HTTPException(status_code=503, detail="Media storage is not configured")
 
     async with RENDER_SEMAPHORE:
-        extension = "png" if scene.kind == "image" else "mp4"
+        extension = "mp4"
         filename = f"{uuid.uuid4().hex}.{extension}"
         with tempfile.TemporaryDirectory(prefix="fluina-manim-") as working_dir:
             work_path = Path(working_dir)
@@ -310,14 +373,12 @@ async def render(
             output_stem = filename.rsplit(".", 1)[0]
             command = [
                 "manim",
-                "-ql",
+                "-qh",
                 "--media_dir",
                 str(work_path / "media"),
                 "-o",
                 output_stem,
             ]
-            if scene.kind == "image":
-                command.extend(["-s", "--format", "png"])
             command.extend(
                 [str(Path(__file__).parent / "scene.py"), "GeneratedScene"]
             )
@@ -354,7 +415,6 @@ async def render(
                     status_code=500, detail="Rendered media was not found"
                 )
             content_types = {
-                "png": "image/png",
                 "mp4": "video/mp4",
                 "vtt": "text/vtt",
             }
@@ -365,13 +425,12 @@ async def render(
                     filename,
                     content_types[extension],
                 )
-                if scene.kind == "video":
-                    await asyncio.to_thread(
-                        upload_to_r2,
-                        make_captions(scene).encode("utf-8"),
-                        f"{output_stem}.vtt",
-                        content_types["vtt"],
-                    )
+                await asyncio.to_thread(
+                    upload_to_r2,
+                    make_captions(scene).encode("utf-8"),
+                    f"{output_stem}.vtt",
+                    content_types["vtt"],
+                )
             except Exception as error:
                 print("R2 upload failed:", error)
                 raise HTTPException(
@@ -382,9 +441,5 @@ async def render(
         "kind": scene.kind,
         "url": create_media_url(filename),
         "alt": scene.title,
-        **(
-            {"captions_url": create_media_url(f"{output_stem}.vtt")}
-            if scene.kind == "video"
-            else {}
-        ),
+        "captions_url": create_media_url(f"{output_stem}.vtt"),
     }

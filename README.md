@@ -47,9 +47,11 @@ OpenRouter, and selected model/provider limits still apply.
 
 ## Manim visual answers
 
-When the assistant decides a diagram or animation will help, it can request a
-still image or short video. The API sends a validated scene description to the
-separate Manim renderer in `renderer/`; generated Python is never executed.
+When the user explicitly requests a mathematical animation, the API sends a
+validated video scene description to the separate Manim renderer in
+`renderer/`. The server renderer produces videos only; generated Python is
+never executed. Static or interactive diagrams belong to a future client-side
+renderer.
 
 Deploy the root `render.yaml` as a Render Blueprint, then set these variables
 on the Fluina API service:
@@ -70,12 +72,13 @@ No Render disk is needed. The renderer also compiles the bounded vector-point pr
 Cython. Cython does not accelerate Manim's Cairo/FFmpeg rendering itself, so
 any broader speed claim should be based on measured render timings.
 
-The visual scene format supports text, safe-subset math formulas, circles,
-rectangles, lines, and plotted point sequences. Configure a one-day R2
-lifecycle expiration rule for the `media/` prefix in the renderer's bucket.
-Keep public access disabled. The bucket's CORS policy should allow `GET` and
-`HEAD` from the Fluina site origin so generated images, videos, and captions can
-be loaded in the browser.
+Video scenes support axes, plots, points, segments, circles, formulas, and
+step-by-step captions. The AI can animate plot expressions, point positions,
+and formula steps across keyframes; the renderer uses Manim's `-qh` quality
+preset (1920×1080 at 60 fps). Configure a one-day R2 lifecycle expiration rule
+for the `media/` prefix in the renderer's bucket. Keep public access disabled.
+The bucket's CORS policy should allow `GET` and `HEAD` from the Fluina site
+origin so generated videos and captions can be loaded in the browser.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
