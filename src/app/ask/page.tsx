@@ -1121,12 +1121,24 @@ const MarkdownCode = ({
               collapsedLines.has(nextLine);
             const collapsedBackgroundRadius =
               joinsPrevious && joinsNext
-                ? "rounded-t-none rounded-b-none"
+                ? {
+                    className: "rounded-t-none rounded-b-none",
+                    value: "0rem 0rem 0rem 0rem",
+                  }
                 : joinsPrevious
-                  ? "rounded-t-none rounded-b-2xl"
+                  ? {
+                      className: "rounded-t-none rounded-b-2xl",
+                      value: "0rem 0rem 1rem 1rem",
+                    }
                   : joinsNext
-                    ? "rounded-t-2xl rounded-b-none"
-                    : "rounded-4xl";
+                    ? {
+                        className: "rounded-t-2xl rounded-b-none",
+                        value: "1rem 1rem 0rem 0rem",
+                      }
+                    : {
+                        className: "rounded-4xl",
+                        value: "2rem 2rem 2rem 2rem",
+                      };
             return (
               <motion.span
                 key={lineIndex}
@@ -1148,11 +1160,20 @@ const MarkdownCode = ({
                       key="collapsed-background"
                       aria-hidden="true"
                       data-code-line-background=""
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
+                      initial={{
+                        opacity: 0,
+                        borderRadius: "2rem 2rem 2rem 2rem",
+                      }}
+                      animate={{
+                        opacity: 1,
+                        borderRadius: collapsedBackgroundRadius.value,
+                      }}
+                      exit={{
+                        opacity: 0,
+                        borderRadius: "2rem 2rem 2rem 2rem",
+                      }}
                       transition={TRANSITION}
-                      className={`radius pointer-events-none absolute -right-1 top-0 bottom-0 z-0 ${collapsedBackgroundRadius} bg-blue/50`}
+                      className={`pointer-events-none absolute -right-1 top-0 bottom-0 z-0 ${collapsedBackgroundRadius.className} bg-blue/50`}
                       style={{
                         left: "calc(-0.25rem - var(--code-line-number-width) + 1ch)",
                       }}

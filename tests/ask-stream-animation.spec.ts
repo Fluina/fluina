@@ -1258,6 +1258,7 @@ test("joins adjacent collapsed-line backgrounds but keeps isolated corners round
   const firstFold = code
     .locator('.code-line[data-line-index="0"]')
     .locator('[data-code-line-control="fold"]');
+  const backgrounds = code.locator("[data-code-line-background]");
   await firstFold.click();
   await expect(firstFold).toHaveAttribute("aria-expanded", "false");
   for (const lineNumber of [3, 5]) {
@@ -1266,14 +1267,23 @@ test("joins adjacent collapsed-line backgrounds but keeps isolated corners round
       .locator('[data-code-line-control="fold"]');
     await fold.click();
     await expect(fold).toHaveAttribute("aria-expanded", "false");
+    if (lineNumber === 3) {
+      const joiningBackground = backgrounds.nth(1);
+      const initialTopRadius = await joiningBackground.evaluate(
+        (element) => getComputedStyle(element).borderTopLeftRadius,
+      );
+      expect(initialTopRadius).toBe("32px");
+      await expect
+        .poll(() =>
+          joiningBackground.evaluate(
+            (element) => getComputedStyle(element).borderTopLeftRadius,
+          ),
+        )
+        .toBe("0px");
+    }
   }
 
-  const backgrounds = code.locator("[data-code-line-background]");
   await expect(backgrounds).toHaveCount(3);
-  await expect(backgrounds.first()).toHaveCSS(
-    "transition-property",
-    "border-radius",
-  );
   const numberAlignment = await code.evaluate((element) => {
     const buttons = ["0", "9"].map((lineIndex) => {
       const button = element.querySelector<HTMLElement>(
