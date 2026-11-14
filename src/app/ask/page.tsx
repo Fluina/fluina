@@ -123,6 +123,61 @@ type AttachedFile = {
   source: "input" | "paste" | "drag";
 };
 
+type VoiceRecognitionAlternative = { transcript: string };
+type VoiceRecognitionResult = {
+  isFinal: boolean;
+  length: number;
+  [index: number]: VoiceRecognitionAlternative;
+};
+type VoiceRecognitionResultList = {
+  length: number;
+  [index: number]: VoiceRecognitionResult;
+};
+type VoiceRecognitionEvent = { results: VoiceRecognitionResultList };
+type VoiceRecognitionErrorEvent = { error: string };
+
+type BrowserSpeechRecognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: VoiceRecognitionEvent) => void) | null;
+  onerror: ((event: VoiceRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+};
+
+type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+type BrowserSpeechRecognitionWindow = Window & {
+  SpeechRecognition?: BrowserSpeechRecognitionConstructor;
+  webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
+};
+
+type VoiceInputSession = {
+  stream: MediaStream;
+  audioContext: AudioContext;
+  source: MediaStreamAudioSourceNode;
+  analyser: AnalyserNode;
+  recognition: BrowserSpeechRecognition;
+  cancelled: boolean;
+  recording: boolean;
+  mediaReleased: boolean;
+  networkRetries: number;
+};
+
+const releaseVoiceMedia = (session: VoiceInputSession) => {
+  if (session.mediaReleased) return;
+  session.mediaReleased = true;
+  session.source.disconnect();
+  for (const track of session.stream.getTracks()) track.stop();
+  if (session.audioContext.state !== "closed") {
+    void session.audioContext.close().catch((error: unknown) => {
+      console.warn("Audio context cleanup failed:", error);
+    });
+  }
+};
+
 type MessageNotice = {
   kind: "cancelled" | "error";
   text: string;
@@ -680,10 +735,17 @@ const getEditableBlockText = (block: HTMLElement): string => {
     }
   }
   if (inlineText) parts.push(inlineText);
-  return parts.join("\n").replace(/\n$/, "");
+  return parts.join("\n");
 };
 
 const getEditableText = (element: HTMLElement) => {
+  if (
+    element.childNodes.length === 1 &&
+    element.firstChild instanceof HTMLBRElement
+  ) {
+    return "";
+  }
+
   const lines: string[] = [];
   let inlineText = "";
   const flushInlineText = () => {
@@ -701,7 +763,7 @@ const getEditableText = (element: HTMLElement) => {
     }
   }
   flushInlineText();
-  return lines.join("\n").replace(/\n$/, "");
+  return lines.join("\n");
 };
 
 const getCodeBlockKey = (language: string, code: string) =>
@@ -2815,6 +2877,7 @@ export default function Ask() {
   const [isScrollable, setIsScrollable] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [files, setFiles] = useState<AttachedFile[]>([]);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
 
   const [messages, setMessages] = useState<ChatArchiveRecord[]>([]);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
@@ -2842,6 +2905,10 @@ export default function Ask() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const voiceVisualizerRef = useRef<HTMLCanvasElement>(null);
+  const voiceSessionRef = useRef<VoiceInputSession | null>(null);
+  const voiceStartPendingRef = useRef(false);
+  const voiceBaseValueRef = useRef("");
   const scrollTopRef = useRef(0);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const nativeSmoothScrollCleanupRef = useRef<(() => void) | null>(null);
@@ -2875,9 +2942,11 @@ export default function Ask() {
     setIsExpanded((expanded) => !expanded);
   }, []);
 
-  const hasText = value.length > 0;
+  const hasText = /\S/.test(value);
+  const hasValue = value.length > 0;
   const hasFiles = files.length > 0;
   const hasInput = value.trim().length > 0 || hasFiles;
+  const isVoiceInputActive = isVoiceRecording;
 
   const updateTailSpacer = useCallback((viewportOverride?: HTMLElement) => {
     const host = chatScrollRef.current;
@@ -4107,13 +4176,273 @@ export default function Ask() {
     abortControllerRef.current?.abort(USER_CANCEL_REASON);
   }, []);
 
+  const replaceVoiceTranscript = useCallback((transcript: string) => {
+    const chunk = transcript;
+
+    const base = voiceBaseValueRef.current;
+    const baseLastCharacter = base.at(-1) ?? "";
+    const firstCharacter = chunk[0] ?? "";
+    const joinsWithoutSpace =
+      /[\u3000-\u30ff\u3400-\u9fff]/.test(baseLastCharacter) &&
+      /[\u3000-\u30ff\u3400-\u9fff]/.test(firstCharacter);
+    const separator =
+      base &&
+      chunk &&
+      !/\s$/.test(base) &&
+      !/^\s/.test(chunk) &&
+      !joinsWithoutSpace
+        ? " "
+        : "";
+    const nextValue = `${base}${separator}${chunk}`;
+    setValue(nextValue);
+    if (editorRef.current) editorRef.current.innerText = nextValue;
+  }, []);
+
+  const stopVoiceInput = useCallback((discardTranscript = false) => {
+    const session = voiceSessionRef.current;
+    if (!session) return;
+
+    session.recording = false;
+    if (discardTranscript) {
+      session.cancelled = true;
+      session.recognition.onresult = null;
+      session.recognition.onerror = null;
+      session.recognition.onend = null;
+      try {
+        session.recognition.abort();
+      } catch (error) {
+        console.warn("Speech recognition abort failed:", error);
+      }
+      releaseVoiceMedia(session);
+      voiceSessionRef.current = null;
+      setValue(voiceBaseValueRef.current);
+      if (editorRef.current) {
+        editorRef.current.innerText = voiceBaseValueRef.current;
+      }
+      setIsVoiceRecording(false);
+      return;
+    }
+
+    try {
+      session.recognition.stop();
+    } catch (error) {
+      console.warn("Speech recognition stop failed:", error);
+      releaseVoiceMedia(session);
+      voiceSessionRef.current = null;
+      setIsVoiceRecording(false);
+    }
+  }, []);
+
+  const startVoiceInput = useCallback(async () => {
+    if (
+      voiceSessionRef.current ||
+      voiceStartPendingRef.current ||
+      isLoading ||
+      submissionInProgressRef.current
+    ) {
+      return;
+    }
+
+    voiceStartPendingRef.current = true;
+    voiceBaseValueRef.current = editorRef.current
+      ? getEditableText(editorRef.current)
+      : value;
+    setValue(voiceBaseValueRef.current);
+    let stream: MediaStream | null = null;
+    let audioContext: AudioContext | null = null;
+    let session: VoiceInputSession | null = null;
+
+    try {
+      const speechWindow = window as BrowserSpeechRecognitionWindow;
+      const SpeechRecognition =
+        speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        throw new Error("Browser speech recognition is not supported.");
+      }
+      if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) {
+        throw new Error("Microphone input is not supported.");
+      }
+
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioContext = new AudioContext();
+      if (audioContext.state === "suspended") await audioContext.resume();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "ja-JP";
+      const activeSession: VoiceInputSession = {
+        stream,
+        audioContext,
+        source,
+        analyser,
+        recognition,
+        cancelled: false,
+        recording: true,
+        mediaReleased: false,
+        networkRetries: 0,
+      };
+      session = activeSession;
+      voiceSessionRef.current = activeSession;
+      setIsAdjusted(false);
+      setIsScrollable(false);
+      setIsExpanded(false);
+      setIsVoiceRecording(true);
+
+      recognition.onresult = (event) => {
+        if (activeSession.cancelled) return;
+        activeSession.networkRetries = 0;
+        let transcript = "";
+        for (let index = 0; index < event.results.length; index += 1) {
+          transcript += event.results[index]?.[0]?.transcript ?? "";
+        }
+        replaceVoiceTranscript(transcript);
+      };
+      recognition.onerror = (event) => {
+        if (activeSession.cancelled || !activeSession.recording) return;
+        if (event.error === "no-speech") return;
+        if (event.error === "network" && activeSession.networkRetries < 1) {
+          activeSession.networkRetries += 1;
+          console.warn("Browser speech recognition network error; retrying.");
+          return;
+        }
+        console.warn("Browser speech recognition failed:", event.error);
+        activeSession.recording = false;
+      };
+      recognition.onend = () => {
+        if (activeSession.recording && !activeSession.cancelled) {
+          try {
+            recognition.start();
+            return;
+          } catch (error) {
+            console.warn("Speech recognition restart failed:", error);
+            activeSession.recording = false;
+          }
+        }
+        releaseVoiceMedia(activeSession);
+        if (voiceSessionRef.current === activeSession) {
+          voiceSessionRef.current = null;
+        }
+        setIsVoiceRecording(false);
+      };
+
+      recognition.start();
+    } catch (error) {
+      if (session) {
+        session.cancelled = true;
+        session.recording = false;
+        session.recognition.onresult = null;
+        session.recognition.onerror = null;
+        session.recognition.onend = null;
+        try {
+          session.recognition.abort();
+        } catch (cleanupError) {
+          console.warn("Speech recognition cleanup failed:", cleanupError);
+        }
+        releaseVoiceMedia(session);
+        if (voiceSessionRef.current === session) {
+          voiceSessionRef.current = null;
+        }
+      } else {
+        for (const track of stream?.getTracks() ?? []) track.stop();
+        if (audioContext && audioContext.state !== "closed") {
+          void audioContext.close().catch((cleanupError: unknown) => {
+            console.warn("Audio context cleanup failed:", cleanupError);
+          });
+        }
+      }
+      console.warn("Microphone startup failed:", error);
+      setIsVoiceRecording(false);
+    } finally {
+      voiceStartPendingRef.current = false;
+    }
+  }, [isLoading, replaceVoiceTranscript, value]);
+
+  const cancelVoiceInput = useCallback(
+    () => stopVoiceInput(true),
+    [stopVoiceInput],
+  );
+
+  useEffect(() => {
+    return () => stopVoiceInput(true);
+  }, [stopVoiceInput]);
+
+  useEffect(() => {
+    if (!isVoiceRecording) return;
+    const session = voiceSessionRef.current;
+    const canvas = voiceVisualizerRef.current;
+    const context = canvas?.getContext("2d");
+    if (!session || !canvas || !context) return;
+
+    const samples = new Uint8Array(session.analyser.fftSize);
+    const bars = new Float32Array(48);
+    let lastBarUpdate = 0;
+    const draw = (timestamp: number) => {
+      if (session.cancelled || !session.recording) return;
+
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      const pixelRatio = window.devicePixelRatio || 1;
+      if (
+        canvas.width !== Math.round(width * pixelRatio) ||
+        canvas.height !== Math.round(height * pixelRatio)
+      ) {
+        canvas.width = Math.round(width * pixelRatio);
+        canvas.height = Math.round(height * pixelRatio);
+      }
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      session.analyser.getByteTimeDomainData(samples);
+
+      if (timestamp - lastBarUpdate >= 45) {
+        let energy = 0;
+        for (const sample of samples) {
+          const amplitude = (sample - 128) / 128;
+          energy += amplitude * amplitude;
+        }
+        bars.copyWithin(0, 1);
+        bars[bars.length - 1] = Math.min(
+          Math.sqrt(energy / samples.length) * 4,
+          1,
+        );
+        lastBarUpdate = timestamp;
+      }
+
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = getComputedStyle(canvas).color;
+      const gap = 3;
+      const barWidth = Math.max(
+        (width - gap * (bars.length - 1)) / bars.length,
+        1,
+      );
+      for (let index = 0; index < bars.length; index += 1) {
+        const barHeight = Math.max(2, (bars[index] ?? 0) * (height - 4));
+        context.fillRect(
+          index * (barWidth + gap),
+          (height - barHeight) / 2,
+          barWidth,
+          barHeight,
+        );
+      }
+
+      requestAnimationFrame(draw);
+    };
+
+    const frame = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frame);
+  }, [isVoiceRecording]);
+
   const handleSubmit = async (e?: SyntheticEvent<HTMLFormElement>) => {
     if (e) e.preventDefault();
-    const userPrompt = (
-      editorRef.current ? getEditableText(editorRef.current) : value
-    ).trim();
+    const userPrompt = editorRef.current
+      ? getEditableText(editorRef.current)
+      : value;
     if (
-      (!userPrompt && files.length === 0) ||
+      (!/\S/.test(userPrompt) && files.length === 0) ||
+      isVoiceInputActive ||
       isLoading ||
       submissionInProgressRef.current ||
       !archiveReady
@@ -4322,8 +4651,7 @@ export default function Ask() {
     measurement.removeAttribute("id");
     measurement.setAttribute("aria-hidden", "true");
     measurement.contentEditable = "false";
-    // Keep a trailing empty line measurable in the cloned editor.
-    measurement.textContent = value.endsWith("\n") ? `${value}\u200B` : value;
+    measurement.textContent = value;
     measurement.style.position = "absolute";
     measurement.style.left = "-10000px";
     measurement.style.top = "0";
@@ -4935,14 +5263,14 @@ export default function Ask() {
   ]);
 
   useEffect(() => {
-    if (hasText) return;
+    if (hasValue) return;
 
     const interval = setInterval(() => {
       setPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDERS.length);
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [hasText]);
+  }, [hasValue]);
 
   useEffect(() => {
     if (!editingMessageId || !editingRef.current) return;
@@ -5520,19 +5848,7 @@ export default function Ask() {
             transition={TRANSITION}
             className={`flex-none grid gap-1 w-full items-center border border-back-5 shadow-lg bg-back-1 p-2 overflow-clip rounded-4xl
               ${isExpanded ? "h-full" : "max-h-full"}
-              ${
-                hasFiles
-                  ? isAdjusted || isExpanded
-                    ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_1fr_auto]"
-                    : hasText
-                      ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] grid-rows-[auto_auto]"
-                      : "grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto]"
-                  : isAdjusted || isExpanded
-                    ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_1fr_auto]"
-                    : hasText
-                      ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]"
-                      : "grid-cols-[auto_minmax(0,1fr)_auto_auto]"
-              }
+            ${isVoiceRecording ? (hasFiles ? (hasText ? "grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto]") : hasText ? "grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto]") : hasFiles ? (isAdjusted || isExpanded ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_auto_1fr_auto]" : hasValue ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] grid-rows-[auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto] grid-rows-[auto_auto]") : isAdjusted || isExpanded ? "grid-cols-[auto_minmax(0,1fr)_auto] grid-rows-[auto_1fr_auto]" : hasValue ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto]"}
               ${messages.length === 0 ? "max-md:mt-auto" : "mt-auto"}
               `}
           >
@@ -5540,100 +5856,120 @@ export default function Ask() {
               layout="position"
               transition={TRANSITION}
               className={`${
-                hasFiles
-                  ? isAdjusted || isExpanded
-                    ? "col-start-1 row-start-4"
-                    : "col-start-1 row-start-2"
-                  : isAdjusted || isExpanded
-                    ? "col-start-1 row-start-3"
-                    : "col-start-1 row-start-1"
+                isVoiceRecording
+                  ? hasFiles
+                    ? hasText
+                      ? "col-start-1 row-start-3"
+                      : "col-start-1 row-start-2"
+                    : hasText
+                      ? "col-start-1 row-start-2"
+                      : "col-start-1 row-start-1"
+                  : hasFiles
+                    ? isAdjusted || isExpanded
+                      ? "col-start-1 row-start-4"
+                      : "col-start-1 row-start-2"
+                    : isAdjusted || isExpanded
+                      ? "col-start-1 row-start-3"
+                      : "col-start-1 row-start-1"
               }`}
             >
-              <Tooltip
-                content="添付"
-                shortcut={{
-                  mac: ["⌘", "Shift", "Option", "A"],
-                  windows: ["Ctrl", "Shift", "Alt", "A"],
-                }}
-              >
-                <Menu.Trigger>
+              {isVoiceInputActive ? (
+                <Tooltip content="音声入力を取り消して文字起こしを消去">
                   <Button
-                    aria-label="Attatch"
+                    onPress={cancelVoiceInput}
+                    aria-label="Cancel voice input"
                     shape="circle"
-                    className="bg-back-2"
                   >
-                    <Plus className="text-fore-1" />
+                    <X />
                   </Button>
+                </Tooltip>
+              ) : (
+                <Tooltip
+                  content="添付"
+                  shortcut={{
+                    mac: ["⌘", "Shift", "Option", "A"],
+                    windows: ["Ctrl", "Shift", "Alt", "A"],
+                  }}
+                >
+                  <Menu.Trigger>
+                    <Button
+                      aria-label="Attatch"
+                      shape="circle"
+                      className="bg-back-2"
+                    >
+                      <Plus className="text-fore-1" />
+                    </Button>
 
-                  <Menu.Content
-                    triggerRef={formRef}
-                    placement="top start"
-                    offset={8}
-                  >
-                    {isMobile ? (
-                      <Menu.Section className="grid grid-cols-2 gap-2">
-                        <Menu.Item
-                          icon={<Paperclip />}
-                          className="h-20 flex flex-col justify-center items-center"
-                          onAction={() => fileInputRef.current?.click()}
-                        >
-                          ファイル
+                    <Menu.Content
+                      triggerRef={formRef}
+                      placement="top start"
+                      offset={8}
+                    >
+                      {isMobile ? (
+                        <Menu.Section className="grid grid-cols-2 gap-2">
+                          <Menu.Item
+                            icon={<Paperclip />}
+                            className="h-20 flex flex-col justify-center items-center"
+                            onAction={() => fileInputRef.current?.click()}
+                          >
+                            ファイル
+                          </Menu.Item>
+                          <Menu.Item
+                            icon={<Camera />}
+                            className="h-20 flex flex-col justify-center items-center"
+                            onAction={() => cameraInputRef.current?.click()}
+                          >
+                            カメラ
+                          </Menu.Item>
+                        </Menu.Section>
+                      ) : (
+                        <>
+                          <Menu.Item
+                            icon={<Paperclip />}
+                            shortcut="Ctrl+Shift+Alt+U"
+                            onAction={() => fileInputRef.current?.click()}
+                          >
+                            ファイルを添付
+                          </Menu.Item>
+                          <Menu.Item
+                            onAction={handleTakeScreenshot}
+                            icon={<Camera />}
+                          >
+                            スクリーンショットを撮影
+                          </Menu.Item>
+                        </>
+                      )}
+
+                      <Menu.Separator />
+
+                      <Menu.SubmenuTrigger>
+                        <Menu.Item icon={<Folder />}>
+                          プロジェクトに追加
                         </Menu.Item>
-                        <Menu.Item
-                          icon={<Camera />}
-                          className="h-20 flex flex-col justify-center items-center"
-                          onAction={() => cameraInputRef.current?.click()}
-                        >
-                          カメラ
+                        <Menu.Content mobileSheet={false}>
+                          <Menu.Item>プロジェクト A</Menu.Item>
+                          <Menu.Item>プロジェクト B</Menu.Item>
+                        </Menu.Content>
+                      </Menu.SubmenuTrigger>
+
+                      <Menu.Item icon={<Puzzle />}>スキル</Menu.Item>
+                      <Menu.Item icon={<Plug />}>コネクタを追加</Menu.Item>
+                      <Menu.Item icon={<Zap />}>プラグインを追加...</Menu.Item>
+
+                      <Menu.Separator />
+
+                      <Menu.Section
+                        selectionMode="single"
+                        defaultSelectedKeys={["web-search"]}
+                      >
+                        <Menu.Item id="web-search" icon={<Globe />}>
+                          ウェブ検索
                         </Menu.Item>
                       </Menu.Section>
-                    ) : (
-                      <>
-                        <Menu.Item
-                          icon={<Paperclip />}
-                          shortcut="Ctrl+Shift+Alt+U"
-                          onAction={() => fileInputRef.current?.click()}
-                        >
-                          ファイルを添付
-                        </Menu.Item>
-                        <Menu.Item
-                          onAction={handleTakeScreenshot}
-                          icon={<Camera />}
-                        >
-                          スクリーンショットを撮影
-                        </Menu.Item>
-                      </>
-                    )}
-
-                    <Menu.Separator />
-
-                    <Menu.SubmenuTrigger>
-                      <Menu.Item icon={<Folder />}>
-                        プロジェクトに追加
-                      </Menu.Item>
-                      <Menu.Content mobileSheet={false}>
-                        <Menu.Item>プロジェクト A</Menu.Item>
-                        <Menu.Item>プロジェクト B</Menu.Item>
-                      </Menu.Content>
-                    </Menu.SubmenuTrigger>
-
-                    <Menu.Item icon={<Puzzle />}>スキル</Menu.Item>
-                    <Menu.Item icon={<Plug />}>コネクタを追加</Menu.Item>
-                    <Menu.Item icon={<Zap />}>プラグインを追加...</Menu.Item>
-
-                    <Menu.Separator />
-
-                    <Menu.Section
-                      selectionMode="single"
-                      defaultSelectedKeys={["web-search"]}
-                    >
-                      <Menu.Item id="web-search" icon={<Globe />}>
-                        ウェブ検索
-                      </Menu.Item>
-                    </Menu.Section>
-                  </Menu.Content>
-                </Menu.Trigger>
-              </Tooltip>
+                    </Menu.Content>
+                  </Menu.Trigger>
+                </Tooltip>
+              )}
             </motion.div>
 
             <input
@@ -5661,12 +5997,18 @@ export default function Ask() {
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={TRANSITION}
-                  className={`flex items-center justify-center p-2 w-full col-start-1 row-start-1 ${
-                    isAdjusted || isExpanded
-                      ? "col-span-2"
-                      : hasText
-                        ? "col-span-4"
-                        : "col-span-3"
+                  className={`flex items-center justify-center p-2 w-full ${
+                    isVoiceRecording
+                      ? "col-start-1 col-span-4 row-start-1"
+                      : "col-start-1 row-start-1"
+                  } ${
+                    isVoiceRecording
+                      ? ""
+                      : isAdjusted || isExpanded
+                        ? "col-span-2"
+                        : hasValue
+                          ? "col-span-4"
+                          : "col-span-3"
                   }`}
                 >
                   <motion.div
@@ -5735,7 +6077,7 @@ export default function Ask() {
             </AnimatePresence>
 
             <AnimatePresence mode="popLayout" initial={false}>
-              {hasFiles && (
+              {hasFiles && !isVoiceRecording && (
                 <motion.div
                   layout="position"
                   initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
@@ -5745,7 +6087,7 @@ export default function Ask() {
                   className={`row-start-1 ${
                     isAdjusted || isExpanded
                       ? "col-start-3"
-                      : hasText
+                      : hasValue
                         ? "col-start-5"
                         : "col-start-4"
                   }`}
@@ -5770,21 +6112,46 @@ export default function Ask() {
               )}
             </AnimatePresence>
 
+            {isVoiceRecording && (
+              <canvas
+                ref={voiceVisualizerRef}
+                role="img"
+                aria-label="音声入力ビジュアライザー"
+                className={`col-start-2 w-full h-9 text-fore-3 ${
+                  hasText
+                    ? hasFiles
+                      ? "row-start-3"
+                      : "row-start-2"
+                    : hasFiles
+                      ? "row-start-2"
+                      : "row-start-1"
+                }`}
+              />
+            )}
+
             <motion.div
               layout="position"
               transition={TRANSITION}
               className={`relative w-full min-w-0 flex flex-col justify-start items-start ${isExpanded ? "h-full" : "[--scroll-fade-size:2.5rem]"}
               ${
-                hasFiles
-                  ? isAdjusted || isExpanded
-                    ? "col-start-1 col-span-2 row-start-2 row-span-2"
-                    : "col-start-2 row-start-2"
-                  : isAdjusted || isExpanded
-                    ? "col-start-1 col-span-2 row-start-1 row-span-2"
-                    : "col-start-2 row-start-1"
+                isVoiceRecording
+                  ? hasFiles
+                    ? hasText
+                      ? "col-start-1 col-span-4 row-start-2"
+                      : "col-start-2 row-start-2"
+                    : hasText
+                      ? "col-start-1 col-span-4 row-start-1"
+                      : "col-start-2 row-start-1"
+                  : hasFiles
+                    ? isAdjusted || isExpanded
+                      ? "col-start-1 col-span-2 row-start-2 row-span-2"
+                      : "col-start-2 row-start-2"
+                    : isAdjusted || isExpanded
+                      ? "col-start-1 col-span-2 row-start-1 row-span-2"
+                      : "col-start-2 row-start-1"
               }`}
             >
-              {!hasText && (
+              {!hasValue && !isVoiceRecording && (
                 <AnimatePresence mode="wait" initial={false}>
                   <motion.span
                     key={placeholderIndex}
@@ -5825,11 +6192,17 @@ export default function Ask() {
                 </AnimatePresence>
               )}
 
+              {isVoiceRecording && (
+                <output className="sr-only" aria-live="polite">
+                  音声を文字起こししています
+                </output>
+              )}
+
               <motion.div
                 ref={scrollRef}
                 layout="position"
                 transition={TRANSITION}
-                className={`p-2 flex justify-center items-start relative w-full min-w-0 ${isExpanded && " h-full max-h-full"}`}
+                className={`p-2 flex justify-center items-start relative w-full min-w-0 ${isExpanded && " h-full max-h-full"} ${isVoiceRecording && !hasText ? "hidden" : ""}`}
                 style={
                   !isExpanded && singleLineRef.current > 0
                     ? { maxHeight: `${singleLineRef.current * 5 + 16}px` }
@@ -5868,7 +6241,7 @@ export default function Ask() {
                     }, 0);
                   }}
                   autoFocus
-                  contentEditable
+                  contentEditable={!isVoiceInputActive}
                   suppressContentEditableWarning
                   spellCheck={false}
                   aria-multiline="true"
@@ -5879,7 +6252,7 @@ export default function Ask() {
             </motion.div>
 
             <AnimatePresence mode="popLayout" initial={false}>
-              {hasText && (
+              {hasValue && !isVoiceInputActive && (
                 <motion.div
                   layout="position"
                   initial={{ opacity: 0, scale: 0.5, rotate: -45 }}
@@ -5887,13 +6260,21 @@ export default function Ask() {
                   exit={{ opacity: 0, scale: 0.5, rotate: 45 }}
                   transition={TRANSITION}
                   className={`${
-                    hasFiles
-                      ? isAdjusted || isExpanded
-                        ? "col-start-3 row-start-2 justify-self-end"
-                        : "col-start-3 row-start-2"
-                      : isAdjusted || isExpanded
-                        ? "col-start-3 row-start-1 justify-self-end"
-                        : "col-start-3 row-start-1"
+                    isVoiceRecording
+                      ? hasFiles
+                        ? hasText
+                          ? "col-start-3 row-start-3 justify-self-end"
+                          : "col-start-3 row-start-2 justify-self-end"
+                        : hasText
+                          ? "col-start-3 row-start-2"
+                          : "col-start-3 row-start-1"
+                      : hasFiles
+                        ? isAdjusted || isExpanded
+                          ? "col-start-3 row-start-2 justify-self-end"
+                          : "col-start-3 row-start-2"
+                        : isAdjusted || isExpanded
+                          ? "col-start-3 row-start-1 justify-self-end"
+                          : "col-start-3 row-start-1"
                   }`}
                 >
                   <Tooltip
@@ -5926,10 +6307,10 @@ export default function Ask() {
                   transition={TRANSITION}
                   className={`self-start ${
                     hasFiles
-                      ? hasText
+                      ? hasValue
                         ? "col-start-3 row-start-3 justify-self-end"
                         : "col-start-3 row-start-2 justify-self-end"
-                      : hasText
+                      : hasValue
                         ? "col-start-3 row-start-2 justify-self-end"
                         : "col-start-3 row-start-1 justify-self-end"
                   }`}
@@ -5983,28 +6364,49 @@ export default function Ask() {
               layout="position"
               transition={TRANSITION}
               className={`${
-                hasFiles
-                  ? isAdjusted || isExpanded
-                    ? "col-start-2 row-start-4 justify-self-end"
+                isVoiceRecording
+                  ? hasFiles
+                    ? hasText
+                      ? "col-start-3 row-start-3 justify-self-end"
+                      : "col-start-3 row-start-2 justify-self-end"
                     : hasText
-                      ? "col-start-4 row-start-2"
-                      : "col-start-3 row-start-2"
-                  : isAdjusted || isExpanded
-                    ? "col-start-2 row-start-3 justify-self-end"
-                    : hasText
-                      ? "col-start-4 row-start-1"
+                      ? "col-start-3 row-start-2"
                       : "col-start-3 row-start-1"
+                  : hasFiles
+                    ? isAdjusted || isExpanded
+                      ? "col-start-2 row-start-4 justify-self-end"
+                      : hasValue
+                        ? "col-start-4 row-start-2"
+                        : "col-start-3 row-start-2"
+                    : isAdjusted || isExpanded
+                      ? "col-start-2 row-start-3 justify-self-end"
+                      : hasValue
+                        ? "col-start-4 row-start-1"
+                        : "col-start-3 row-start-1"
               }`}
             >
               <Tooltip
-                content="マイク"
-                shortcut={{
-                  mac: ["⌘", "Shift", "Option", "M"],
-                  windows: ["Ctrl", "Shift", "Alt", "M"],
-                }}
+                content={isVoiceRecording ? "音声入力を停止" : "マイク"}
+                shortcut={
+                  isVoiceRecording
+                    ? undefined
+                    : {
+                        mac: ["⌘", "Shift", "Option", "M"],
+                        windows: ["Ctrl", "Shift", "Alt", "M"],
+                      }
+                }
               >
-                <Button aria-label="Mic" shape="circle" className="bg-back-2">
-                  <Mic />
+                <Button
+                  onPress={
+                    isVoiceRecording ? () => stopVoiceInput() : startVoiceInput
+                  }
+                  isDisabled={isLoading}
+                  aria-label={isVoiceRecording ? "Stop voice input" : "Mic"}
+                  shape="circle"
+                  className="bg-back-2"
+                  color={isVoiceRecording ? "caution" : undefined}
+                >
+                  {isVoiceRecording ? <Square fill="currentColor" /> : <Mic />}
                 </Button>
               </Tooltip>
             </motion.div>
@@ -6013,21 +6415,37 @@ export default function Ask() {
               layout="position"
               transition={TRANSITION}
               className={`${
-                hasFiles
-                  ? isAdjusted || isExpanded
-                    ? "col-start-3 row-start-4 justify-self-end"
+                isVoiceRecording
+                  ? hasFiles
+                    ? hasText
+                      ? "col-start-4 row-start-3 justify-self-end"
+                      : "col-start-4 row-start-2 justify-self-end"
                     : hasText
-                      ? "col-start-5 row-start-2"
-                      : "col-start-4 row-start-2"
-                  : isAdjusted || isExpanded
-                    ? "col-start-3 row-start-3 justify-self-end"
-                    : hasText
-                      ? "col-start-5 row-start-1"
+                      ? "col-start-4 row-start-2"
                       : "col-start-4 row-start-1"
+                  : hasFiles
+                    ? isAdjusted || isExpanded
+                      ? "col-start-3 row-start-4 justify-self-end"
+                      : hasValue
+                        ? "col-start-5 row-start-2"
+                        : "col-start-4 row-start-2"
+                    : isAdjusted || isExpanded
+                      ? "col-start-3 row-start-3 justify-self-end"
+                      : hasValue
+                        ? "col-start-5 row-start-1"
+                        : "col-start-4 row-start-1"
               }`}
             >
               <Tooltip
-                content={isLoading ? "停止" : hasInput ? "送信" : "会話"}
+                content={
+                  isLoading
+                    ? "停止"
+                    : isVoiceInputActive
+                      ? "音声文字起こし中"
+                      : hasInput
+                        ? "送信"
+                        : "会話"
+                }
                 shortcut={
                   isLoading
                     ? undefined
@@ -6038,7 +6456,9 @@ export default function Ask() {
                 }
               >
                 <Button
-                  isDisabled={!isLoading && !archiveReady}
+                  isDisabled={
+                    (!isLoading && !archiveReady) || isVoiceInputActive
+                  }
                   type={isLoading ? "button" : "submit"}
                   onPress={isLoading ? handleStop : undefined}
                   aria-label={

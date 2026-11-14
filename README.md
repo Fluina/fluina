@@ -19,6 +19,9 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 The API server requires an OpenRouter API key. Set `OPENROUTER_API_KEY` in
 `.env.local` before starting the app. `OPENROUTER_MODEL` is optional and
 defaults to `openrouter/free`, which routes requests to an available free model.
+Voice transcription uses the browser's built-in SpeechRecognition API when
+available. Browser support and network requirements depend on the browser's
+recognition service.
 OpenRouter account privacy settings (including Zero Data Retention) can exclude
 all free providers. If that happens, choose a compatible model/provider or
 review the account's [Privacy Settings](https://openrouter.ai/settings/privacy).
