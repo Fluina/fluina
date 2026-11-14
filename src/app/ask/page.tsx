@@ -1631,6 +1631,10 @@ const MarkdownPre = ({
   const sharedLayoutEnabled =
     parallaxEnabled && !dialog.isClosing && !dialog.isAnimating;
   const frameRef = useRef<HTMLDivElement>(null);
+  const pointerScrollRef = useRef<{
+    host: HTMLElement;
+    scrollTop: number;
+  } | null>(null);
   const [index, setIndex] = useState(-1);
   const isExpanded =
     dialog.expanded?.root === frameRef.current?.closest(".prose") &&
@@ -1763,6 +1767,31 @@ const MarkdownPre = ({
           >
             <pre
               {...props}
+              onPointerDownCapture={(event) => {
+                if (event.button !== 0) return;
+                const host = findVerticalScrollHost(event.currentTarget);
+                if (!host) return;
+                pointerScrollRef.current = { host, scrollTop: host.scrollTop };
+              }}
+              onPointerUp={() => {
+                pointerScrollRef.current = null;
+              }}
+              onPointerCancel={() => {
+                pointerScrollRef.current = null;
+              }}
+              onPointerLeave={() => {
+                pointerScrollRef.current = null;
+              }}
+              onFocus={() => {
+                const pointerScroll = pointerScrollRef.current;
+                pointerScrollRef.current = null;
+                if (!pointerScroll) return;
+                requestAnimationFrame(() => {
+                  if (pointerScroll.host.isConnected) {
+                    pointerScroll.host.scrollTop = pointerScroll.scrollTop;
+                  }
+                });
+              }}
               tabIndex={
                 isHorizontallyScrollable && !isExpanded
                   ? (props.tabIndex ?? 0)

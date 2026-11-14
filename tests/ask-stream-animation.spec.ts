@@ -1699,6 +1699,54 @@ test("keeps code horizontal scroll position when Shift+Tab enters line controls"
     .toBe(scrollLeft);
 });
 
+test("keeps the chat scroll position when tapping a wide code block", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const codeLines = Array.from(
+    { length: 60 },
+    (_, index) => `const line${index + 1} = "${"x".repeat(80)}";`,
+  ).join("\n");
+  await mockAnswer(page, `\`\`\`js\n${codeLines}\n\`\`\``);
+  await page.goto("/ask");
+  await expect(page.getByLabel("Loading Chat")).toHaveCount(0);
+  await page.locator("#prompt").fill("コードブロックのスクロール");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.locator("[data-chat-disclaimer]")).toBeVisible();
+
+  const pre = page.locator("[data-chat-last-turn]").last().locator("pre");
+  await expect(pre).toHaveAttribute("tabindex", "0");
+  const host = await pre.evaluateHandle((element) => {
+    let host = element.parentElement;
+    while (host && getComputedStyle(host).overflowY !== "auto") {
+      host = host.parentElement;
+    }
+    if (!(host instanceof HTMLElement)) {
+      throw new Error("Chat scroll viewport not found");
+    }
+    host.style.scrollBehavior = "auto";
+    return host;
+  });
+  const scrollState = await pre.evaluate((element, host) => {
+    if (!(host instanceof HTMLElement)) {
+      throw new Error("Chat scroll viewport not found");
+    }
+    const viewportTop = host.getBoundingClientRect().top + host.clientTop;
+    host.scrollTop += element.getBoundingClientRect().top - viewportTop - 80;
+    return {
+      top: host.scrollTop,
+      x: element.getBoundingClientRect().left + 160,
+      y: viewportTop + 180,
+    };
+  }, host);
+  await page.mouse.click(scrollState.x, scrollState.y);
+  await expect(pre).toBeFocused();
+  await expect
+    .poll(() => host.evaluate((element) => element.scrollTop))
+    .toBe(scrollState.top);
+});
+
 test("does not animate streamed code layout while its size changes", async ({
   page,
 }) => {
