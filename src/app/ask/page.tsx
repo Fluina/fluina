@@ -93,7 +93,7 @@ import {
 import { saveCodeFile } from "@/lib/code-file";
 import { getDragOpacity, THEME, TRANSITION } from "@/lib/motion";
 import { useIsMobile, useOS } from "@/lib/os";
-import { getScrollFadeSize, useNativeScroll } from "@/lib/scrollbar";
+import { getScrollFadeSize, useNativeScroll } from "@/lib/scroll";
 
 const PLACEHOLDERS = [
   "Fluinaに訊いてみて！",
@@ -3397,14 +3397,6 @@ export default function Ask() {
       const chatScrollHost = chatScrollRef.current;
       const viewport = chatScrollHost;
       if (!viewport) {
-        frame = requestAnimationFrame(positionInitialChat);
-        return;
-      }
-
-      const layoutReady = getComputedStyle(
-        document.documentElement,
-      ).getPropertyValue("--fluina-layout-ready");
-      if (layoutReady.trim() !== "1") {
         frame = requestAnimationFrame(positionInitialChat);
         return;
       }

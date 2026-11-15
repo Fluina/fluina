@@ -13,7 +13,7 @@ import {
   type ScrollAxis,
   type UseNativeScrollOptions,
   useNativeScroll,
-} from "@/lib/scrollbar";
+} from "@/lib/scroll";
 
 type ScrollConfig =
   | false
