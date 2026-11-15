@@ -29,6 +29,7 @@ type Environment = Static<typeof envSchema>;
 const checkEnv = () => {
   const isAotBuild = Manifest.isAotBuildEnv();
   const validatedEnv = Value.Default(envSchema, process.env) as Environment;
+
   if (isAotBuild && !validatedEnv.OPENROUTER_API_KEY) {
     validatedEnv.OPENROUTER_API_KEY = "aot-build-placeholder";
   }
@@ -51,7 +52,7 @@ const checkEnv = () => {
       Boolean(process.env.MANIM_RENDERER_TOKEN)
   ) {
     console.error(
-      "MANIM_RENDERER_URL and MANIM_RENDERER_TOKEN must be configured together.",
+      "MANIM_RENDERER_URL and MANIM_RENDERER_TOKEN must be Configured Together.",
     );
     process.exit(1);
   }
@@ -62,13 +63,14 @@ const checkEnv = () => {
     "R2_SECRET_ACCESS_KEY",
     "R2_UPLOAD_BUCKET",
   ];
+
   if (
     !isAotBuild &&
     r2UploadSettings.some((key) => process.env[key]) &&
     r2UploadSettings.some((key) => !process.env[key])
   ) {
     console.error(
-      `${r2UploadSettings.join(", ")} must be configured together.`,
+      `${r2UploadSettings.join(", ")} must be Configured Together.`,
     );
     process.exit(1);
   }

@@ -473,7 +473,6 @@ export function useNativeScroll<T extends HTMLElement = HTMLDivElement>(
       initCleanupRef.current = undefined;
       restoreOverflow();
     };
-    // deps lets conditionally mounted hosts be re-attached
   }, [axis, scrollBehavior, enableEdgeFade, elementRef, ...deps]);
 
   return { elementRef };

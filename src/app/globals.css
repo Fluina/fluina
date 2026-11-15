@@ -51,14 +51,17 @@
   --color-fore-8_: hsl(0, 0%, 40%);
   --color-fore-9_: hsl(0, 0%, 45%);
 
-  --color-gray: hsl(0, 0%, 50%);
+  --color-accent: hsl(195, 100%, 50%);
+  --color-success: hsl(135, 100%, 25%);
+  --color-caution: hsl(45, 100%, 50%);
+  --color-warning: hsl(15, 100%, 50%);
+  --color-middle: hsl(0, 0%, 50%);
+
   --color-red: hsl(15, 100%, 50%);
   --color-orange: hsl(30, 100%, 50%);
   --color-yellow: hsl(45, 100%, 50%);
   --color-green: hsl(135, 100%, 25%);
   --color-blue: hsl(195, 100%, 50%);
-  --color-indigo: hsl(255, 100%, 50%);
-  --color-violet: hsl(300, 100%, 50%);
 
   --font-serif: var(--font-noto-serif), serif;
   --font-sans-serif: var(--font-noto-sans), sans-serif;
@@ -66,6 +69,55 @@
   --transition-duration: 500ms;
   --transition-timing-function: ease-out;
   --transition-delay: 0ms;
+}
+
+:root {
+  --fluina-layout-ready: 1;
+  --back-0: hsl(0, 0%, 100%);
+  --back-1: hsl(0, 0%, 95%);
+  --back-2: hsl(0, 0%, 90%);
+  --back-3: hsl(0, 0%, 85%);
+  --back-4: hsl(0, 0%, 80%);
+  --back-5: hsl(0, 0%, 75%);
+  --back-6: hsl(0, 0%, 70%);
+  --back-7: hsl(0, 0%, 65%);
+  --back-8: hsl(0, 0%, 60%);
+  --back-9: hsl(0, 0%, 55%);
+
+  --fore-0: hsl(0, 0%, 0%);
+  --fore-1: hsl(0, 0%, 5%);
+  --fore-2: hsl(0, 0%, 10%);
+  --fore-3: hsl(0, 0%, 15%);
+  --fore-4: hsl(0, 0%, 20%);
+  --fore-5: hsl(0, 0%, 25%);
+  --fore-6: hsl(0, 0%, 30%);
+  --fore-7: hsl(0, 0%, 35%);
+  --fore-8: hsl(0, 0%, 40%);
+  --fore-9: hsl(0, 0%, 45%);
+}
+
+[data-theme="dark"] {
+  --back-0: hsl(0, 0%, 0%);
+  --back-1: hsl(0, 0%, 5%);
+  --back-2: hsl(0, 0%, 10%);
+  --back-3: hsl(0, 0%, 15%);
+  --back-4: hsl(0, 0%, 20%);
+  --back-5: hsl(0, 0%, 25%);
+  --back-6: hsl(0, 0%, 30%);
+  --back-7: hsl(0, 0%, 35%);
+  --back-8: hsl(0, 0%, 40%);
+  --back-9: hsl(0, 0%, 45%);
+
+  --fore-0: hsl(0, 0%, 100%);
+  --fore-1: hsl(0, 0%, 95%);
+  --fore-2: hsl(0, 0%, 90%);
+  --fore-3: hsl(0, 0%, 85%);
+  --fore-4: hsl(0, 0%, 80%);
+  --fore-5: hsl(0, 0%, 75%);
+  --fore-6: hsl(0, 0%, 70%);
+  --fore-7: hsl(0, 0%, 65%);
+  --fore-8: hsl(0, 0%, 60%);
+  --fore-9: hsl(0, 0%, 55%);
 }
 
 @utility prose-fluina {
@@ -149,55 +201,6 @@
 
 [data-theme="dark"] .syntax-token {
   color: var(--shiki-dark);
-}
-
-:root {
-  --fluina-layout-ready: 1;
-  --back-0: hsl(0, 0%, 100%);
-  --back-1: hsl(0, 0%, 95%);
-  --back-2: hsl(0, 0%, 90%);
-  --back-3: hsl(0, 0%, 85%);
-  --back-4: hsl(0, 0%, 80%);
-  --back-5: hsl(0, 0%, 75%);
-  --back-6: hsl(0, 0%, 70%);
-  --back-7: hsl(0, 0%, 65%);
-  --back-8: hsl(0, 0%, 60%);
-  --back-9: hsl(0, 0%, 55%);
-
-  --fore-0: hsl(0, 0%, 0%);
-  --fore-1: hsl(0, 0%, 5%);
-  --fore-2: hsl(0, 0%, 10%);
-  --fore-3: hsl(0, 0%, 15%);
-  --fore-4: hsl(0, 0%, 20%);
-  --fore-5: hsl(0, 0%, 25%);
-  --fore-6: hsl(0, 0%, 30%);
-  --fore-7: hsl(0, 0%, 35%);
-  --fore-8: hsl(0, 0%, 40%);
-  --fore-9: hsl(0, 0%, 45%);
-}
-
-[data-theme="dark"] {
-  --back-0: hsl(0, 0%, 0%);
-  --back-1: hsl(0, 0%, 5%);
-  --back-2: hsl(0, 0%, 10%);
-  --back-3: hsl(0, 0%, 15%);
-  --back-4: hsl(0, 0%, 20%);
-  --back-5: hsl(0, 0%, 25%);
-  --back-6: hsl(0, 0%, 30%);
-  --back-7: hsl(0, 0%, 35%);
-  --back-8: hsl(0, 0%, 40%);
-  --back-9: hsl(0, 0%, 45%);
-
-  --fore-0: hsl(0, 0%, 100%);
-  --fore-1: hsl(0, 0%, 95%);
-  --fore-2: hsl(0, 0%, 90%);
-  --fore-3: hsl(0, 0%, 85%);
-  --fore-4: hsl(0, 0%, 80%);
-  --fore-5: hsl(0, 0%, 75%);
-  --fore-6: hsl(0, 0%, 70%);
-  --fore-7: hsl(0, 0%, 65%);
-  --fore-8: hsl(0, 0%, 60%);
-  --fore-9: hsl(0, 0%, 55%);
 }
 
 [data-transparency="off"] .transparency-effect,

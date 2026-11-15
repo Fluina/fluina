@@ -19,7 +19,9 @@ function detectOS(): OS {
     navigator.platform ??
     navigator.userAgent;
 
-  return /mac|iphone|ipad/i.test(platform) ? "mac" : "windows";
+  return /mac|iphone|ipad|ipod|ios|tvos|watchos|visionos/i.test(platform)
+    ? "mac"
+    : "windows";
 }
 
 export function useOS(): OS {
@@ -32,7 +34,7 @@ export function useOS(): OS {
   return os;
 }
 
-function detectMobile(): boolean {
+function detectIsMobile(): boolean {
   if (typeof navigator === "undefined") return false;
 
   if (
@@ -50,7 +52,7 @@ export function useIsMobile(): boolean {
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    setIsMobile(detectMobile());
+    setIsMobile(detectIsMobile());
   }, []);
 
   return isMobile;

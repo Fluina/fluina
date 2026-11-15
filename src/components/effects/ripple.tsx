@@ -1,5 +1,8 @@
+"use client";
+
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { cn } from "@/lib/cn";
+import { getTransitionDurationMs } from "@/lib/motion";
 
 type RippleType = {
   x: number;
@@ -20,6 +23,7 @@ export const useRipple = () => {
 
   const triggerRipple = useCallback((e: RippleTriggerEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
+
     const w = rect.width;
     const h = rect.height;
 
@@ -54,6 +58,7 @@ export const useRipple = () => {
       distBottomLeft,
       distBottomRight,
     );
+
     const size = maxDist * 2;
 
     const newRipple: RippleType = {
@@ -70,7 +75,7 @@ export const useRipple = () => {
     if (ripples.length > 0) {
       const timer = setTimeout(() => {
         setRipples((prev) => prev.slice(1));
-      }, 500);
+      }, getTransitionDurationMs());
 
       return () => clearTimeout(timer);
     }
